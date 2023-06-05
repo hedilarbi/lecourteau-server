@@ -19,7 +19,7 @@ const customerSchema = new Schema({
             ref:"Order"
         }
     ],
-    preferences:[
+    favorites:[
         {
             type:Schema.Types.ObjectId,
             ref:"Menu_Item"

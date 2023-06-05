@@ -6,9 +6,9 @@ const orderSchema = new Schema({
     type:Schema.Types.ObjectId,
     ref:"Customer"
    },
-   Items:[
+   items:[
     {
-        Item_id:{
+        item_id:{
             type:Schema.Types.ObjectId,
     ref:"MenuItem"
         },
@@ -22,6 +22,8 @@ const orderSchema = new Schema({
     }
    ],
    total_price:Number,
+   type:String,
+   address:String,
    status:String,
    createdAt:Date
 

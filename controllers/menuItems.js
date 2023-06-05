@@ -31,13 +31,16 @@ const updateMenuItem = async(req,res) =>{
         prices,
         description,
         components,
+        category,
         customization} = req.body
     const {id} = req.params
+    console.log(req.body)
     try{
-        const response = MenuItem.findByIdAndUpdate(id,{ name,
+        const response =await MenuItem.findByIdAndUpdate(id,{ name,
             image,
             prices,
             description,
+            category,
             components,
             customization},{new:true})
         res.status(202).json(response)    
@@ -77,4 +80,15 @@ try{
 }
 }
 
-module.exports = {createMenuItem,updateMenuItem,getMenuItem,getMenuItems,deleteMenuItem}
+
+const getMenuItemsByCategory = async (req,res) => {
+    const {category} = req.params
+    try{
+        const response = await MenuItem.find({category}).populate()
+        res.status(200).json(response)
+    }catch(err){
+        res.status(500).json({success: false, error:err.message})
+    }
+}
+
+module.exports = {createMenuItem,updateMenuItem,getMenuItem,getMenuItems,deleteMenuItem,getMenuItemsByCategory}

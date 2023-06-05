@@ -8,6 +8,10 @@ const menuItemSchema = new Schema({
     size:String,
     price:Number
  }],
+ category:{
+   type:Schema.Types.ObjectId,
+   ref:"Category"
+ },
  description:String,
  components:[String],
  customization:[

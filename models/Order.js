@@ -1,13 +1,13 @@
 const { Schema, model } = require("mongoose");
 
 const orderSchema = new Schema({
-  user_id: {
+  user: {
     type: Schema.Types.ObjectId,
     ref: "User",
   },
   orderItems: [
     {
-      item_id: {
+      item: {
         type: Schema.Types.ObjectId,
         ref: "MenuItem",
       },
@@ -21,15 +21,28 @@ const orderSchema = new Schema({
       price: Number,
     },
   ],
+  offers: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "Offer",
+    },
+  ],
+  rewards: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "Reward",
+    },
+  ],
   total_price: Number,
   sub_total: Number,
   delivery_fee: Number,
   instructions: String,
   type: String,
-  address: {
+  coords: {
     latitude: Number,
     longitude: Number,
   },
+  address: String,
   status: String,
   createdAt: Date,
 });

@@ -1,7 +1,7 @@
 const Category = require("../models/Category");
 
 const createCategory = async (req, res) => {
-  const { name, image, description } = req.body;
+  const { name } = req.body;
 
   try {
     const category = await Category.findOne({ name });
@@ -10,7 +10,8 @@ const createCategory = async (req, res) => {
     }
     const newCategory = new Category({
       name,
-      image,
+      image:
+        "https://lecourteau.com/wp-content/uploads/2021/11/WingsAlone-scaled-aspect-ratio-264-257-scaled.jpg",
     });
     const response = await newCategory.save();
     res.status(201).json(response);

@@ -4,15 +4,16 @@ const generateToken = require("../utils/generateToken");
 
 const createUser = async (req, res) => {
   const { phone_number } = req.body;
+
   try {
     const verifyPhone = await User.findOne({ phone_number });
     if (verifyPhone) {
-      return res
-        .status(403)
-        .json({ message: "Un compte existe déja avec ce numéro" });
+      const token = generateToken(verifyPhone._id, verifyPhone.phone_number);
+      return res.status(200).json({ user: verifyPhone, token });
     }
     const newUser = new User({
       phone_number,
+
       createdAt: new Date().toISOString(),
     });
     const response = await newUser.save();
@@ -25,13 +26,41 @@ const createUser = async (req, res) => {
 };
 
 const updateUser = async (req, res) => {
-  const { phone_number, email, profile_img, name } = req.body;
+  const { email, name } = req.body;
   const { id } = req.params;
   try {
-    const response = await User.findByIdAndUpdate(
-      id,
-      { phone_number, email, profile_img, name },
-      { new: true }
+    const response = await User.findOneAndUpdate(
+      { _id: id },
+      {
+        $set: {
+          name: name,
+          email: email,
+        },
+      },
+      { new: true } // This option returns the updated user
+    );
+    res.status(200).json(response);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+const setUserInfo = async (req, res) => {
+  const { address, email, name } = req.body;
+  const { id } = req.params;
+  try {
+    const response = await User.findOneAndUpdate(
+      { _id: id },
+      {
+        $set: {
+          name: name,
+          email: email,
+          is_profile_setup: true,
+        },
+        $push: {
+          addresses: address, // This will add the new address to the addresses array
+        },
+      },
+      { new: true } // This option returns the updated user
     );
     res.status(200).json(response);
   } catch (err) {
@@ -41,6 +70,7 @@ const updateUser = async (req, res) => {
 
 const deleteUser = async (req, res) => {
   const { id } = req.params;
+
   try {
     await User.findByIdAndDelete(id);
     res.status(200).json({ success: true });
@@ -51,7 +81,7 @@ const deleteUser = async (req, res) => {
 
 const getUsers = async (req, res) => {
   try {
-    const response = await User.find();
+    const response = await User.find().select("name phone_number email");
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -61,7 +91,7 @@ const getUsers = async (req, res) => {
 const getUser = async (req, res) => {
   const { id } = req.params;
   try {
-    const response = await User.findById(id);
+    const response = await User.findById(id).populate("orders");
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -113,7 +143,22 @@ const removeFromFavorites = async (req, res) => {
     await user.save();
     res.status(200).json(user);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+const getOrdersList = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const user = await User.findById(id)
+      .select("orders")
+      .populate({
+        path: "orders",
+        populate: { path: "orderItems", populate: "item customizations" },
+      });
+    res.status(200).json(user);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -200,10 +245,11 @@ module.exports = {
   getUser,
   getUsers,
   addToFavorites,
-
+  getOrdersList,
   addToAddresses,
   deleteFromAddresses,
   getFavorites,
   removeFromFavorites,
   getUserByToken,
+  setUserInfo,
 };

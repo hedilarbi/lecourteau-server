@@ -6,13 +6,14 @@ const createToppingCategory = async (req, res) => {
   try {
     const toppingCategory = await ToppingCategory.findOne({ name });
     if (toppingCategory) {
-      return res.json({ message: "categorie existe déja" });
+      return res.status(403).json({ error: "categorie existe déja" });
     }
     const newToppingCategory = new ToppingCategory({
       name,
     });
     const response = await newToppingCategory.save();
-    res.status(201).json(response);
+
+    res.status(200).json(response);
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

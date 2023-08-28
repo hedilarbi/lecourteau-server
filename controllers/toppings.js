@@ -6,11 +6,13 @@ const createTopping = async (req, res) => {
   try {
     const newTopping = new Topping({
       name,
-      image,
+      image:
+        "https://lecourteau.com/wp-content/uploads/2021/11/WingsAlone-scaled-aspect-ratio-264-257-scaled.jpg",
       category,
-      price,
+      price: parseFloat(price),
     });
     const response = await newTopping.save();
+
     res.status(201).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -19,7 +21,7 @@ const createTopping = async (req, res) => {
 
 const getToppings = async (req, res) => {
   try {
-    const response = await Topping.find();
+    const response = await Topping.find().populate("category");
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -56,9 +58,9 @@ const deleteTopping = async (req, res) => {
 
   try {
     await Topping.findByIdAndDelete(id);
-    res.status(202).json({ message: "success" });
+    res.status(200).json({ message: "success" });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

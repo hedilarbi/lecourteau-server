@@ -16,11 +16,24 @@ const createReward = async (req, res) => {
 
 const getRewards = async (req, res) => {
   try {
-    const response = await Reward.find().populate("item");
+    const response = await Reward.find().populate({
+      path: "item",
+      select: "name",
+    });
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
-module.exports = { createReward, getRewards };
+const deleteReward = async (req, res) => {
+  const { id } = req.params;
+  try {
+    await Reward.findByIdAndDelete(id);
+    res.status(200).json({ success: false, message: "reward deleted" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { createReward, getRewards, deleteReward };

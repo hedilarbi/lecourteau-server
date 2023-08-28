@@ -2,16 +2,14 @@ const { Schema, model } = require("mongoose");
 
 const userSchema = new Schema({
   name: String,
-  profile_img: String,
   email: String,
   phone_number: String,
   addresses: [
     {
-      country: String,
-      province: String,
-      postal_code: String,
+      region: String,
       city: String,
       street: String,
+      number: String,
     },
   ],
   orders: [
@@ -26,7 +24,15 @@ const userSchema = new Schema({
       ref: "MenuItem",
     },
   ],
+  fidelity_points: {
+    type: Number,
+    default: 0,
+  },
   createdAt: Date,
+  is_profile_setup: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 module.exports = model("User", userSchema);

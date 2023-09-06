@@ -1,10 +1,13 @@
-const { default: mongoose } = require("mongoose");
+const { default: mongoose, Schema } = require("mongoose");
 const Order = require("../models/Order");
+const generateRandomCode = require("../utils/generateOrderCode");
+const { Expo } = require("expo-server-sdk");
 
 const createOrder = async (req, res) => {
   const { order } = req.body;
 
   try {
+    const code = generateRandomCode(8);
     const newOrder = new Order({
       user: order.order.user_id,
       orderItems: order.order.orderItems,
@@ -16,22 +19,25 @@ const createOrder = async (req, res) => {
         latitude: order.coords.latitude,
         longitude: order.coords.longitude,
       },
+      code: code.toUpperCase(),
       address: order.address,
       istructions: order.order.istructions,
-      status: "onGoing",
+      status: "On Going",
       offers: order.order.offers,
       rewards: order.order.rewards,
       createdAt: new Date().toISOString(),
     });
     const response = await newOrder.save();
-    console.log(response);
+
     const user = await mongoose.models.User.findById(order.order.user_id);
     user.orders.push(response._id);
     let total = 0;
     if (order.order.rewards.length > 0) {
+      console.log("here");
       order.order.rewards.map((item) => (total += item.points));
-      console.log(total);
+      console.log(order.order.rewards);
       user.fidelity_points = user.fidelity_points - total;
+      console.log(user.fidelity_points);
     }
     let points = 0;
     if (order.order.offers.length > 0) {
@@ -43,6 +49,22 @@ const createOrder = async (req, res) => {
     user.fidelity_points = user.fidelity_points + parseInt(points) * 10;
 
     const newUser = await user.save();
+    const expo_token = user.expo_token;
+    const expo = new Expo();
+    let message = {};
+
+    message = {
+      to: expo_token,
+      sound: "default",
+      body: `Your order is on progress `,
+      data: {
+        order_id: response._id,
+      },
+      title: "New Order",
+      priority: "high",
+    };
+
+    const ticket = await expo.sendPushNotificationsAsync([message]);
     res.status(201).json(newUser);
   } catch (err) {
     console.log(err.message);
@@ -99,6 +121,25 @@ const updateStatus = async (req, res) => {
       { status },
       { new: true }
     );
+    const user = await mongoose.models.User.findById(response.user);
+    const expo_token = user.expo_token;
+    const expo = new Expo();
+    let message = {};
+
+    message = {
+      to: expo_token,
+      sound: "default",
+      body: `Your order is ${status} `,
+      data: {
+        order_id: id,
+      },
+      title: "New Order",
+
+      priority: "high",
+    };
+
+    const ticket = await expo.sendPushNotificationsAsync([message]);
+
     res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

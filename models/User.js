@@ -33,6 +33,7 @@ const userSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  expo_token: String,
 });
 
 module.exports = model("User", userSchema);

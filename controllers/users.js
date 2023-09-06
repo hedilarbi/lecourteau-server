@@ -238,6 +238,23 @@ const getUserByToken = async (req, res) => {
   }
 };
 
+const updateUserExpoToken = async (req, res) => {
+  const { id } = req.params;
+  console.log(id);
+  const { token } = req.body;
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: "No user" });
+    }
+    user.expo_token = token;
+    await user.save();
+    res.json({ message: "expo token updated", status: true });
+  } catch (err) {
+    res.json({ message: err.message, status: false });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -252,4 +269,5 @@ module.exports = {
   removeFromFavorites,
   getUserByToken,
   setUserInfo,
+  updateUserExpoToken,
 };

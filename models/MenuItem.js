@@ -21,6 +21,10 @@ const menuItemSchema = new Schema({
       ref: "Topping",
     },
   ],
+  is_available: {
+    type: Schema.Types.Boolean,
+    default: true,
+  },
 });
 
 module.exports = model("MenuItem", menuItemSchema);

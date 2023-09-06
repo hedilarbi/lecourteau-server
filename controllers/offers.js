@@ -51,7 +51,7 @@ const getOffer = async (req, res) => {
         path: "items",
         populate: "item",
       })
-      .populate("customizations");
+      .populate({ path: "customizations", populate: "category" });
 
     res.status(200).json(response);
   } catch (err) {

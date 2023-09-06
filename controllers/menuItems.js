@@ -135,6 +135,21 @@ const getMenuItemsByCategory = async (req, res) => {
   }
 };
 
+const updateMenuItemAvailability = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  try {
+    const response = await MenuItem.findByIdAndUpdate(
+      id,
+      { is_available: status },
+      { new: true }
+    );
+    res.json(response);
+  } catch (err) {
+    res.json({ message: err.message, status: false });
+  }
+};
+
 module.exports = {
   createMenuItem,
   updateMenuItem,
@@ -143,4 +158,5 @@ module.exports = {
   deleteMenuItem,
   getMenuItemsByCategory,
   getItemsNames,
+  updateMenuItemAvailability,
 };

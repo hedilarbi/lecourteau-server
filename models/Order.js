@@ -23,8 +23,17 @@ const orderSchema = new Schema({
   ],
   offers: [
     {
-      type: Schema.Types.ObjectId,
-      ref: "Offer",
+      offer: {
+        type: Schema.Types.ObjectId,
+        ref: "Offer",
+      },
+      customizations: [
+        {
+          type: Schema.Types.ObjectId,
+          ref: "Topping",
+        },
+      ],
+      price: Number,
     },
   ],
   rewards: [
@@ -45,6 +54,7 @@ const orderSchema = new Schema({
   address: String,
   status: String,
   createdAt: Date,
+  code: String,
 });
 
 module.exports = model("Order", orderSchema);

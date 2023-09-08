@@ -72,10 +72,9 @@ const updateMenuItem = async (req, res) => {
       },
       { new: true }
     ).populate("customization");
-    console.log(response);
+
     res.status(200).json(response);
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -83,7 +82,7 @@ const updateMenuItem = async (req, res) => {
 const getMenuItems = async (req, res) => {
   try {
     const response = await MenuItem.find()
-      .select("category name image prices")
+      .select("category name image prices is_available")
       .populate({
         path: "category",
         select: "name",

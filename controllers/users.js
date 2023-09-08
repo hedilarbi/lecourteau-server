@@ -45,8 +45,16 @@ const updateUser = async (req, res) => {
   }
 };
 const setUserInfo = async (req, res) => {
-  const { address, email, name } = req.body;
+  const { address, email, name, coords } = req.body;
   const { id } = req.params;
+
+  let newAddress;
+  if (address.length > 0 && coords.longitude) {
+    newAddress = {
+      address,
+      coords,
+    };
+  }
   try {
     const response = await User.findOneAndUpdate(
       { _id: id },
@@ -57,13 +65,14 @@ const setUserInfo = async (req, res) => {
           is_profile_setup: true,
         },
         $push: {
-          addresses: address, // This will add the new address to the addresses array
+          addresses: newAddress, // This will add the new address to the addresses array
         },
       },
       { new: true } // This option returns the updated user
     );
     res.status(200).json(response);
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -178,22 +187,29 @@ const getFavorites = async (req, res) => {
 };
 
 const addToAddresses = async (req, res) => {
-  const { address } = req.body;
+  const { address, coords } = req.body;
+
   const { id } = req.params;
 
   try {
     const user = await User.findById(id);
 
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     }
 
-    user.addresses.push(address);
+    user.addresses.push({
+      address,
+      coords: {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      },
+    });
 
     await user.save();
-    res.status(200).json(User);
+    res.status(200).json(user);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -240,7 +256,7 @@ const getUserByToken = async (req, res) => {
 
 const updateUserExpoToken = async (req, res) => {
   const { id } = req.params;
-  console.log(id);
+
   const { token } = req.body;
   try {
     const user = await User.findById(id);

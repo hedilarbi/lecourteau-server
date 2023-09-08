@@ -33,11 +33,9 @@ const createOrder = async (req, res) => {
     user.orders.push(response._id);
     let total = 0;
     if (order.order.rewards.length > 0) {
-      console.log("here");
       order.order.rewards.map((item) => (total += item.points));
-      console.log(order.order.rewards);
+
       user.fidelity_points = user.fidelity_points - total;
-      console.log(user.fidelity_points);
     }
     let points = 0;
     if (order.order.offers.length > 0) {

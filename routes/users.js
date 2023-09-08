@@ -24,7 +24,7 @@ router.post("/create", createUser);
 router.get("/favorites/:id", getFavorites);
 router.put("/favorites/update/add/:id", addToFavorites);
 router.put("/favorites/update/remove/:id", removeFromFavorites);
-router.put("/addresses/:id", addToAddresses);
+router.put("/addresses/update/add/:id", addToAddresses);
 router.put("/update/expoToken/:id", updateUserExpoToken);
 router.put("/:id/delete/addresses/:addressId", deleteFromAddresses);
 router.get("/orders/:id", getOrdersList);

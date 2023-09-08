@@ -103,10 +103,9 @@ const updateOffer = async (req, res) => {
         populate: "item",
       })
       .populate("customizations");
-    console.log(response);
+
     res.status(200).json(response);
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

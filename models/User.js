@@ -6,10 +6,11 @@ const userSchema = new Schema({
   phone_number: String,
   addresses: [
     {
-      region: String,
-      city: String,
-      street: String,
-      number: String,
+      address: String,
+      coords: {
+        latitude: Number,
+        longitude: Number,
+      },
     },
   ],
   orders: [

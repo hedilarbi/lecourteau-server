@@ -45,7 +45,8 @@ const updateUser = async (req, res) => {
   }
 };
 const setUserInfo = async (req, res) => {
-  const { address, email, name, coords } = req.body;
+  const { address, email, name, coords, date_of_birth } = req.body;
+
   const { id } = req.params;
 
   let newAddress;
@@ -63,6 +64,7 @@ const setUserInfo = async (req, res) => {
           name: name,
           email: email,
           is_profile_setup: true,
+          date_of_birth: new Date(date_of_birth),
         },
         $push: {
           addresses: newAddress, // This will add the new address to the addresses array
@@ -72,7 +74,6 @@ const setUserInfo = async (req, res) => {
     );
     res.status(200).json(response);
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -235,7 +236,6 @@ const deleteFromAddresses = async (req, res) => {
 
     res.status(200).json(user);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Server Error" });
   }
 };

@@ -22,7 +22,7 @@ const createOffer = async (req, res) => {
       expireAt: new Date(expireAt),
       items: itemList,
       customizations: customizationList,
-      price,
+      price: parseFloat(price),
       createdAt: new Date(),
     });
     const response = await newOffer.save();

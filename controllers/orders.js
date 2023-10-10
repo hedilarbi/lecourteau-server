@@ -11,9 +11,9 @@ const createOrder = async (req, res) => {
     const newOrder = new Order({
       user: order.order.user_id,
       orderItems: order.order.orderItems,
-      total_price: order.order.total,
-      sub_total: order.order.subTotal,
-      delivery_fee: order.order.deliveryFee,
+      total_price: parseFloat(order.order.total),
+      sub_total: parseFloat(order.order.subTotal),
+      delivery_fee: parseFloat(order.order.deliveryFee),
       type: order.type,
       coords: {
         latitude: order.coords.latitude,
@@ -63,9 +63,8 @@ const createOrder = async (req, res) => {
     };
 
     const ticket = await expo.sendPushNotificationsAsync([message]);
-    res.status(201).json(newUser);
+    res.status(201).json({ user: newUser, orderId: response._id });
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -158,6 +157,26 @@ const updatePrice = async (req, res) => {
   }
 };
 
+const reviewOrder = async (req, res) => {
+  const { id } = req.params;
+  const { comment, rating } = req.body;
+  const review = {
+    comment,
+    rating: parseInt(rating),
+    status: true,
+  };
+  try {
+    const response = await Order.findByIdAndUpdate(
+      id,
+      { review },
+      { new: true }
+    );
+    res.status(200).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   createOrder,
   getOrders,
@@ -165,4 +184,5 @@ module.exports = {
   deleteOrder,
   updateStatus,
   updatePrice,
+  reviewOrder,
 };

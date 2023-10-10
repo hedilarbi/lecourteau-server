@@ -12,6 +12,7 @@ const toppingCategoriesRoutes = require("./routes/toppingCategory");
 const rewardsRoutes = require("./routes/rewards");
 const settingsRoutes = require("./routes/settings");
 const staffsRoutes = require("./routes/staffs");
+const paymentsRoutes = require("./routes/payments");
 require("dotenv/config");
 
 const { createServer } = require("http");
@@ -34,6 +35,7 @@ app.use("/api/toppingCategories", toppingCategoriesRoutes);
 app.use("/api/rewards", rewardsRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/staffs", staffsRoutes);
+app.use("/api/payments", paymentsRoutes);
 
 mongoose.connect(process.env.DB_CONNECTION, { useNewUrlParser: true });
 

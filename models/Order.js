@@ -42,6 +42,7 @@ const orderSchema = new Schema({
       ref: "Reward",
     },
   ],
+
   total_price: Number,
   sub_total: Number,
   delivery_fee: Number,
@@ -55,6 +56,14 @@ const orderSchema = new Schema({
   status: String,
   createdAt: Date,
   code: String,
+  review: {
+    comment: String,
+    rating: Number,
+    status: {
+      type: Boolean,
+      default: false,
+    },
+  },
 });
 
 module.exports = model("Order", orderSchema);

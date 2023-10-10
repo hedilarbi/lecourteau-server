@@ -44,7 +44,7 @@ const updateTopping = async (req, res) => {
   try {
     const response = await Topping.findByIdAndUpdate(
       id,
-      { name, description, image, price },
+      { name, description, image, price: parseFloat(price) },
       { new: true }
     );
     res.json(response);

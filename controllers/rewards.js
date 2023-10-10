@@ -5,7 +5,7 @@ const createReward = async (req, res) => {
   try {
     const newReward = new Reward({
       item,
-      points,
+      points: parseFloat(points),
     });
     const response = await newReward.save();
     res.status(201).json(response);

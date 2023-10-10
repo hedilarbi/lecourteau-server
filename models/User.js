@@ -4,6 +4,7 @@ const userSchema = new Schema({
   name: String,
   email: String,
   phone_number: String,
+  date_of_birth: Date,
   addresses: [
     {
       address: String,
@@ -35,6 +36,7 @@ const userSchema = new Schema({
     default: false,
   },
   expo_token: String,
+  auth_mehtod: String,
 });
 
 module.exports = model("User", userSchema);

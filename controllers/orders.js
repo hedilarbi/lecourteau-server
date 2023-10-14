@@ -89,7 +89,7 @@ const getOrder = async (req, res) => {
         path: "orderItems",
         populate: "customizations item",
       })
-      .populate("offers")
+      .populate({ path: "offers", populate: "offer" })
       .populate("rewards")
       .populate({ path: "user", select: "name phone_number email" });
     res.status(200).json(response);

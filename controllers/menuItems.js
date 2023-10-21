@@ -1,27 +1,29 @@
 const MenuItem = require("../models/MenuItem");
 
 const createMenuItem = async (req, res) => {
-  const {
-    name,
-    description,
-    prices,
+  let firebaseUrl = null;
+  if (req.file) {
+    firebaseUrl = req.file.firebaseUrl;
+  }
 
-    customization,
-    category,
-  } = req.body;
+  const { name, description, prices, customization, category } = req.body;
+
   let newPrices = [];
-  prices.map((item) => {
+  const pricesArray = JSON.parse(prices);
+  const customizationArray = JSON.parse(customization);
+
+  pricesArray.map((item) => {
     if (item.price != "0")
       newPrices.push({ size: item.size, price: parseFloat(item.price) });
   });
+
   try {
     const newMenuItem = new MenuItem({
       name,
-      image:
-        "https://lecourteau.com/wp-content/uploads/2021/11/WingsAlone-scaled-aspect-ratio-264-257-scaled.jpg",
+      image: firebaseUrl,
       prices: newPrices,
       description,
-      customization,
+      customization: customizationArray,
       category,
     });
     const response = await newMenuItem.save();
@@ -81,12 +83,13 @@ const updateMenuItem = async (req, res) => {
 
 const getMenuItems = async (req, res) => {
   try {
-    const response = await MenuItem.find()
+    let response = await MenuItem.find()
       .select("category name image prices is_available")
       .populate({
         path: "category",
         select: "name",
       });
+    response = response.reverse();
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

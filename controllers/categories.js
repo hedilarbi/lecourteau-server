@@ -1,6 +1,11 @@
 const Category = require("../models/Category");
 
 const createCategory = async (req, res) => {
+  let firebaseUrl = null;
+  if (req.file) {
+    firebaseUrl = req.file.firebaseUrl;
+  }
+
   const { name } = req.body;
 
   try {
@@ -10,8 +15,7 @@ const createCategory = async (req, res) => {
     }
     const newCategory = new Category({
       name,
-      image:
-        "https://lecourteau.com/wp-content/uploads/2021/11/WingsAlone-scaled-aspect-ratio-264-257-scaled.jpg",
+      image: firebaseUrl,
     });
     const response = await newCategory.save();
     res.status(201).json(response);

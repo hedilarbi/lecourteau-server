@@ -16,10 +16,11 @@ const createReward = async (req, res) => {
 
 const getRewards = async (req, res) => {
   try {
-    const response = await Reward.find().populate({
+    let response = await Reward.find().populate({
       path: "item",
       select: "name",
     });
+    response = response.reverse();
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

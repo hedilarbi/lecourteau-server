@@ -2,6 +2,14 @@ const { default: mongoose, Schema } = require("mongoose");
 const Order = require("../models/Order");
 const generateRandomCode = require("../utils/generateOrderCode");
 const { Expo } = require("expo-server-sdk");
+const {
+  IN_DELIVERY,
+  READY,
+  PICKEDUP,
+  DELIVERED,
+  CANCELED,
+  ON_GOING,
+} = require("../utils/constants");
 
 const createOrder = async (req, res) => {
   const { order } = req.body;
@@ -22,7 +30,7 @@ const createOrder = async (req, res) => {
       code: code.toUpperCase(),
       address: order.address,
       istructions: order.order.istructions,
-      status: "On Going",
+      status: ON_GOING,
       offers: order.order.offers,
       rewards: order.order.rewards,
       createdAt: new Date().toISOString(),
@@ -71,9 +79,10 @@ const createOrder = async (req, res) => {
 
 const getOrders = async (req, res) => {
   try {
-    const response = await Order.find().select(
-      "status createdAt total_price type"
+    const data = await Order.find().select(
+      "status createdAt total_price type code"
     );
+    const response = data.reverse();
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

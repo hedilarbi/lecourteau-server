@@ -1,13 +1,17 @@
 const Topping = require("../models/Topping");
 
 const createTopping = async (req, res) => {
-  const { name, image, price, category } = req.body;
+  let firebaseUrl = null;
+  if (req.file) {
+    firebaseUrl = req.file.firebaseUrl;
+  }
+
+  const { name, price, category } = req.body;
 
   try {
     const newTopping = new Topping({
       name,
-      image:
-        "https://lecourteau.com/wp-content/uploads/2021/11/WingsAlone-scaled-aspect-ratio-264-257-scaled.jpg",
+      image: firebaseUrl,
       category,
       price: parseFloat(price),
     });
@@ -21,7 +25,8 @@ const createTopping = async (req, res) => {
 
 const getToppings = async (req, res) => {
   try {
-    const response = await Topping.find().populate("category");
+    let response = await Topping.find().populate("category");
+    response = response.reverse();
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

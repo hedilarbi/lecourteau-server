@@ -91,7 +91,8 @@ const deleteUser = async (req, res) => {
 
 const getUsers = async (req, res) => {
   try {
-    const response = await User.find().select("name phone_number email");
+    let response = await User.find().select("name phone_number email");
+    response = response.reverse();
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

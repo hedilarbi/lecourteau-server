@@ -29,6 +29,7 @@ const createStaff = async (req, res) => {
 
 const loginStaff = async (req, res) => {
   const { username, password } = req.body;
+  console.log("hyv");
 
   try {
     const staff = await Staff.findOne({ username });

@@ -6,10 +6,19 @@ const {
   deleteOffer,
   updateOffer,
 } = require("../controllers/offers");
+const { uploadImageToFirebase } = require("../firebase");
+const Multer = require("../middlewares/multer");
+const { optimizeImage } = require("../middlewares/imageOptimizor");
 const router = express.Router();
 
 router.get("/", getOffers);
-router.post("/create", createOffer);
+router.post(
+  "/create",
+  Multer.single("file"),
+  optimizeImage,
+  uploadImageToFirebase,
+  createOffer
+);
 router.delete("/delete/:id", deleteOffer);
 router.put("/update/:id", updateOffer);
 router.get("/:id", getOffer);

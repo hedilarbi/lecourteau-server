@@ -1,3 +1,4 @@
+const { deleteImagesFromFirebase } = require("../firebase");
 const Category = require("../models/Category");
 
 const createCategory = async (req, res) => {
@@ -18,8 +19,10 @@ const createCategory = async (req, res) => {
       image: firebaseUrl,
     });
     const response = await newCategory.save();
+
     res.status(201).json(response);
   } catch (error) {
+    console.log(error.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -71,8 +74,15 @@ const deleteCategory = async (req, res) => {
   const { id } = req.params;
 
   try {
+    const response = await Category.findById(id);
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "La catégorie n'existe pas" });
+    }
+    await deleteImagesFromFirebase(response.image);
     await Category.findByIdAndDelete(id);
-    res.status(202).json({ message: "success" });
+    res.status(200).json({ message: "success" });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

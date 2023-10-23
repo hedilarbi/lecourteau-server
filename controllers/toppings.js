@@ -1,3 +1,4 @@
+const { deleteImagesFromFirebase } = require("../firebase");
 const Topping = require("../models/Topping");
 
 const createTopping = async (req, res) => {
@@ -62,6 +63,13 @@ const deleteTopping = async (req, res) => {
   const { id } = req.params;
 
   try {
+    const response = await Topping.findById(id);
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "La personalisation n'existe pas" });
+    }
+    await deleteImagesFromFirebase(response.image);
     await Topping.findByIdAndDelete(id);
     res.status(200).json({ message: "success" });
   } catch (err) {

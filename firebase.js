@@ -39,33 +39,57 @@ const uploadImageToFirebase = (req, res, next) => {
   stream.end(image.buffer);
 };
 
+const updateMenuItemImageInFirebase = async (req, res, next) => {
+  if (!req.body.fileToDelete || !req.file) return next();
 
+  const oldImageName = req.body.fileToDelete.split("/").pop();
 
-const deleteImagesFromFirebase = async (req, res, next) => {
-  if (!req.body.toDelete) return next();
-  const images = req.body.toDelete;
-
+  const oldImageFile = bucket.file(oldImageName);
   try {
-    if (typeof req.body.toDelete === "object") {
-      for (const image of images) {
-        const imageName = image.split("/").pop();
-        const file = bucket.file(imageName);
-        await file.delete();
-      }
-    } else {
-      const imageName = req.body.toDelete.split("/").pop();
-      const file = bucket.file(imageName);
-      await file.delete();
-    }
+    await oldImageFile.delete();
+    console.log("image deleted");
   } catch (err) {
-    return res.status(500).json({ message: "error in delete from firebase" });
+    console.log(err.message);
+    res.status(404).json({ success: false, message: err.message });
   }
+  const image = req.file;
+  const imageName = Date.now() + "." + image.originalname.split(".").pop();
 
-  next();
+  const file = bucket.file(imageName);
+  const stream = file.createWriteStream({
+    metadata: {
+      contentType: image.mimetype,
+    },
+  });
+  console.log("image added");
+  stream.on("error", (e) => {
+    console.log(e);
+    res.status(404).json({ success: false, message: e.message });
+  });
+
+  stream.on("finish", async () => {
+    await file.makePublic();
+
+    req.file.firebaseUrl = `https://storage.googleapis.com/${BUCKET_NAME}/${imageName}`;
+    console.log("image finished");
+    next();
+  });
+
+  stream.end(image.buffer);
+};
+
+const deleteImagesFromFirebase = async (image) => {
+  try {
+    const imageName = image.split("/").pop();
+    const file = bucket.file(imageName);
+    await file.delete();
+  } catch (err) {
+    return err.message;
+  }
 };
 
 module.exports = {
   uploadImageToFirebase,
- 
+  updateMenuItemImageInFirebase,
   deleteImagesFromFirebase,
 };

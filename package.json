@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "NODE_ENV=developement  nodemon index.js",
-    "start": "NODE_ENV=production pm2 start index.js"
+    "dev": "nodemon index.js",
+    "start": "pm2 start index.js"
   },
   "repository": {
     "type": "git",

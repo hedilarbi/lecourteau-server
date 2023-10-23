@@ -70,6 +70,13 @@ const getOffer = async (req, res) => {
 const deleteOffer = async (req, res) => {
   const { id } = req.params;
   try {
+    const response = await Offer.findById(id);
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "L'Offre n'existe pas" });
+    }
+    await deleteImagesFromFirebase(response.image);
     await Offer.findByIdAndDelete(id);
     res.status(200).json({ message: "offer deleted", success: true });
   } catch (err) {

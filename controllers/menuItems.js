@@ -1,3 +1,4 @@
+const { deleteImagesFromFirebase } = require("../firebase");
 const MenuItem = require("../models/MenuItem");
 
 const createMenuItem = async (req, res) => {
@@ -46,34 +47,59 @@ const getItemsNames = async (req, res) => {
 const updateMenuItem = async (req, res) => {
   const {
     name,
-    image,
+
     prices,
     description,
 
     category,
     customization,
   } = req.body;
+  let firebaseUrl = null;
+  if (req.file) {
+    firebaseUrl = req.file.firebaseUrl;
+  }
   const { id } = req.params;
-  const newPrices = prices.map((price) => {
-    return { size: price.size, price: parseFloat(price.price) };
+
+  let newPrices = [];
+  const pricesArray = JSON.parse(prices);
+  const customizationArray = JSON.parse(customization);
+
+  pricesArray.map((item) => {
+    if (item.price != "0")
+      newPrices.push({ size: item.size, price: parseFloat(item.price) });
   });
-  const newCategory = category.value;
-  const newCustomization = customization.map((custo) => {
+
+  const newCustomization = customizationArray.map((custo) => {
     return { _id: custo._id };
   });
   try {
-    const response = await MenuItem.findByIdAndUpdate(
-      id,
-      {
-        name,
-        image,
-        prices: newPrices,
-        description,
-        category: newCategory,
-        customization: newCustomization,
-      },
-      { new: true }
-    ).populate("customization");
+    let response;
+    if (firebaseUrl) {
+      response = await MenuItem.findByIdAndUpdate(
+        id,
+        {
+          name,
+          image: firebaseUrl,
+          prices: newPrices,
+          description,
+          category,
+          customization: newCustomization,
+        },
+        { new: true }
+      ).populate("customization category");
+    } else {
+      response = await MenuItem.findByIdAndUpdate(
+        id,
+        {
+          name,
+          prices: newPrices,
+          description,
+          category,
+          customization: newCustomization,
+        },
+        { new: true }
+      ).populate("customization category");
+    }
 
     res.status(200).json(response);
   } catch (err) {
@@ -120,6 +146,13 @@ const deleteMenuItem = async (req, res) => {
   const { id } = req.params;
 
   try {
+    const response = await MenuItem.findById(id);
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Article n'existe pas" });
+    }
+    await deleteImagesFromFirebase(response.image);
     await MenuItem.findByIdAndDelete(id);
     res.status(200).json({ success: true, message: "item deleted" });
   } catch (err) {

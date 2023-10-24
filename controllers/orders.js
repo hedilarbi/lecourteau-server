@@ -62,11 +62,12 @@ const createOrder = async (req, res) => {
     message = {
       to: expo_token,
       sound: "default",
-      body: `Your order is on progress `,
+      body: `Bienvenu chez Le Courteau, votre commande est en préparation.`,
+
       data: {
         order_id: response._id,
       },
-      title: "New Order",
+      title: "Nouvelle Commande",
       priority: "high",
     };
 

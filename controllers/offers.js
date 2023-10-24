@@ -1,3 +1,4 @@
+const { deleteImagesFromFirebase } = require("../firebase");
 const Offer = require("../models/Offer");
 
 const createOffer = async (req, res) => {
@@ -7,7 +8,7 @@ const createOffer = async (req, res) => {
   }
 
   const { name, expireAt, items, price, customizations } = req.body;
-  console.log(expireAt);
+
   const parsedItems = JSON.parse(items);
   const parsedCustomization = JSON.parse(customizations);
 
@@ -80,7 +81,7 @@ const deleteOffer = async (req, res) => {
     await Offer.findByIdAndDelete(id);
     res.status(200).json({ message: "offer deleted", success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 const updateOffer = async (req, res) => {

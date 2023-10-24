@@ -184,7 +184,17 @@ const updateMenuItemAvailability = async (req, res) => {
     res.json({ message: err.message, status: false });
   }
 };
-
+const getNewItems = async (req, res) => {
+  try {
+    const response = await MenuItem.find()
+      .sort({ _id: -1 })
+      .limit(3)
+      .select("name image");
+    res.status(200).json(response);
+  } catch (err) {
+    res.status(500).json({ status: false, message: err.message });
+  }
+};
 module.exports = {
   createMenuItem,
   updateMenuItem,
@@ -194,4 +204,5 @@ module.exports = {
   getMenuItemsByCategory,
   getItemsNames,
   updateMenuItemAvailability,
+  getNewItems,
 };

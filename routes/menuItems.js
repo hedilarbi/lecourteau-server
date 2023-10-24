@@ -8,6 +8,7 @@ const {
   getMenuItemsByCategory,
   getItemsNames,
   updateMenuItemAvailability,
+  getNewItems,
 } = require("../controllers/menuItems");
 const {
   uploadImageToFirebase,
@@ -20,6 +21,7 @@ const router = express.Router();
 
 router.get("/", getMenuItems);
 router.get("/name", getItemsNames);
+router.get("/new", getNewItems);
 router.post(
   "/create",
   Multer.single("file"),

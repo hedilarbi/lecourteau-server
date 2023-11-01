@@ -28,6 +28,15 @@ const createMenuItem = async (req, res) => {
       category,
     });
     const response = await newMenuItem.save();
+    await Promise.all(
+      restaurants.map(async (restaurant) => {
+        restaurant.menu_items.push({
+          menuItem: response._id,
+          availability: true,
+        });
+        await restaurant.save();
+      })
+    );
 
     res.status(200).json(response);
   } catch (err) {
@@ -154,6 +163,17 @@ const deleteMenuItem = async (req, res) => {
     }
     await deleteImagesFromFirebase(response.image);
     await MenuItem.findByIdAndDelete(id);
+    const restaurants = await mongoose.models.Restaurant.find({}); // Retrieve all restaurants
+
+    await Promise.all(
+      restaurants.map(async (restaurant) => {
+        // Find and remove the offer from the offers array
+        restaurant.menu_items = restaurant.menu_items.filter(
+          (restaurantOffer) => !restaurantOffer.menuItem.equals(id)
+        );
+        await restaurant.save();
+      })
+    );
     res.status(200).json({ success: true, message: "item deleted" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

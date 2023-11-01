@@ -17,6 +17,12 @@ const createTopping = async (req, res) => {
       price: parseFloat(price),
     });
     const response = await newTopping.save();
+    await Promise.all(
+      restaurants.map(async (restaurant) => {
+        restaurant.toppings.push({ topping: response._id, availability: true });
+        await restaurant.save();
+      })
+    );
 
     res.status(201).json(response);
   } catch (err) {
@@ -45,14 +51,27 @@ const getTopping = async (req, res) => {
 };
 
 const updateTopping = async (req, res) => {
-  const { name, image, category, price } = req.body;
+  let firebaseUrl = null;
+  if (req.file) {
+    firebaseUrl = req.file.firebaseUrl;
+  }
+  const { name, category, price } = req.body;
   const { id } = req.params;
   try {
-    const response = await Topping.findByIdAndUpdate(
-      id,
-      { name, description, image, price: parseFloat(price) },
-      { new: true }
-    );
+    let response;
+    if (firebaseUrl) {
+      response = await Topping.findByIdAndUpdate(
+        id,
+        { name, image: firebaseUrl, category, price: parseFloat(price) },
+        { new: true }
+      );
+    } else {
+      response = await Topping.findByIdAndUpdate(
+        id,
+        { name, category, price: parseFloat(price) },
+        { new: true }
+      );
+    }
     res.json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -71,6 +90,17 @@ const deleteTopping = async (req, res) => {
     }
     await deleteImagesFromFirebase(response.image);
     await Topping.findByIdAndDelete(id);
+    const restaurants = await mongoose.models.Restaurant.find({}); // Retrieve all restaurants
+
+    await Promise.all(
+      restaurants.map(async (restaurant) => {
+        // Find and remove the offer from the offers array
+        restaurant.toppings = restaurant.toppings.filter(
+          (restaurantOffer) => !restaurantOffer.topping.equals(id)
+        );
+        await restaurant.save();
+      })
+    );
     res.status(200).json({ message: "success" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

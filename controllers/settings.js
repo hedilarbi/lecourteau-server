@@ -1,9 +1,14 @@
+const { default: mongoose } = require("mongoose");
 const Setting = require("../models/Setting");
 
 const getSetting = async (req, res) => {
   try {
-    const response = await Setting.find();
-    res.json(response);
+    const settings = await Setting.find();
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "name address location"
+    );
+
+    res.status(200).json({ settings, restaurants });
   } catch (err) {
     res.json({ error: err.message });
   }

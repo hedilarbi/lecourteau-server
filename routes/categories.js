@@ -7,7 +7,10 @@ const {
   getCategory,
   getCategoriesNames,
 } = require("../controllers/categories");
-const { uploadImageToFirebase } = require("../firebase");
+const {
+  uploadImageToFirebase,
+  updateMenuItemImageInFirebase,
+} = require("../firebase");
 const Multer = require("../middlewares/multer");
 const { optimizeImage } = require("../middlewares/imageOptimizor");
 
@@ -22,7 +25,14 @@ router.post(
   uploadImageToFirebase,
   createCategory
 );
-router.put("/update/:id", updateCategory);
+router.put(
+  "/update/:id",
+  Multer.single("file"),
+  optimizeImage,
+
+  updateMenuItemImageInFirebase,
+  updateCategory
+);
 router.delete("/delete/:id", deleteCategory);
 router.get("/:id", getCategory);
 

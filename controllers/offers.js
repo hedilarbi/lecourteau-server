@@ -34,7 +34,13 @@ const createOffer = async (req, res) => {
       createdAt: new Date(),
     });
     const response = await newOffer.save();
-
+    const restaurants = await mongoose.models.Restaurant.find();
+    await Promise.all(
+      restaurants.map(async (restaurant) => {
+        restaurant.offers.push({ offer: response._id, availability: true });
+        await restaurant.save();
+      })
+    );
     res.status(201).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -79,12 +85,28 @@ const deleteOffer = async (req, res) => {
     }
     await deleteImagesFromFirebase(response.image);
     await Offer.findByIdAndDelete(id);
+    const restaurants = await mongoose.models.Restaurant.find({}); // Retrieve all restaurants
+
+    await Promise.all(
+      restaurants.map(async (restaurant) => {
+        // Find and remove the offer from the offers array
+        restaurant.offers = restaurant.offers.filter(
+          (restaurantOffer) => !restaurantOffer.offer.equals(id)
+        );
+        await restaurant.save();
+      })
+    );
+
     res.status(200).json({ message: "offer deleted", success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 const updateOffer = async (req, res) => {
+  let firebaseUrl = null;
+  if (req.file) {
+    firebaseUrl = req.file.firebaseUrl;
+  }
   const {
     name,
 
@@ -94,18 +116,23 @@ const updateOffer = async (req, res) => {
     items,
     customizations,
   } = req.body;
+
   const { id } = req.params;
 
-  const newCustomizations = customizations.map((custo) => {
+  const itemsArray = JSON.parse(items);
+  const customizationArray = JSON.parse(customizations);
+
+  const newCustomizations = customizationArray.map((custo) => {
     return { _id: custo._id };
   });
-  const newItems = items.map((custo) => {
+  const newItems = itemsArray.map((custo) => {
     return { item: custo.item._id, size: custo.size, quantity: custo.quantity };
   });
   try {
     const response = await Offer.findByIdAndUpdate(
       id,
       {
+        image: firebaseUrl,
         name,
         price: parseFloat(price),
         exprireAt: new Date(exprireAt),

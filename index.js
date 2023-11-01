@@ -14,7 +14,8 @@ const settingsRoutes = require("./routes/settings");
 const staffsRoutes = require("./routes/staffs");
 const paymentsRoutes = require("./routes/payments");
 const statsRoutes = require("./routes/stats");
-
+const restaurantsRoutes = require("./routes/restaurants");
+const notifiersRoutes = require("./routes/notifies");
 require("dotenv/config");
 
 const { createServer } = require("http");
@@ -39,6 +40,8 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/staffs", staffsRoutes);
 app.use("/api/payments", paymentsRoutes);
 app.use("/api/stats", statsRoutes);
+app.use("/api/restaurants", restaurantsRoutes);
+app.use("/api/notifiers", notifiersRoutes);
 
 mongoose.connect(
   process.env.NODE_ENV === "developement"

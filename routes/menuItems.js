@@ -13,7 +13,6 @@ const {
 const {
   uploadImageToFirebase,
   updateMenuItemImageInFirebase,
-  deleteImagesFromFirebase,
 } = require("../firebase");
 const Multer = require("../middlewares/multer");
 const { optimizeImage } = require("../middlewares/imageOptimizor");

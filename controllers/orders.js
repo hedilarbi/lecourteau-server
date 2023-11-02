@@ -88,11 +88,15 @@ const createOrder = async (req, res) => {
       title: "Nouvelle Commande",
       priority: "high",
     };
-
-    await expo.sendPushNotificationsAsync([userMessage]);
-    await expo.sendPushNotificationsAsync([dashboardMessage]);
+    if (expo_token.length > 0) {
+      await expo.sendPushNotificationsAsync([userMessage]);
+    }
+    if (restaurant.expo_token?.length > 0) {
+      await expo.sendPushNotificationsAsync([dashboardMessage]);
+    }
     res.status(201).json({ user: newUser, orderId: response._id });
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

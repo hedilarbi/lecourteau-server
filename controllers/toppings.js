@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../firebase");
 const Topping = require("../models/Topping");
 
@@ -17,6 +18,7 @@ const createTopping = async (req, res) => {
       price: parseFloat(price),
     });
     const response = await newTopping.save();
+    const restaurants = await mongoose.models.find().select("toppings");
     await Promise.all(
       restaurants.map(async (restaurant) => {
         restaurant.toppings.push({ topping: response._id, availability: true });

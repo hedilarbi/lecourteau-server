@@ -110,7 +110,7 @@ const getRestaurantMenuItem = async (req, res) => {
     const response = restaurant.menu_items.filter(
       (item) => item.menuItem._id == id
     );
-    console.log(response);
+
     res.json(response);
   } catch (error) {
     res.status(500).json({ message: error.message });

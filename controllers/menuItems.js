@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../firebase");
 const MenuItem = require("../models/MenuItem");
 
@@ -28,6 +29,9 @@ const createMenuItem = async (req, res) => {
       category,
     });
     const response = await newMenuItem.save();
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "menu_items"
+    );
     await Promise.all(
       restaurants.map(async (restaurant) => {
         restaurant.menu_items.push({
@@ -40,6 +44,7 @@ const createMenuItem = async (req, res) => {
 
     res.status(200).json(response);
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };

@@ -18,16 +18,25 @@ const createTopping = async (req, res) => {
       price: parseFloat(price),
     });
     const response = await newTopping.save();
-    const restaurants = await mongoose.models.find().select("toppings");
-    await Promise.all(
-      restaurants.map(async (restaurant) => {
-        restaurant.toppings.push({ topping: response._id, availability: true });
-        await restaurant.save();
-      })
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "toppings"
     );
+    console.log(restaurants);
+    if (restaurants.length > 0) {
+      await Promise.all(
+        restaurants.map(async (restaurant) => {
+          restaurant.toppings.push({
+            topping: response._id,
+            availability: true,
+          });
+          await restaurant.save();
+        })
+      );
+    }
 
     res.status(201).json(response);
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -92,17 +101,20 @@ const deleteTopping = async (req, res) => {
     }
     await deleteImagesFromFirebase(response.image);
     await Topping.findByIdAndDelete(id);
-    const restaurants = await mongoose.models.Restaurant.find({}); // Retrieve all restaurants
-
-    await Promise.all(
-      restaurants.map(async (restaurant) => {
-        // Find and remove the offer from the offers array
-        restaurant.toppings = restaurant.toppings.filter(
-          (restaurantOffer) => !restaurantOffer.topping.equals(id)
-        );
-        await restaurant.save();
-      })
-    );
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "toppings"
+    ); // Retrieve all restaurants
+    if (restaurants.length > 0) {
+      await Promise.all(
+        restaurants.map(async (restaurant) => {
+          // Find and remove the offer from the offers array
+          restaurant.toppings = restaurant.toppings.filter(
+            (restaurantOffer) => !restaurantOffer.topping.equals(id)
+          );
+          await restaurant.save();
+        })
+      );
+    }
     res.status(200).json({ message: "success" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

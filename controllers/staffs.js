@@ -80,15 +80,8 @@ const deleteStaffMember = async (req, res) => {
 
 const updateStaffMember = async (req, res) => {
   const { id } = req.params;
-  const { name, username, password, restaurant, role } = req.body;
+  const { name, username, restaurant, role } = req.body;
   try {
-    const staff = await Staff.findById(id);
-    const verify = await bcrypt.compare(password, staff.password);
-    let hashedPasword;
-    if (!verify) {
-      hashedPasword = await bcrypt.hash(password, saltRounds);
-    }
-
     const response = await Staff.findByIdAndUpdate(
       id,
       {
@@ -97,7 +90,6 @@ const updateStaffMember = async (req, res) => {
         username,
         role,
         restaurant,
-        password: verify ? staff.password : hashedPasword,
       },
       { new: true }
     ).populate({ path: "restaurant", select: "name" });

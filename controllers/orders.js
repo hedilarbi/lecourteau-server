@@ -152,23 +152,27 @@ const updateStatus = async (req, res) => {
       { new: true }
     );
     const user = await mongoose.models.User.findById(response.user);
-    const expo_token = user.expo_token;
-    const expo = new Expo();
-    let message = {};
+    if (status === IN_DELIVERY || status === DELIVERED) {
+      const expo_token = user.expo_token;
+      const expo = new Expo();
+      let message = {};
 
-    message = {
-      to: expo_token,
-      sound: "default",
-      body: `Your order is ${status} `,
-      data: {
-        order_id: id,
-      },
-      title: "New Order",
+      message = {
+        to: expo_token,
+        sound: "default",
+        body:
+          status === IN_DELIVERY
+            ? `Votre commande est en cours de livraison`
+            : "Bon appétit!",
+        data: {
+          order_id: id,
+        },
 
-      priority: "high",
-    };
+        priority: "high",
+      };
 
-    const ticket = await expo.sendPushNotificationsAsync([message]);
+      const ticket = await expo.sendPushNotificationsAsync([message]);
+    }
 
     res.status(200).json({ success: true });
   } catch (err) {

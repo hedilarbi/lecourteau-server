@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../firebase");
 const Offer = require("../models/Offer");
 
@@ -34,15 +35,20 @@ const createOffer = async (req, res) => {
       createdAt: new Date(),
     });
     const response = await newOffer.save();
-    const restaurants = await mongoose.models.Restaurant.find();
-    await Promise.all(
-      restaurants.map(async (restaurant) => {
-        restaurant.offers.push({ offer: response._id, availability: true });
-        await restaurant.save();
-      })
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "offers"
     );
+    if (restaurants.length > 0) {
+      await Promise.all(
+        restaurants.map(async (restaurant) => {
+          restaurant.offers.push({ offer: response._id, availability: true });
+          await restaurant.save();
+        })
+      );
+    }
     res.status(201).json(response);
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -85,17 +91,20 @@ const deleteOffer = async (req, res) => {
     }
     await deleteImagesFromFirebase(response.image);
     await Offer.findByIdAndDelete(id);
-    const restaurants = await mongoose.models.Restaurant.find({}); // Retrieve all restaurants
-
-    await Promise.all(
-      restaurants.map(async (restaurant) => {
-        // Find and remove the offer from the offers array
-        restaurant.offers = restaurant.offers.filter(
-          (restaurantOffer) => !restaurantOffer.offer.equals(id)
-        );
-        await restaurant.save();
-      })
-    );
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "offers"
+    ); // Retrieve all restaurants
+    if (restaurants.length > 0) {
+      await Promise.all(
+        restaurants.map(async (restaurant) => {
+          // Find and remove the offer from the offers array
+          restaurant.offers = restaurant.offers.filter(
+            (restaurantOffer) => !restaurantOffer.offer.equals(id)
+          );
+          await restaurant.save();
+        })
+      );
+    }
 
     res.status(200).json({ message: "offer deleted", success: true });
   } catch (err) {

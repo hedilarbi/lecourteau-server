@@ -64,6 +64,14 @@ const orderSchema = new Schema({
       default: false,
     },
   },
+  delivery_by: {
+    type: Schema.Types.ObjectId,
+    ref: "Staff",
+  },
+  restaurant: {
+    type: Schema.Types.ObjectId,
+    ref: "Restaurant",
+  },
 });
 
 module.exports = model("Order", orderSchema);

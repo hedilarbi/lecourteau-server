@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../firebase");
 const MenuItem = require("../models/MenuItem");
 
@@ -28,7 +29,20 @@ const createMenuItem = async (req, res) => {
       category,
     });
     const response = await newMenuItem.save();
-
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "menu_items"
+    );
+    if (restaurants.length > 0) {
+      await Promise.all(
+        restaurants.map(async (restaurant) => {
+          restaurant.menu_items.push({
+            menuItem: response._id,
+            availability: true,
+          });
+          await restaurant.save();
+        })
+      );
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -154,6 +168,20 @@ const deleteMenuItem = async (req, res) => {
     }
     await deleteImagesFromFirebase(response.image);
     await MenuItem.findByIdAndDelete(id);
+    const restaurants = await mongoose.models.Restaurant.find().select(
+      "menu_items"
+    ); // Retrieve all restaurants
+    if (restaurants.length > 0) {
+      await Promise.all(
+        restaurants.map(async (restaurant) => {
+          // Find and remove the offer from the offers array
+          restaurant.menu_items = restaurant.menu_items.filter(
+            (restaurantOffer) => !restaurantOffer.menuItem.equals(id)
+          );
+          await restaurant.save();
+        })
+      );
+    }
     res.status(200).json({ success: true, message: "item deleted" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

@@ -22,8 +22,7 @@ const createCategory = async (req, res) => {
 
     res.status(201).json(response);
   } catch (error) {
-    console.log(error.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -32,7 +31,7 @@ const getCategories = async (req, res) => {
     const response = await Category.find();
     res.status(200).json(response);
   } catch (error) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -56,14 +55,23 @@ const getCategory = async (req, res) => {
 };
 
 const updateCategory = async (req, res) => {
-  const { name, image, description } = req.body;
+  let firebaseUrl = null;
+  if (req.file) {
+    firebaseUrl = req.file.firebaseUrl;
+  }
+  const { name } = req.body;
   const { id } = req.params;
   try {
-    const response = await Category.findByIdAndUpdate(
-      id,
-      { name, description, image },
-      { new: true }
-    );
+    let response;
+    if (firebaseUrl) {
+      response = await Category.findByIdAndUpdate(
+        id,
+        { name, image: firebaseUrl },
+        { new: true }
+      );
+    } else {
+      response = await Category.findByIdAndUpdate(id, { name }, { new: true });
+    }
     res.json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

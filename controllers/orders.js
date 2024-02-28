@@ -89,13 +89,10 @@ const createOrder = async (req, res) => {
       priority: "high",
     };
     if (expo_token.length > 0) {
-      const ticket = await expo.sendPushNotificationsAsync([userMessage]);
-      console.log(ticket);
+      await expo.sendPushNotificationsAsync([userMessage]);
     }
     if (restaurant.expo_token?.length > 0) {
-      console.log(restaurant.expo_token);
-      const ticket = await expo.sendPushNotificationsAsync([dashboardMessage]);
-      console.log(ticket);
+      await expo.sendPushNotificationsAsync([dashboardMessage]);
     }
     res.status(201).json({ user: newUser, orderId: response._id });
   } catch (err) {
@@ -106,10 +103,10 @@ const createOrder = async (req, res) => {
 
 const getOrders = async (req, res) => {
   try {
-    const response = await Order.find().select(
+    const data = await Order.find().select(
       "status createdAt total_price type code"
     );
-
+    const response = data.reverse();
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

@@ -22,8 +22,18 @@ router.post(
   uploadImageToFirebase,
   createOffer
 );
-router.delete("/delete/:id", deleteOffer);
-router.put("/update/:id", updateOffer);
+router.delete(
+  "/delete/:id",
+
+  deleteOffer
+);
+router.put(
+  "/update/:id",
+  Multer.single("file"),
+  optimizeImage,
+  updateMenuItemImageInFirebase,
+  updateOffer
+);
 router.get("/:id", getOffer);
 
 module.exports = router;

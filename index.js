@@ -14,7 +14,8 @@ const settingsRoutes = require("./routes/settings");
 const staffsRoutes = require("./routes/staffs");
 const paymentsRoutes = require("./routes/payments");
 const statsRoutes = require("./routes/stats");
-
+const restaurantsRoutes = require("./routes/restaurants");
+const notifiersRoutes = require("./routes/notifies");
 require("dotenv/config");
 
 const { createServer } = require("http");
@@ -40,7 +41,12 @@ app.use("/api/staffs", staffsRoutes);
 app.use("/api/payments", paymentsRoutes);
 app.use("/api/stats", statsRoutes);
 
-mongoose.connect(process.env.DEV_DB_CONNECTION, { useNewUrlParser: true });
+mongoose.connect(
+  process.env.NODE_ENV === "developement"
+    ? process.env.DEV_DB_CONNECTION
+    : process.env.PROD_DB_CONNECTION,
+  { useNewUrlParser: true }
+);
 
 httpServer.listen(process.env.PORT, () => {
   console.log("listening on port 5000");

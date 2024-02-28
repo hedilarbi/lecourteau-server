@@ -6,7 +6,10 @@ const {
   updateTopping,
   getTopping,
 } = require("../controllers/toppings");
-const { uploadImageToFirebase } = require("../firebase");
+const {
+  uploadImageToFirebase,
+  updateMenuItemImageInFirebase,
+} = require("../firebase");
 const Multer = require("../middlewares/multer");
 const { optimizeImage } = require("../middlewares/imageOptimizor");
 
@@ -20,7 +23,13 @@ router.post(
   uploadImageToFirebase,
   createTopping
 );
-router.put("/update/:id", updateTopping);
+router.put(
+  "/update/:id",
+  Multer.single("file"),
+  optimizeImage,
+  updateMenuItemImageInFirebase,
+  updateTopping
+);
 router.delete("/delete/:id", deleteTopping);
 router.get("/:id", getTopping);
 

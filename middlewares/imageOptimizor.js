@@ -6,7 +6,7 @@ const optimizeImage = (req, res, next) => {
   }
   const image = req.file;
   sharp(image.buffer)
-    .resize(500, 400)
+    .resize(600, 400)
     .toFormat("jpeg")
     .jpeg({ quality: 75, chromaSubsampling: "4:4:4" })
     .toBuffer()

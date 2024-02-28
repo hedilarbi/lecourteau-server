@@ -34,11 +34,13 @@ const createOrder = async (req, res) => {
       offers: order.order.offers,
       rewards: order.order.rewards,
       createdAt: new Date().toISOString(),
+      restaurant: order.restaurant,
     });
     const response = await newOrder.save();
 
     const user = await mongoose.models.User.findById(order.order.user_id);
     user.orders.push(response._id);
+
     let total = 0;
     if (order.order.rewards.length > 0) {
       order.order.rewards.map((item) => (total += item.points));
@@ -55,11 +57,16 @@ const createOrder = async (req, res) => {
     user.fidelity_points = user.fidelity_points + parseInt(points) * 10;
 
     const newUser = await user.save();
+    const restaurant = await mongoose.models.Restaurant.findById(
+      order.restaurant
+    );
+    restaurant.orders.push(response._id);
+    await restaurant.save();
+
     const expo_token = user.expo_token;
     const expo = new Expo();
-    let message = {};
 
-    message = {
+    const userMessage = {
       to: expo_token,
       sound: "default",
       body: `Bienvenu chez Le Courteau, votre commande est en préparation.`,
@@ -70,20 +77,39 @@ const createOrder = async (req, res) => {
       title: "Nouvelle Commande",
       priority: "high",
     };
+    const dashboardMessage = {
+      to: restaurant.expo_token,
+      sound: "default",
+      body: `Nouvelle commande en attente`,
 
-    const ticket = await expo.sendPushNotificationsAsync([message]);
+      data: {
+        order_id: response._id,
+      },
+      title: "Nouvelle Commande",
+      priority: "high",
+    };
+    if (expo_token.length > 0) {
+      const ticket = await expo.sendPushNotificationsAsync([userMessage]);
+      console.log(ticket);
+    }
+    if (restaurant.expo_token?.length > 0) {
+      console.log(restaurant.expo_token);
+      const ticket = await expo.sendPushNotificationsAsync([dashboardMessage]);
+      console.log(ticket);
+    }
     res.status(201).json({ user: newUser, orderId: response._id });
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
 const getOrders = async (req, res) => {
   try {
-    const data = await Order.find().select(
+    const response = await Order.find().select(
       "status createdAt total_price type code"
     );
-    const response = data.reverse();
+
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -129,23 +155,27 @@ const updateStatus = async (req, res) => {
       { new: true }
     );
     const user = await mongoose.models.User.findById(response.user);
-    const expo_token = user.expo_token;
-    const expo = new Expo();
-    let message = {};
+    if (status === IN_DELIVERY || status === DELIVERED) {
+      const expo_token = user.expo_token;
+      const expo = new Expo();
+      let message = {};
 
-    message = {
-      to: expo_token,
-      sound: "default",
-      body: `Your order is ${status} `,
-      data: {
-        order_id: id,
-      },
-      title: "New Order",
+      message = {
+        to: expo_token,
+        sound: "default",
+        body:
+          status === IN_DELIVERY
+            ? `Votre commande est en cours de livraison`
+            : "Bon appétit!",
+        data: {
+          order_id: id,
+        },
 
-      priority: "high",
-    };
+        priority: "high",
+      };
 
-    const ticket = await expo.sendPushNotificationsAsync([message]);
+      const ticket = await expo.sendPushNotificationsAsync([message]);
+    }
 
     res.status(200).json({ success: true });
   } catch (err) {

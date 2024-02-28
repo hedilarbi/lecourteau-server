@@ -6,6 +6,11 @@ const staffSchema = new Schema({
   password: String,
   createdAt: Date,
   role: String,
+  image: String,
+  restaurant: {
+    type: Schema.Types.ObjectId,
+    ref: "Restaurant",
+  },
 });
 
 module.exports = model("Staff", staffSchema);

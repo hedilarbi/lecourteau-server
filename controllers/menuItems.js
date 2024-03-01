@@ -124,7 +124,7 @@ const updateMenuItem = async (req, res) => {
 const getMenuItems = async (req, res) => {
   try {
     let response = await MenuItem.find()
-      .select("category name image prices is_available")
+      .select("category name image prices is_available order")
       .populate({
         path: "category",
         select: "name",
@@ -223,6 +223,7 @@ const getNewItems = async (req, res) => {
     res.status(500).json({ status: false, message: err.message });
   }
 };
+
 module.exports = {
   createMenuItem,
   updateMenuItem,

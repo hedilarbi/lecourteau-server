@@ -40,11 +40,12 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/staffs", staffsRoutes);
 app.use("/api/payments", paymentsRoutes);
 app.use("/api/stats", statsRoutes);
+app.use("/api/restaurants", restaurantsRoutes);
+app.use("/api/notifiers", notifiersRoutes);
 
 mongoose.connect(
-  process.env.NODE_ENV === "developement"
-    ? process.env.DEV_DB_CONNECTION
-    : process.env.PROD_DB_CONNECTION,
+  process.env.DEV_DB_CONNECTION,
+
   { useNewUrlParser: true }
 );
 

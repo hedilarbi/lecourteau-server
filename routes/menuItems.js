@@ -19,6 +19,7 @@ const { optimizeImage } = require("../middlewares/imageOptimizor");
 const router = express.Router();
 
 router.get("/", getMenuItems);
+
 router.get("/name", getItemsNames);
 router.get("/new", getNewItems);
 router.post(

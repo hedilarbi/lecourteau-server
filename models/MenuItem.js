@@ -25,6 +25,7 @@ const menuItemSchema = new Schema({
     type: Schema.Types.Boolean,
     default: true,
   },
+  order: Number,
 });
 
 module.exports = model("MenuItem", menuItemSchema);

@@ -129,7 +129,7 @@ const getMenuItems = async (req, res) => {
         path: "category",
         select: "name",
       });
-    response = response.reverse();
+
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

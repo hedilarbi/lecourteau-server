@@ -129,7 +129,7 @@ const getMenuItems = async (req, res) => {
         path: "category",
         select: "name",
       });
-
+    response.sort((a, b) => a.order - b.order);
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -170,11 +170,10 @@ const deleteMenuItem = async (req, res) => {
     await MenuItem.findByIdAndDelete(id);
     const restaurants = await mongoose.models.Restaurant.find().select(
       "menu_items"
-    ); // Retrieve all restaurants
+    );
     if (restaurants.length > 0) {
       await Promise.all(
         restaurants.map(async (restaurant) => {
-          // Find and remove the offer from the offers array
           restaurant.menu_items = restaurant.menu_items.filter(
             (restaurantOffer) => !restaurantOffer.menuItem.equals(id)
           );
@@ -223,6 +222,36 @@ const getNewItems = async (req, res) => {
     res.status(500).json({ status: false, message: err.message });
   }
 };
+const triMenutItems = async (req, res) => {
+  const { from, to } = req.body;
+
+  try {
+    let menuitems = await MenuItem.find();
+
+    const indexFrom = menuitems.findIndex((item) => item.order === from);
+    const indexTo = menuitems.findIndex((item) => item.order === to);
+
+    if (indexFrom !== -1 && indexTo !== -1) {
+      menuitems[indexFrom].order = to;
+      menuitems[indexTo].order = from;
+
+      console.log("from:", menuitems[indexFrom]);
+      await Promise.all([
+        menuitems[indexFrom].save(),
+        menuitems[indexTo].save(),
+      ]);
+    } else {
+      return res
+        .status(400)
+        .json({ status: false, message: "Invalid 'from' or 'to' values" });
+    }
+
+    res.status(200).json({ message: "success" });
+  } catch (err) {
+    console.log(err.message);
+    res.status(500).json({ status: false, message: err.message });
+  }
+};
 
 module.exports = {
   createMenuItem,
@@ -234,4 +263,5 @@ module.exports = {
   getItemsNames,
   updateMenuItemAvailability,
   getNewItems,
+  triMenutItems,
 };

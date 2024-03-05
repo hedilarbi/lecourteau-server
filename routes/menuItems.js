@@ -9,6 +9,7 @@ const {
   getItemsNames,
   updateMenuItemAvailability,
   getNewItems,
+  triMenutItems,
 } = require("../controllers/menuItems");
 const {
   uploadImageToFirebase,
@@ -19,7 +20,7 @@ const { optimizeImage } = require("../middlewares/imageOptimizor");
 const router = express.Router();
 
 router.get("/", getMenuItems);
-
+router.put("/tri", triMenutItems);
 router.get("/name", getItemsNames);
 router.get("/new", getNewItems);
 router.post(

@@ -41,11 +41,11 @@ const createOrder = async (req, res) => {
     const user = await mongoose.models.User.findById(order.order.user_id);
     user.orders.push(response._id);
 
-    let total = 0;
     if (order.order.rewards.length > 0) {
-      order.order.rewards.map((item) => (total += item.points));
+      let pointsToremove = 0;
+      order.order.rewards.map((item) => (pointsToremove += item.points));
 
-      user.fidelity_points = user.fidelity_points - total;
+      user.fidelity_points = user.fidelity_points - pointsToremove;
     }
     let points = 0;
     if (order.order.offers.length > 0) {
@@ -69,7 +69,8 @@ const createOrder = async (req, res) => {
     const userMessage = {
       to: expo_token,
       sound: "default",
-      body: `Bienvenu chez Le Courteau, votre commande est en préparation.`,
+      body: `
+      Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${points} de fidélité.`,
 
       data: {
         order_id: response._id,
@@ -80,7 +81,7 @@ const createOrder = async (req, res) => {
     const dashboardMessage = {
       to: restaurant.expo_token,
       sound: "default",
-      body: `Nouvelle commande en attente`,
+      body: `Nouvelle commande en attente, code:${code.toUpperCase()}`,
 
       data: {
         order_id: response._id,

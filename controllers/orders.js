@@ -80,9 +80,9 @@ const createOrder = async (req, res) => {
     };
     const dashboardMessage = {
       to: restaurant.expo_token,
-      sound: "default",
+      sound: "notificationsound.wav",
       body: `Nouvelle commande en attente, code:${code.toUpperCase()}`,
-
+      channel: "default",
       data: {
         order_id: response._id,
       },

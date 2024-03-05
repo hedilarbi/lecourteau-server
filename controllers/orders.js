@@ -153,10 +153,10 @@ const updateStatus = async (req, res) => {
       { new: true }
     );
     const user = await mongoose.models.User.findById(response.user);
+    let message = {};
     if (status === IN_DELIVERY || status === DELIVERED) {
       const expo_token = user.expo_token;
       const expo = new Expo();
-      let message = {};
 
       message = {
         to: expo_token,

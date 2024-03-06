@@ -48,7 +48,6 @@ const createOffer = async (req, res) => {
     }
     res.status(201).json(response);
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

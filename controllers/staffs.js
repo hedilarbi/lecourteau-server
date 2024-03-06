@@ -136,7 +136,6 @@ const getStaffByToken = async (req, res) => {
 
     res.status(200).json(response);
   } catch (error) {
-    console.log(error.message);
     res.status(500).json({ message: error.message });
   }
 };

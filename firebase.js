@@ -24,9 +24,7 @@ const uploadImageToFirebase = (req, res, next) => {
     },
   });
 
-  stream.on("error", (e) => {
-    console.log(e);
-  });
+  stream.on("error", (e) => {});
 
   stream.on("finish", async () => {
     await file.makePublic();
@@ -47,9 +45,7 @@ const updateMenuItemImageInFirebase = async (req, res, next) => {
   const oldImageFile = bucket.file(oldImageName);
   try {
     await oldImageFile.delete();
-    console.log("image deleted");
   } catch (err) {
-    console.log(err.message);
     res.status(404).json({ success: false, message: err.message });
   }
   const image = req.file;
@@ -61,9 +57,8 @@ const updateMenuItemImageInFirebase = async (req, res, next) => {
       contentType: image.mimetype,
     },
   });
-  console.log("image added");
+
   stream.on("error", (e) => {
-    console.log(e);
     res.status(404).json({ success: false, message: e.message });
   });
 
@@ -71,7 +66,7 @@ const updateMenuItemImageInFirebase = async (req, res, next) => {
     await file.makePublic();
 
     req.file.firebaseUrl = `https://storage.googleapis.com/${BUCKET_NAME}/${imageName}`;
-    console.log("image finished");
+
     next();
   });
 

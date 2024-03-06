@@ -39,13 +39,14 @@ const createOrder = async (req, res) => {
     const response = await newOrder.save();
 
     const user = await mongoose.models.User.findById(order.order.user_id);
+
     user.orders.push(response._id);
 
     if (order.order.rewards.length > 0) {
       let pointsToremove = 0;
       order.order.rewards.map((item) => (pointsToremove += item.points));
 
-      user.fidelity_points = user.fidelity_points - pointsToremove;
+      user.fidelity_points = user.fidelity_points - parseInt(pointsToremove);
     }
     let points = 0;
     if (order.order.offers.length > 0) {
@@ -60,12 +61,13 @@ const createOrder = async (req, res) => {
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant
     );
+
     restaurant.orders.push(response._id);
+
     await restaurant.save();
 
     const expo_token = user.expo_token;
     const expo = new Expo();
-
     const userMessage = {
       to: expo_token,
       sound: "default",
@@ -97,7 +99,6 @@ const createOrder = async (req, res) => {
     }
     res.status(201).json({ user: newUser, orderId: response._id });
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

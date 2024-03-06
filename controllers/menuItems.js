@@ -235,7 +235,6 @@ const triMenutItems = async (req, res) => {
       menuitems[indexFrom].order = to;
       menuitems[indexTo].order = from;
 
-      console.log("from:", menuitems[indexFrom]);
       await Promise.all([
         menuitems[indexFrom].save(),
         menuitems[indexTo].save(),
@@ -248,7 +247,6 @@ const triMenutItems = async (req, res) => {
 
     res.status(200).json({ message: "success" });
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ status: false, message: err.message });
   }
 };

@@ -21,7 +21,7 @@ const createTopping = async (req, res) => {
     const restaurants = await mongoose.models.Restaurant.find().select(
       "toppings"
     );
-    console.log(restaurants);
+
     if (restaurants.length > 0) {
       await Promise.all(
         restaurants.map(async (restaurant) => {
@@ -36,7 +36,6 @@ const createTopping = async (req, res) => {
 
     res.status(201).json(response);
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

@@ -177,8 +177,11 @@ const updateRestaurantItemAvailability = async (req, res) => {
     restaurant.menu_items[menuItemIndex].availability =
       !restaurant.menu_items[menuItemIndex].availability;
 
-    const updatedRestaurant = await restaurant.save();
-    res.status(200).json({ status: true, message: "updated" });
+    await restaurant.save();
+
+    res
+      .status(200)
+      .json({ status: true, message: "Menu item availability updated" });
   } catch (error) {
     res.json({ message: error.message });
   }

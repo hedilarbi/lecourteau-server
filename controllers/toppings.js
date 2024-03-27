@@ -11,6 +11,12 @@ const createTopping = async (req, res) => {
   const { name, price, category } = req.body;
 
   try {
+    const topping = await Topping.findOne({ name });
+    if (topping) {
+      return res
+        .status(400)
+        .json({ success: false, message: "La personalisation existe déjà" });
+    }
     const newTopping = new Topping({
       name,
       image: firebaseUrl,

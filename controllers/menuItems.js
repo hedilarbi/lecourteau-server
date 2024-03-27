@@ -20,6 +20,13 @@ const createMenuItem = async (req, res) => {
   });
 
   try {
+    const menuItem = await MenuItem.findOne({ name });
+    if (menuItem) {
+      res.status(400).json({ success: false, message: "Item already exists" });
+    }
+    const menuItems = await MenuItem.find();
+
+    const order = menuItems.length;
     const newMenuItem = new MenuItem({
       name,
       image: firebaseUrl,
@@ -27,6 +34,7 @@ const createMenuItem = async (req, res) => {
       description,
       customization: customizationArray,
       category,
+      order,
     });
     const response = await newMenuItem.save();
     const restaurants = await mongoose.models.Restaurant.find().select(
@@ -45,6 +53,7 @@ const createMenuItem = async (req, res) => {
     }
     res.status(200).json(response);
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };

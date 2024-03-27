@@ -61,7 +61,7 @@ const createOrder = async (req, res) => {
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant
     );
-
+    console.log(restaurant.orders);
     restaurant.orders.push(response._id);
 
     await restaurant.save();
@@ -82,7 +82,7 @@ const createOrder = async (req, res) => {
     };
     const dashboardMessage = {
       to: restaurant.expo_token,
-      sound: "notificationsound.wav",
+
       body: `Nouvelle commande en attente, code:${code.toUpperCase()}`,
       channel: "default",
       data: {
@@ -99,6 +99,7 @@ const createOrder = async (req, res) => {
     }
     res.status(201).json({ user: newUser, orderId: response._id });
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

@@ -15,7 +15,7 @@ const createStaff = async (req, res) => {
     const verifyStaff = await Staff.findOne({ username });
 
     if (verifyStaff) {
-      return res.status(403).json({ message: "this username already exist" });
+      return res.status(403).json({ message: "cet utilisateut existe déja" });
     }
 
     const hashedPasword = await bcrypt.hash(password, saltRounds);

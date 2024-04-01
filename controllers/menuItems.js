@@ -60,7 +60,7 @@ const createMenuItem = async (req, res) => {
 
 const getItemsNames = async (req, res) => {
   try {
-    const response = await MenuItem.find().select("name");
+    const response = await MenuItem.find().select("name prices");
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

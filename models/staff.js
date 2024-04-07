@@ -11,6 +11,17 @@ const staffSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: "Restaurant",
   },
+  expo_token: String,
+  orders: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "Order",
+    },
+  ],
+  is_available: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 module.exports = model("Staff", staffSchema);

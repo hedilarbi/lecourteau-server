@@ -93,6 +93,7 @@ const createOrder = async (req, res) => {
       title: "Nouvelle Commande",
       priority: "high",
     };
+
     if (expo_token.length > 0) {
       await expo.sendPushNotificationsAsync([userMessage]);
     }

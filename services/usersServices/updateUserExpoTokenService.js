@@ -5,7 +5,7 @@ const updateUserExpoTokenService = async (id, expoToken) => {
   if (!user) {
     return { error: "User not found" };
   }
-  user.expoToken = expoToken;
+  user.expo_token = expoToken;
   await user.save();
   return { user };
 };

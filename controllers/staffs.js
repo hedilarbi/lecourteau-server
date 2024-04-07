@@ -5,6 +5,7 @@ const generateStaffToken = require("../utils/generateStaffToken");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const saltRounds = 10;
+const { Expo } = require("expo-server-sdk");
 const createStaff = async (req, res) => {
   let firebaseUrl = null;
   if (req.file) {
@@ -140,6 +141,69 @@ const getStaffByToken = async (req, res) => {
   }
 };
 
+const affectOrderToStaff = async (req, res) => {
+  const { orderId } = req.body;
+  const { staffId } = req.params;
+  try {
+    const staff = await Staff.findById(staffId);
+    const order = await mongoose.models.Order.findById(orderId);
+    if (!staff) {
+      return res.status(404).json({ message: "staff not found" });
+    }
+    if (!order) {
+      return res.status(404).json({ message: "order not found" });
+    }
+    order.deliverd_by = staffId;
+    await order.save();
+    staff.orders.push(orderId);
+    await staff.save();
+    const expo = new Expo();
+    const message = {
+      to: expo_token,
+      sound: "default",
+      body: `
+     Vous avez une nouvelle commande à livrer`,
+
+      data: {
+        order_id: orderId,
+      },
+      title: "Nouvelle Commande",
+      priority: "high",
+    };
+    if (staff.expo_token.length > 0) {
+      await expo.sendPushNotificationsAsync([message]);
+    }
+    res.status(200).json({ message: "success" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const getStaffOrder = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const response = await Staff.findById(id).populate({
+      path: "orders",
+      populate: {
+        path: "user",
+      },
+    });
+    const lastItem = response[response.length - 1];
+    res.status(200).json({ response: lastItem });
+  } catch (error) {
+    res.json({ message: error.message });
+  }
+};
+
+const getAvailableDrivers = async (req, res) => {
+  try {
+    const response = await Staff.find({ role: "Livreur", is_available: true });
+    res.status(200).json(response);
+  } catch (error) {
+    res.json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginStaff,
   createStaff,
@@ -148,4 +212,7 @@ module.exports = {
   getStaffMembers,
   deleteStaffMember,
   updateStaffMember,
+  affectOrderToStaff,
+  getStaffOrder,
+  getAvailableDrivers,
 };

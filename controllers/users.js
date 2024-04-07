@@ -211,9 +211,10 @@ const getUserByToken = async (req, res) => {
 
 const updateUserExpoToken = async (req, res) => {
   const { id } = req.params;
-  const { expoToken } = req.body;
+  const { token } = req.body;
+  console.log(token);
   try {
-    const { error, user } = await updateUserExpoTokenService(id, expoToken);
+    const { error, user } = await updateUserExpoTokenService(id, token);
     if (error) {
       return res.status(404).json({ error });
     }

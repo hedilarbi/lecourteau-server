@@ -61,7 +61,7 @@ const createOrder = async (req, res) => {
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant
     );
-    console.log(restaurant.orders);
+
     restaurant.orders.push(response._id);
 
     await restaurant.save();
@@ -72,7 +72,9 @@ const createOrder = async (req, res) => {
       to: expo_token,
       sound: "default",
       body: `
-      Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${points} de fidélité.`,
+      Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${
+        points * 10
+      } de fidélité.`,
 
       data: {
         order_id: response._id,
@@ -99,7 +101,6 @@ const createOrder = async (req, res) => {
     }
     res.status(201).json({ user: newUser, orderId: response._id });
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

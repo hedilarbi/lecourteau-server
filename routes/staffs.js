@@ -30,7 +30,7 @@ router.post(
   createStaff
 );
 router.get("/:id/order", getStaffOrder);
-router.put("/affectOrder/${staffId}", affectOrderToStaff);
+router.put("/affectOrder/:id", affectOrderToStaff);
 router.post("/login", loginStaff);
 router.get("/staffByToken", getStaffByToken);
 router.delete("/delete/:id", deleteStaffMember);

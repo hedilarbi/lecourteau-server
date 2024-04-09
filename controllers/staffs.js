@@ -6,6 +6,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const saltRounds = 10;
 const { Expo } = require("expo-server-sdk");
+const { response } = require("express");
 const createStaff = async (req, res) => {
   let firebaseUrl = null;
   if (req.file) {
@@ -143,23 +144,34 @@ const getStaffByToken = async (req, res) => {
 
 const affectOrderToStaff = async (req, res) => {
   const { orderId } = req.body;
-  const { staffId } = req.params;
+  const { id } = req.params;
+
   try {
-    const staff = await Staff.findById(staffId);
-    const order = await mongoose.models.Order.findById(orderId);
+    const staff = await Staff.findById(id);
+    const order = await mongoose.models.Order.findByIdAndUpdate(
+      orderId,
+      {
+        delivery_by: id,
+      },
+      { new: true }
+    );
+
     if (!staff) {
       return res.status(404).json({ message: "staff not found" });
+    }
+    if (!staff.expo_token) {
+      return res.status(404).json({ message: "Livreur déconnecté" });
     }
     if (!order) {
       return res.status(404).json({ message: "order not found" });
     }
-    order.deliverd_by = staffId;
-    await order.save();
+
     staff.orders.push(orderId);
+    staff.is_available = true;
     await staff.save();
     const expo = new Expo();
     const message = {
-      to: expo_token,
+      to: staff.expo_token,
       sound: "default",
       body: `
      Vous avez une nouvelle commande à livrer`,
@@ -173,8 +185,9 @@ const affectOrderToStaff = async (req, res) => {
     if (staff.expo_token.length > 0) {
       await expo.sendPushNotificationsAsync([message]);
     }
-    res.status(200).json({ message: "success" });
+    res.status(200).json({ message: "order affected to staff" });
   } catch (error) {
+    console.log(error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -188,8 +201,9 @@ const getStaffOrder = async (req, res) => {
         path: "user",
       },
     });
-    const lastItem = response[response.length - 1];
-    res.status(200).json({ response: lastItem });
+    const lastItem = response.orders[response.orders.length - 1];
+
+    res.status(200).json(lastItem);
   } catch (error) {
     res.json({ message: error.message });
   }
@@ -197,7 +211,10 @@ const getStaffOrder = async (req, res) => {
 
 const getAvailableDrivers = async (req, res) => {
   try {
-    const response = await Staff.find({ role: "Livreur", is_available: true });
+    const response = await Staff.find({
+      role: "Livreur",
+      is_available: true,
+    }).select("name");
     res.status(200).json(response);
   } catch (error) {
     res.json({ message: error.message });

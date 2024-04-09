@@ -129,9 +129,12 @@ const getOrder = async (req, res) => {
       })
       .populate({ path: "offers", populate: "offer" })
       .populate("rewards")
-      .populate({ path: "user", select: "name phone_number email" });
+      .populate({ path: "user", select: "name phone_number email" })
+      .populate({ path: "delivery_by", select: "name" });
+    console.log(response);
     res.status(200).json(response);
   } catch (err) {
+    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };

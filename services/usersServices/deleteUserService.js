@@ -1,7 +1,12 @@
 const User = require("../../models/User");
 
 const deleteUserService = async (id) => {
-  await User.findByIdAndDelete(id);
+  try {
+    await User.findByIdAndDelete(id);
+    return { error: null };
+  } catch (err) {
+    return { error: err.message };
+  }
 };
 
 module.exports = {

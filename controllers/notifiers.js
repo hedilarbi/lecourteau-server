@@ -1,5 +1,6 @@
 const { Expo } = require("expo-server-sdk");
 const { default: mongoose } = require("mongoose");
+const sendNotificationsService = require("../services/notificationService.js/sendNotificationsService");
 const client = require("twilio")(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
@@ -8,31 +9,11 @@ require("dotenv/config");
 
 const sendNotifications = async (req, res) => {
   const { title, body } = req.body;
-  let messages = [];
-  let expo = new Expo();
 
   try {
-    const users = await mongoose.models.User.find();
-    const usersTokens = users.map((user) => user.expo_token);
-    for (let pushToken of usersTokens) {
-      if (!Expo.isExpoPushToken(pushToken)) {
-        console.error(`Push token ${pushToken} is not a valid Expo push token`);
-        continue;
-      }
-
-      messages.push({
-        to: pushToken,
-        sound: "default",
-        body,
-        title,
-      });
-    }
-    let chunks = expo.chunkPushNotifications(messages);
-    let tickets = [];
-    for (let chunk of chunks) {
-      let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-
-      tickets.push(...ticketChunk);
+    const { error } = await sendNotificationsService(title, body);
+    if (error) {
+      return res.json({ status: false, message: error.message });
     }
     res.json({ status: true, message: "Notifications sent" });
   } catch (err) {

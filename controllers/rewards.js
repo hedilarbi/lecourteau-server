@@ -1,13 +1,16 @@
 const Reward = require("../models/Reward");
 
+const {
+  createRewardService,
+} = require("../services/rewardServices/createRewardService");
+const {
+  deleteRewardsService,
+} = require("../services/rewardServices/deleteRewardsService");
+
 const createReward = async (req, res) => {
   const { item, points } = req.body;
   try {
-    const newReward = new Reward({
-      item,
-      points: parseFloat(points),
-    });
-    const response = await newReward.save();
+    const response = await createRewardService(item, points);
     res.status(201).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -30,7 +33,7 @@ const getRewards = async (req, res) => {
 const deleteReward = async (req, res) => {
   const { id } = req.params;
   try {
-    await Reward.findByIdAndDelete(id);
+    await deleteRewardsService(id);
     res.status(200).json({ success: false, message: "reward deleted" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

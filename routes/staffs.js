@@ -10,6 +10,7 @@ const {
   affectOrderToStaff,
   getAvailableDrivers,
   getStaffOrder,
+  getDriverOrders,
 } = require("../controllers/staffs");
 const {
   uploadImageToFirebase,
@@ -32,6 +33,7 @@ router.post(
 router.get("/:id/order", getStaffOrder);
 router.put("/affectOrder/:id", affectOrderToStaff);
 router.post("/login", loginStaff);
+router.get("/driver/orders/:id", getDriverOrders);
 router.get("/staffByToken", getStaffByToken);
 router.delete("/delete/:id", deleteStaffMember);
 router.get("/:id", getStaffMember);

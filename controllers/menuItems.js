@@ -1,6 +1,17 @@
 const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../firebase");
 const MenuItem = require("../models/MenuItem");
+const createMenuItemService = require("../services/menuItemsServices/createMenuItemService");
+const getItemsNamesService = require("../services/menuItemsServices/getItemsNamesService");
+const updateMenuItemService = require("../services/menuItemsServices/updateMenuItemService");
+const getMenuItemsService = require("../services/menuItemsServices/getMenuItemsService");
+const {
+  getMenuItemService,
+} = require("../services/menuItemsServices/getMenuItemService");
+const deleteMenuItemService = require("../services/menuItemsServices/deleteMenuItemService");
+const updateMenuItemAvailabilityService = require("../services/menuItemsServices/updateMenuItemAvailabilityService");
+const getNewItemsService = require("../services/menuItemsServices/getNewItemsService");
+const triMenutItemsService = require("../services/menuItemsServices/triMenuItemsService");
 
 const createMenuItem = async (req, res) => {
   let firebaseUrl = null;
@@ -10,46 +21,25 @@ const createMenuItem = async (req, res) => {
 
   const { name, description, prices, customization, category } = req.body;
 
-  let newPrices = [];
-  const pricesArray = JSON.parse(prices);
-  const customizationArray = JSON.parse(customization);
-
-  pricesArray.map((item) => {
-    if (item.price != "0")
-      newPrices.push({ size: item.size, price: parseFloat(item.price) });
-  });
-
   try {
-    const menuItem = await MenuItem.findOne({ name });
-    if (menuItem) {
-      res.status(400).json({ success: false, message: "Item already exists" });
-    }
-    const menuItems = await MenuItem.find();
+    let newPrices = [];
+    const pricesArray = JSON.parse(prices);
+    const customizationArray = JSON.parse(customization);
 
-    const order = menuItems.length;
-    const newMenuItem = new MenuItem({
-      name,
-      image: firebaseUrl,
-      prices: newPrices,
-      description,
-      customization: customizationArray,
-      category,
-      order,
+    pricesArray.map((item) => {
+      if (item.price != "0")
+        newPrices.push({ size: item.size, price: parseFloat(item.price) });
     });
-    const response = await newMenuItem.save();
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "menu_items"
+    const { error, response } = await createMenuItemService(
+      name,
+      firebaseUrl,
+      newPrices,
+      description,
+      customizationArray,
+      category
     );
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          restaurant.menu_items.push({
-            menuItem: response._id,
-            availability: true,
-          });
-          await restaurant.save();
-        })
-      );
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json(response);
   } catch (err) {
@@ -59,7 +49,10 @@ const createMenuItem = async (req, res) => {
 
 const getItemsNames = async (req, res) => {
   try {
-    const response = await MenuItem.find().select("name prices");
+    const { error, response } = await getItemsNamesService();
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -67,62 +60,38 @@ const getItemsNames = async (req, res) => {
 };
 
 const updateMenuItem = async (req, res) => {
-  const {
-    name,
-
-    prices,
-    description,
-
-    category,
-    customization,
-  } = req.body;
+  const { name, prices, description, category, customization } = req.body;
   let firebaseUrl = null;
   if (req.file) {
     firebaseUrl = req.file.firebaseUrl;
   }
   const { id } = req.params;
 
-  let newPrices = [];
-  const pricesArray = JSON.parse(prices);
-  const customizationArray = JSON.parse(customization);
-
-  pricesArray.map((item) => {
-    if (item.price != "0")
-      newPrices.push({ size: item.size, price: parseFloat(item.price) });
-  });
-
-  const newCustomization = customizationArray.map((custo) => {
-    return { _id: custo._id };
-  });
   try {
-    let response;
-    if (firebaseUrl) {
-      response = await MenuItem.findByIdAndUpdate(
-        id,
-        {
-          name,
-          image: firebaseUrl,
-          prices: newPrices,
-          description,
-          category,
-          customization: newCustomization,
-        },
-        { new: true }
-      ).populate("customization category");
-    } else {
-      response = await MenuItem.findByIdAndUpdate(
-        id,
-        {
-          name,
-          prices: newPrices,
-          description,
-          category,
-          customization: newCustomization,
-        },
-        { new: true }
-      ).populate("customization category");
-    }
+    let newPrices = [];
+    const pricesArray = JSON.parse(prices);
+    const customizationArray = JSON.parse(customization);
 
+    pricesArray.map((item) => {
+      if (item.price != "0")
+        newPrices.push({ size: item.size, price: parseFloat(item.price) });
+    });
+
+    const newCustomization = customizationArray.map((custo) => {
+      return { _id: custo._id };
+    });
+    const { error, response } = await updateMenuItemService(
+      id,
+      name,
+      firebaseUrl,
+      newPrices,
+      description,
+      category,
+      newCustomization
+    );
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -131,13 +100,10 @@ const updateMenuItem = async (req, res) => {
 
 const getMenuItems = async (req, res) => {
   try {
-    let response = await MenuItem.find()
-      .select("category name image prices is_available order")
-      .populate({
-        path: "category",
-        select: "name",
-      });
-    response.sort((a, b) => a.order - b.order);
+    const { error, response } = await getMenuItemsService();
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -148,16 +114,10 @@ const getMenuItem = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const response = await MenuItem.findById(id)
-
-      .populate({
-        path: "customization",
-        populate: {
-          path: "category",
-        },
-      })
-      .populate("category");
-
+    const { error, response } = await getMenuItemService(id);
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -168,26 +128,9 @@ const deleteMenuItem = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const response = await MenuItem.findById(id);
-    if (!response) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Article n'existe pas" });
-    }
-    await deleteImagesFromFirebase(response.image);
-    await MenuItem.findByIdAndDelete(id);
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "menu_items"
-    );
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          restaurant.menu_items = restaurant.menu_items.filter(
-            (restaurantOffer) => !restaurantOffer.menuItem.equals(id)
-          );
-          await restaurant.save();
-        })
-      );
+    const { error, response } = await deleteMenuItemService(id);
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json({ success: true, message: "item deleted" });
   } catch (err) {
@@ -209,11 +152,13 @@ const updateMenuItemAvailability = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   try {
-    const response = await MenuItem.findByIdAndUpdate(
+    const { error, response } = await updateMenuItemAvailabilityService(
       id,
-      { is_available: status },
-      { new: true }
+      status
     );
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
+    }
     res.json(response);
   } catch (err) {
     res.json({ message: err.message, status: false });
@@ -221,10 +166,10 @@ const updateMenuItemAvailability = async (req, res) => {
 };
 const getNewItems = async (req, res) => {
   try {
-    const response = await MenuItem.find()
-      .sort({ _id: -1 })
-      .limit(3)
-      .select("name image");
+    const { error, response } = await getNewItemsService();
+    if (error) {
+      return res.status(400).json({ status: false, message: error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ status: false, message: err.message });
@@ -234,25 +179,10 @@ const triMenutItems = async (req, res) => {
   const { from, to } = req.body;
 
   try {
-    let menuitems = await MenuItem.find();
-
-    const indexFrom = menuitems.findIndex((item) => item.order === from);
-    const indexTo = menuitems.findIndex((item) => item.order === to);
-
-    if (indexFrom !== -1 && indexTo !== -1) {
-      menuitems[indexFrom].order = to;
-      menuitems[indexTo].order = from;
-
-      await Promise.all([
-        menuitems[indexFrom].save(),
-        menuitems[indexTo].save(),
-      ]);
-    } else {
-      return res
-        .status(400)
-        .json({ status: false, message: "Invalid 'from' or 'to' values" });
+    const { error } = await triMenutItemsService(from, to);
+    if (error) {
+      return res.status(400).json({ status: false, message: error });
     }
-
     res.status(200).json({ message: "success" });
   } catch (err) {
     res.status(500).json({ status: false, message: err.message });

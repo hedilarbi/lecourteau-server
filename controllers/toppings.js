@@ -1,46 +1,40 @@
 const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../firebase");
 const Topping = require("../models/Topping");
+const {
+  getToppingService,
+} = require("../services/toppingsServices/getToppingService");
+const {
+  updateToppingService,
+} = require("../services/toppingsServices/updateToppingService");
+const {
+  getToppingsService,
+} = require("../services/toppingsServices/getToppingsService");
+const {
+  deleteToppingService,
+} = require("../services/toppingsServices/deleteToppingService");
+const {
+  createToppingService,
+} = require("../services/toppingsServices/createToppingService");
 
 const createTopping = async (req, res) => {
   let firebaseUrl = null;
   if (req.file) {
     firebaseUrl = req.file.firebaseUrl;
   }
-
-  const { name, price, category } = req.body;
-
+  const { name, category, price } = req.body;
   try {
-    const topping = await Topping.findOne({ name });
-    if (topping) {
-      return res
-        .status(400)
-        .json({ success: false, message: "La personalisation existe déjà" });
-    }
-    const newTopping = new Topping({
+    const { error, response } = await createToppingService(
       name,
-      image: firebaseUrl,
+      price,
       category,
-      price: parseFloat(price),
-    });
-    const response = await newTopping.save();
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "toppings"
+      firebaseUrl
     );
 
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          restaurant.toppings.push({
-            topping: response._id,
-            availability: true,
-          });
-          await restaurant.save();
-        })
-      );
+    if (error) {
+      return res.status(400).json({ message: error });
     }
-
-    res.status(201).json(response);
+    res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -48,8 +42,7 @@ const createTopping = async (req, res) => {
 
 const getToppings = async (req, res) => {
   try {
-    let response = await Topping.find().populate("category");
-    response = response.reverse();
+    const { response } = await getToppingsService();
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -59,7 +52,7 @@ const getToppings = async (req, res) => {
 const getTopping = async (req, res) => {
   const { id } = req.params;
   try {
-    const response = await Topping.findById(id);
+    const { response } = await getToppingService(id);
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -74,21 +67,14 @@ const updateTopping = async (req, res) => {
   const { name, category, price } = req.body;
   const { id } = req.params;
   try {
-    let response;
-    if (firebaseUrl) {
-      response = await Topping.findByIdAndUpdate(
-        id,
-        { name, image: firebaseUrl, category, price: parseFloat(price) },
-        { new: true }
-      );
-    } else {
-      response = await Topping.findByIdAndUpdate(
-        id,
-        { name, category, price: parseFloat(price) },
-        { new: true }
-      );
-    }
-    res.json(response);
+    const { response } = await updateToppingService(
+      id,
+      name,
+      price,
+      category,
+      firebaseUrl
+    );
+    res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -98,28 +84,11 @@ const deleteTopping = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const response = await Topping.findById(id);
-    if (!response) {
-      return res
-        .status(404)
-        .json({ success: false, message: "La personalisation n'existe pas" });
+    const { error, status } = await deleteToppingService(id);
+    if (error) {
+      return res.status(400).json({ message: error });
     }
-    await deleteImagesFromFirebase(response.image);
-    await Topping.findByIdAndDelete(id);
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "toppings"
-    ); // Retrieve all restaurants
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          // Find and remove the offer from the offers array
-          restaurant.toppings = restaurant.toppings.filter(
-            (restaurantOffer) => !restaurantOffer.topping.equals(id)
-          );
-          await restaurant.save();
-        })
-      );
-    }
+
     res.status(200).json({ message: "success" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

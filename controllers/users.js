@@ -1,5 +1,3 @@
-const User = require("../models/User");
-const jwt = require("jsonwebtoken");
 const {
   updateUserService,
 } = require("../services/usersServices/updateUserService");
@@ -46,7 +44,10 @@ const createUser = async (req, res) => {
   const { phone_number } = req.body;
 
   try {
-    const { user, token } = await createUserService(phone_number);
+    const { user, token, error } = await createUserService(phone_number);
+    if (error) {
+      return res.status(400).json(error);
+    }
     res.status(200).json({ user, token });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -58,8 +59,11 @@ const updateUser = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const updatedUser = await updateUserService(id, email, name);
-    res.status(200).json(updatedUser);
+    const { response, error } = await updateUserService(id, email, name);
+    if (error) {
+      return res.status(400).json(error);
+    }
+    res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -87,7 +91,10 @@ const deleteUser = async (req, res) => {
   const { id } = req.params;
 
   try {
-    await deleteUserService(id);
+    const { error } = await deleteUserService(id);
+    if (error) {
+      return res.status(404).json(error);
+    }
     res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -96,8 +103,12 @@ const deleteUser = async (req, res) => {
 
 const getUsers = async (req, res) => {
   try {
-    const users = await getUsersService();
-    res.status(200).json(users);
+    const { response, error } = await getUsersService();
+    if (error) {
+      return res.status(404).json(error);
+    }
+
+    res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -106,8 +117,9 @@ const getUsers = async (req, res) => {
 const getUser = async (req, res) => {
   const { id } = req.params;
   try {
-    const user = await getUserService(id);
-    res.status(200).json(user);
+    const { response } = await getUserService(id);
+
+    res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -147,7 +159,7 @@ const removeFromFavorites = async (req, res) => {
 const getOrdersList = async (req, res) => {
   const { id } = req.params;
   try {
-    const user = await getOrdersListService(id);
+    const { user } = await getOrdersListService(id);
     res.status(200).json(user);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -212,7 +224,7 @@ const getUserByToken = async (req, res) => {
 const updateUserExpoToken = async (req, res) => {
   const { id } = req.params;
   const { token } = req.body;
-  console.log(token);
+
   try {
     const { error, user } = await updateUserExpoTokenService(id, token);
     if (error) {

@@ -7,6 +7,7 @@ const {
   updateStatus,
   updatePrice,
   reviewOrder,
+  orderDelivered,
 } = require("../controllers/orders");
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.post("/create", createOrder);
 router.delete("/delete/:id", deleteOrder);
 router.put("/review/:id", reviewOrder);
 router.put("/update/status/:id", updateStatus);
+router.put("/update/delivered/:orderId", orderDelivered);
 router.put("/update/price/:id", updatePrice);
 router.get("/:id", getOrder);
 

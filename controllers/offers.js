@@ -1,6 +1,11 @@
 const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../firebase");
 const Offer = require("../models/Offer");
+const createOfferService = require("../services/offersServices/createOfferService");
+const getOffersService = require("../services/offersServices/getOffersService");
+const getOfferService = require("../services/offersServices/getOfferService");
+const deleteOfferService = require("../services/offersServices/deleteOfferService");
+const updateOfferService = require("../services/offersServices/updateOfferService");
 
 const createOffer = async (req, res) => {
   let firebaseUrl = null;
@@ -9,10 +14,8 @@ const createOffer = async (req, res) => {
   }
 
   const { name, expireAt, items, price, customizations } = req.body;
-
   const parsedItems = JSON.parse(items);
   const parsedCustomization = JSON.parse(customizations);
-
   const itemList = parsedItems.map((item) => {
     return { item: item.item._id, quantity: item.quantity, size: item.size };
   });
@@ -20,31 +23,16 @@ const createOffer = async (req, res) => {
     return item._id;
   });
   try {
-    const offer = await Offer.findOne({ name });
-    if (offer) {
-      return res.json({ message: "categorie existe déja" });
-    }
-    const newOffer = new Offer({
+    const { response, error } = await createOfferService(
       name,
-      image: firebaseUrl,
-
-      expireAt: new Date(expireAt),
-      items: itemList,
-      customizations: customizationList,
-      price: parseFloat(price),
-      createdAt: new Date(),
-    });
-    const response = await newOffer.save();
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "offers"
+      expireAt,
+      itemList,
+      price,
+      customizationList,
+      firebaseUrl
     );
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          restaurant.offers.push({ offer: response._id, availability: true });
-          await restaurant.save();
-        })
-      );
+    if (error) {
+      return res.status(500).json({ success: false, error });
     }
     res.status(201).json(response);
   } catch (err) {
@@ -54,8 +42,10 @@ const createOffer = async (req, res) => {
 
 const getOffers = async (req, res) => {
   try {
-    const data = await Offer.find();
-    const response = data.reverse();
+    const { response, error } = await getOffersService();
+    if (error) {
+      return res.status(500).json({ success: false, error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -66,13 +56,11 @@ const getOffer = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const response = await Offer.findById(id)
-      .populate({
-        path: "items",
-        populate: "item",
-      })
-      .populate({ path: "customizations", populate: "category" });
+    const { response, error } = await getOfferService(id);
 
+    if (error) {
+      return res.status(500).json({ success: false, error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -82,27 +70,9 @@ const getOffer = async (req, res) => {
 const deleteOffer = async (req, res) => {
   const { id } = req.params;
   try {
-    const response = await Offer.findById(id);
-    if (!response) {
-      return res
-        .status(404)
-        .json({ success: false, message: "L'Offre n'existe pas" });
-    }
-    await deleteImagesFromFirebase(response.image);
-    await Offer.findByIdAndDelete(id);
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "offers"
-    ); // Retrieve all restaurants
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          // Find and remove the offer from the offers array
-          restaurant.offers = restaurant.offers.filter(
-            (restaurantOffer) => !restaurantOffer.offer.equals(id)
-          );
-          await restaurant.save();
-        })
-      );
+    const { error, response } = await deleteOfferService(id);
+    if (error) {
+      return res.status(500).json({ success: false, error });
     }
 
     res.status(200).json({ message: "offer deleted", success: true });
@@ -137,23 +107,18 @@ const updateOffer = async (req, res) => {
     return { item: custo.item._id, size: custo.size, quantity: custo.quantity };
   });
   try {
-    const response = await Offer.findByIdAndUpdate(
+    const { response, error } = await updateOfferService(
       id,
-      {
-        image: firebaseUrl,
-        name,
-        price: parseFloat(price),
-        exprireAt: new Date(exprireAt),
-        items: newItems,
-        customizations: newCustomizations,
-      },
-      { new: true }
-    )
-      .populate({
-        path: "items",
-        populate: "item",
-      })
-      .populate("customizations");
+      name,
+      newItems,
+      newCustomizations,
+      price,
+      exprireAt,
+      firebaseUrl
+    );
+    if (error) {
+      return res.status(500).json({ success: false, error });
+    }
 
     res.status(200).json(response);
   } catch (err) {

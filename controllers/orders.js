@@ -1,106 +1,21 @@
-const { default: mongoose, Schema } = require("mongoose");
-const Order = require("../models/Order");
-const generateRandomCode = require("../utils/generateOrderCode");
-const { Expo } = require("expo-server-sdk");
-const {
-  IN_DELIVERY,
-  READY,
-  PICKEDUP,
-  DELIVERED,
-  CANCELED,
-  ON_GOING,
-} = require("../utils/constants");
+const createOrderService = require("../services/ordersServices/createOrderService");
+const getOrdersService = require("../services/ordersServices/getOrdersService");
+const getOrderService = require("../services/ordersServices/getOrderService");
+const deleteOrderService = require("../services/ordersServices/deleteOrderService");
+const updateStatusService = require("../services/ordersServices/updateStatusService");
+const updatePriceService = require("../services/ordersServices/updatePriceService");
+const orderDeliveredService = require("../services/ordersServices/orderDeliveredService");
+const reviewOrderService = require("../services/ordersServices/reviewOrderService");
 
 const createOrder = async (req, res) => {
   const { order } = req.body;
 
   try {
-    const code = generateRandomCode(8);
-    const newOrder = new Order({
-      user: order.order.user_id,
-      orderItems: order.order.orderItems,
-      total_price: parseFloat(order.order.total),
-      sub_total: parseFloat(order.order.subTotal),
-      delivery_fee: parseFloat(order.order.deliveryFee),
-      type: order.type,
-      coords: {
-        latitude: order.coords.latitude,
-        longitude: order.coords.longitude,
-      },
-      code: code.toUpperCase(),
-      address: order.address,
-      istructions: order.order.istructions,
-      status: ON_GOING,
-      offers: order.order.offers,
-      rewards: order.order.rewards,
-      createdAt: new Date().toISOString(),
-      restaurant: order.restaurant,
-    });
-    const response = await newOrder.save();
-
-    const user = await mongoose.models.User.findById(order.order.user_id);
-
-    user.orders.push(response._id);
-
-    if (order.order.rewards.length > 0) {
-      let pointsToremove = 0;
-      order.order.rewards.map((item) => (pointsToremove += item.points));
-
-      user.fidelity_points = user.fidelity_points - parseInt(pointsToremove);
+    const { error, user, response } = await createOrderService(order);
+    if (error) {
+      return res.status(400).json({ success: false, error });
     }
-    let points = 0;
-    if (order.order.offers.length > 0) {
-      order.order.offers.map((item) => (points += item.price));
-    }
-    if (order.order.orderItems.length > 0) {
-      order.order.orderItems.map((item) => (points += item.price));
-    }
-    user.fidelity_points = user.fidelity_points + parseInt(points) * 10;
-
-    const newUser = await user.save();
-    const restaurant = await mongoose.models.Restaurant.findById(
-      order.restaurant
-    );
-
-    restaurant.orders.push(response._id);
-
-    await restaurant.save();
-
-    const expo_token = user.expo_token;
-    const expo = new Expo();
-    const userMessage = {
-      to: expo_token,
-      sound: "default",
-      body: `
-      Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${
-        points * 10
-      } de fidélité.`,
-
-      data: {
-        order_id: response._id,
-      },
-      title: "Nouvelle Commande",
-      priority: "high",
-    };
-    const dashboardMessage = {
-      to: restaurant.expo_token,
-
-      body: `Nouvelle commande en attente, code:${code.toUpperCase()}`,
-      channel: "default",
-      data: {
-        order_id: response._id,
-      },
-      title: "Nouvelle Commande",
-      priority: "high",
-    };
-
-    if (expo_token.length > 0) {
-      await expo.sendPushNotificationsAsync([userMessage]);
-    }
-    if (restaurant.expo_token?.length > 0) {
-      await expo.sendPushNotificationsAsync([dashboardMessage]);
-    }
-    res.status(201).json({ user: newUser, orderId: response._id });
+    res.status(201).json({ user, orderId: response._id });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -108,10 +23,10 @@ const createOrder = async (req, res) => {
 
 const getOrders = async (req, res) => {
   try {
-    const data = await Order.find().select(
-      "status createdAt total_price type code"
-    );
-    const response = data.reverse();
+    const { response, error } = await getOrdersService();
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -122,19 +37,13 @@ const getOrder = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const response = await Order.findById(id)
-      .populate({
-        path: "orderItems",
-        populate: "customizations item",
-      })
-      .populate({ path: "offers", populate: "offer" })
-      .populate("rewards")
-      .populate({ path: "user", select: "name phone_number email" })
-      .populate({ path: "delivery_by", select: "name" });
-    console.log(response);
+    const { response, error } = await getOrderService(id);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
+
     res.status(200).json(response);
   } catch (err) {
-    console.log(err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -143,7 +52,10 @@ const deleteOrder = async (req, res) => {
   const { id } = req.params;
 
   try {
-    await Order.findByIdAndDelete(id);
+    const { error } = await deleteOrderService(id);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
     res.status(200).json({ message: "order deleted", success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -154,34 +66,10 @@ const updateStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   try {
-    const response = await Order.findByIdAndUpdate(
-      id,
-      { status },
-      { new: true }
-    );
-    const user = await mongoose.models.User.findById(response.user);
-    let message = {};
-    if (status === IN_DELIVERY || status === DELIVERED) {
-      const expo_token = user.expo_token;
-      const expo = new Expo();
-
-      message = {
-        to: expo_token,
-        sound: "default",
-        body:
-          status === IN_DELIVERY
-            ? `Votre commande est en cours de livraison`
-            : "Bon appétit!",
-        data: {
-          order_id: id,
-        },
-
-        priority: "high",
-      };
-
-      const ticket = await expo.sendPushNotificationsAsync([message]);
+    const { error } = updateStatusService(id, status);
+    if (error) {
+      return res.status(400).json({ success: false, error });
     }
-
     res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -191,12 +79,26 @@ const updatePrice = async (req, res) => {
   const { id } = req.params;
   const { price } = req.body;
   try {
-    const response = await Order.findByIdAndUpdate(
-      id,
-      { total_price: parseFloat(price) },
-      { new: true }
-    );
+    const { response, error } = await updatePriceService(id, price);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
     res.status(200).json(response);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const orderDelivered = async (req, res) => {
+  const { orderId } = req.params;
+  const { staffId } = req.body;
+
+  try {
+    const { error } = await orderDeliveredService(orderId, staffId);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
+    res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -211,11 +113,10 @@ const reviewOrder = async (req, res) => {
     status: true,
   };
   try {
-    const response = await Order.findByIdAndUpdate(
-      id,
-      { review },
-      { new: true }
-    );
+    const { error } = reviewOrderService(id, review);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
     res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -230,4 +131,5 @@ module.exports = {
   updateStatus,
   updatePrice,
   reviewOrder,
+  orderDelivered,
 };

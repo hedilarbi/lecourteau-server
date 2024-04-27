@@ -1,3 +1,5 @@
+const MenuItem = require("../../models/MenuItem");
+
 const getMenuItemService = async (id) => {
   try {
     const response = await MenuItem.findById(id)

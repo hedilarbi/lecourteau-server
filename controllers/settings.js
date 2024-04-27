@@ -19,7 +19,7 @@ const getSetting = async (req, res) => {
 const updateSettings = async (req, res) => {
   const { id } = req.params;
   const { settings } = req.body;
-  console.log(settings);
+
   try {
     const { response, error } = await updateSettingsService(id, settings);
     if (error) {

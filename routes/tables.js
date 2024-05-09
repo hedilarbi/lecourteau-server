@@ -4,10 +4,12 @@ const {
   getTables,
   getTable,
   addItemToTableBasket,
-  removeItemFromTableBasket,
+  removeItemWithIDFromTableBasket,
   clearTableBasket,
   updateItemInTableBasket,
   getTableBasket,
+  removeItemWithUIDFromTableBasket,
+  getItemFromBasket,
 } = require("../controllers/tables");
 const router = express.Router();
 
@@ -15,9 +17,11 @@ router.post("/", createTable);
 router.get("/", getTables);
 router.get("/:number", getTable);
 router.get("/:number/basket", getTableBasket);
-router.put("/:number/add", addItemToTableBasket);
-router.put("/:number/remove", removeItemFromTableBasket);
-router.put("/:number/clear", clearTableBasket);
-router.put("/:number/update", updateItemInTableBasket);
+router.put("/:number/basket/add", addItemToTableBasket);
+router.put("/:number/basket/removeWithID", removeItemWithIDFromTableBasket);
+router.put("/:number/basket/removeWithUID", removeItemWithUIDFromTableBasket);
+router.put("/:number/basket/clear", clearTableBasket);
+router.put("/:number/basket/update", updateItemInTableBasket);
+router.get("/:number/basket/item/:uid", getItemFromBasket);
 
 module.exports = router;

@@ -29,7 +29,7 @@ const TableSchema = new Schema(
       },
     ],
   },
-  { timestamps: true }
+  { timestamps: true, versionKey: false }
 );
 
 module.exports = model("Table", TableSchema);

@@ -28,27 +28,12 @@ const getInititalStats = async (req, res) => {
 
 const getRestaurantStats = async (req, res) => {
   try {
-    // const usersCount = await mongoose.models.User.countDocuments();
-    // const ordersCount = await mongoose.models.Order.countDocuments();
-
-    // const onGoingOrders = await mongoose.models.Order.find({
-    //   status: ON_GOING,
-    // });
-
-    // const income = await mongoose.models.Order.aggregate([
-    //   {
-    //     $group: {
-    //       _id: null,
-    //       total: { $sum: "$total_price" },
-    //     },
-    //   },
-    // ]);
-
-    // const revenue = income.length ? income[0].total.toFixed(2) : 0;
     const { id } = req.params;
+
     const restaurent = await mongoose.models.Restaurant.findById(id).populate(
       "orders"
     );
+
     const ordersCount = restaurent.orders.length;
     let onGoingOrders = restaurent.orders.filter(
       (order) => order.status === ON_GOING
@@ -68,8 +53,6 @@ const getRestaurantStats = async (req, res) => {
 
 const testNotif = async (req, res) => {
   try {
-    const serverKey = require("../lecourteau-dashboard-firebase-adminsdk-v78d7-b13b34a340.json");
-
     const response = await fetch("https://fcm.googleapis.com/fcm/send", {
       method: "POST",
       headers: {

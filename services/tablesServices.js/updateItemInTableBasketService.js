@@ -8,8 +8,15 @@ const updateItemInTableBasketService = async (number, item) => {
     }
     const index = table.basket.findIndex((el) => el.uid === item.uid);
     table.basket[index] = item;
-    const response = await table.save();
-    return { response };
+    await table.save();
+    const { basket } = await Table.findOne({ number }).populate({
+      path: "basket",
+      populate: {
+        path: "customizations item",
+      },
+    });
+    const total = basket.reduce((acc, item) => acc + item.price, 0);
+    return { response: { total, basket } };
   } catch (err) {
     return { error: err.message };
   }

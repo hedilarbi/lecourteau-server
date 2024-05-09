@@ -104,7 +104,7 @@ const updateStaffMember = async (req, res) => {
 };
 const loginStaff = async (req, res) => {
   const { username, password, expoToken } = req.body;
-  console.log("expoToken", expoToken);
+
   try {
     const { error, staff, token } = await loginStaffService(
       username,

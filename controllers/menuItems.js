@@ -1,5 +1,3 @@
-const { default: mongoose } = require("mongoose");
-const { deleteImagesFromFirebase } = require("../firebase");
 const MenuItem = require("../models/MenuItem");
 const createMenuItemService = require("../services/menuItemsServices/createMenuItemService");
 const getItemsNamesService = require("../services/menuItemsServices/getItemsNamesService");
@@ -176,10 +174,10 @@ const getNewItems = async (req, res) => {
   }
 };
 const triMenutItems = async (req, res) => {
-  const { from, to } = req.body;
+  const { list } = req.body;
 
   try {
-    const { error } = await triMenutItemsService(from, to);
+    const { error } = await triMenutItemsService(list);
     if (error) {
       return res.status(400).json({ status: false, message: error });
     }

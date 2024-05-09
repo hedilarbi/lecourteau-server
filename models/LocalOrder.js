@@ -2,10 +2,7 @@ const { Schema, model } = require("mongoose");
 
 const LocalOrderSchema = new Schema(
   {
-    table: {
-      type: Schema.Types.ObjectId,
-      ref: "Table",
-    },
+    table: Number,
     items: [
       {
         item: {

@@ -6,7 +6,7 @@ const generateRandomCode = require("../../utils/generateOrderCode");
 
 const createOrderService = async (order) => {
   let rewardsList = [];
-
+  console.log(order);
   if (order.order.rewards.length > 0) {
     order.order.rewards.map((item) => rewardsList.push(item.id));
   }
@@ -32,6 +32,7 @@ const createOrderService = async (order) => {
       rewards: rewardsList,
       createdAt: new Date().toISOString(),
       restaurant: order.restaurant,
+      discount: order.order.discount ? order.order.discount : 0,
     });
     const response = await newOrder.save();
 
@@ -49,11 +50,16 @@ const createOrderService = async (order) => {
       order.order.orderItems.map((item) => (points += item.price));
     }
 
+    points = points - (points * order.order.discount) / 100;
+
     const totalPoints = parseInt(points) * 10 - parseInt(pointsToremove);
 
     user.fidelity_points = user.fidelity_points + totalPoints;
 
     user.orders.push(response._id);
+    if (user.firstOrderDiscountApplied === false) {
+      user.firstOrderDiscountApplied = true;
+    }
     const newUser = await user.save();
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant
@@ -71,7 +77,7 @@ const createOrderService = async (order) => {
       body: `
             Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${
               points * 10
-            } de fidélité.`,
+            } points de fidélité.`,
 
       data: {
         order_id: response._id,

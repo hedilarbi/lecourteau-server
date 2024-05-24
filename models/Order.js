@@ -72,6 +72,7 @@ const orderSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: "Restaurant",
   },
+  discount: Number,
 });
 
 module.exports = model("Order", orderSchema);

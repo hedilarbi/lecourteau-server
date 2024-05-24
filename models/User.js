@@ -37,6 +37,10 @@ const userSchema = new Schema({
   },
   expo_token: String,
   auth_mehtod: String,
+  firstOrderDiscountApplied: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 module.exports = model("User", userSchema);

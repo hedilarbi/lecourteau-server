@@ -39,6 +39,7 @@ const e = require("express");
 const {
   addToFavoritesService,
 } = require("../services/usersServices/addToFavoritesService");
+const User = require("../models/User");
 
 const createUser = async (req, res) => {
   const { phone_number } = req.body;
@@ -236,6 +237,18 @@ const updateUserExpoToken = async (req, res) => {
   }
 };
 
+const updateUserDiscount = async (req, res) => {
+  try {
+    const response = await User.updateMany(
+      {},
+      { firstOrderDiscountApplied: false }
+    );
+    res.status(200).json(response);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -251,4 +264,5 @@ module.exports = {
   getUserByToken,
   setUserInfo,
   updateUserExpoToken,
+  updateUserDiscount,
 };

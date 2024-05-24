@@ -15,12 +15,13 @@ const {
   getOrdersList,
   setUserInfo,
   updateUserExpoToken,
+  updateUserDiscount,
 } = require("../controllers/users");
 const router = express.Router();
 
 router.get("/", getUsers);
 router.get("/userByToken", getUserByToken);
-
+router.put("/update/discount", updateUserDiscount);
 router.post("/create", createUser);
 router.get("/favorites/:id", getFavorites);
 router.put("/favorites/update/add/:id", addToFavorites);

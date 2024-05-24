@@ -6,7 +6,7 @@ const generateRandomCode = require("../../utils/generateOrderCode");
 
 const createOrderService = async (order) => {
   let rewardsList = [];
-  console.log(order);
+
   if (order.order.rewards.length > 0) {
     order.order.rewards.map((item) => rewardsList.push(item.id));
   }

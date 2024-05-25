@@ -2,7 +2,8 @@ const Order = require("../../models/Order");
 
 const getOrdersService = async () => {
   try {
-    const response = await Order.find();
+    const orders = await Order.find();
+    const response = orders.reverse();
     return { response };
   } catch (err) {
     return { error: err.message };

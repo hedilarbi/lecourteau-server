@@ -22,7 +22,7 @@ const router = express.Router();
 
 router.get("/", getStaffMembers);
 router.get("/available", getAvailableDrivers);
-router.put("/update/:id", updateStaffMember);
+router.put("/update/:id", Multer.single("file"), updateStaffMember);
 router.post(
   "/create",
   Multer.single("file"),

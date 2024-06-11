@@ -7,7 +7,8 @@ const createStaffService = async (
   username,
   password,
   role,
-  restaurant
+  restaurant,
+  firebaseUrl
 ) => {
   try {
     const verifyStaff = await Staff.findOne({ username });
@@ -17,22 +18,40 @@ const createStaffService = async (
     }
 
     const hashedPasword = await bcrypt.hash(password, saltRounds);
+    if (firebaseUrl) {
+      const newStaff = new Staff({
+        name,
+        restaurant,
+        username,
+        password: hashedPasword,
+        role,
+        image: firebaseUrl,
+        createdAt: new Date().toISOString(),
+      });
 
-    const newStaff = new Staff({
-      name,
-      restaurant,
-      username,
-      password: hashedPasword,
-      role,
-      createdAt: new Date().toISOString(),
-    });
+      const response = await newStaff.save();
 
-    const response = await newStaff.save();
+      const restau = await mongoose.models.Restaurant.findById(restaurant);
+      restau.staff.push(response._id);
+      await restau.save();
+      return { response };
+    } else {
+      const newStaff = new Staff({
+        name,
+        restaurant,
+        username,
+        password: hashedPasword,
+        role,
+        createdAt: new Date().toISOString(),
+      });
 
-    const restau = await mongoose.models.Restaurant.findById(restaurant);
-    restau.staff.push(response._id);
-    await restau.save();
-    return { ...response };
+      const response = await newStaff.save();
+
+      const restau = await mongoose.models.Restaurant.findById(restaurant);
+      restau.staff.push(response._id);
+      await restau.save();
+      return { response };
+    }
   } catch (err) {
     return { error: err.message };
   }

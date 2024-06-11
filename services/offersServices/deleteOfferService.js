@@ -17,7 +17,7 @@ const deleteOfferService = async (id) => {
       await Promise.all(
         restaurants.map(async (restaurant) => {
           restaurant.offers = restaurant.offers.filter(
-            (restaurantOffer) => !restaurantOffer.offer.equals(id)
+            (restaurantOffer) => restaurantOffer.offer.toString() !== id
           );
           await restaurant.save();
         })

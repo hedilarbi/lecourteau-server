@@ -6,6 +6,7 @@ const updateStatusService = require("../services/ordersServices/updateStatusServ
 const updatePriceService = require("../services/ordersServices/updatePriceService");
 const orderDeliveredService = require("../services/ordersServices/orderDeliveredService");
 const reviewOrderService = require("../services/ordersServices/reviewOrderService");
+const updateOrderPriceAndStatusService = require("../services/ordersServices/updateOrderPriceAndStatusService");
 
 const createOrder = async (req, res) => {
   const { order } = req.body;
@@ -89,6 +90,22 @@ const updatePrice = async (req, res) => {
   }
 };
 
+const updatePriceAndStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status, price } = req.body;
+
+  try {
+    const { error } = await updateOrderPriceAndStatusService(id, status, price);
+    if (error) {
+      console.log("error", error);
+      return res.status(400).json({ success: false, error });
+    }
+    res.status(200).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 const orderDelivered = async (req, res) => {
   const { orderId } = req.params;
   const { staffId } = req.body;
@@ -132,4 +149,5 @@ module.exports = {
   updatePrice,
   reviewOrder,
   orderDelivered,
+  updatePriceAndStatus,
 };

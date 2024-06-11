@@ -5,6 +5,7 @@ const optimizeImage = (req, res, next) => {
     return next();
   }
   const image = req.file;
+
   sharp(image.buffer)
     .resize(600, 400)
     .toFormat("jpeg")
@@ -16,6 +17,7 @@ const optimizeImage = (req, res, next) => {
       req.file.mimetype = "image/jpeg";
       next();
     })
+
     .catch((err) => {
       next(err);
     });

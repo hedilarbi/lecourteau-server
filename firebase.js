@@ -15,16 +15,19 @@ const bucket = admin.storage().bucket();
 const uploadImageToFirebase = (req, res, next) => {
   if (!req.file) return next();
   const image = req.file;
-  const imageName = Date.now() + "." + image.originalname.split(".").pop();
 
+  const imageName = Date.now() + "." + image.originalname.split(".").pop();
   const file = bucket.file(imageName);
+
   const stream = file.createWriteStream({
     metadata: {
       contentType: image.mimetype,
     },
   });
 
-  stream.on("error", (e) => {});
+  stream.on("error", (e) => {
+    res.status(404).json({ success: false, message: e.message });
+  });
 
   stream.on("finish", async () => {
     await file.makePublic();
@@ -46,7 +49,7 @@ const updateMenuItemImageInFirebase = async (req, res, next) => {
   try {
     await oldImageFile.delete();
   } catch (err) {
-    res.status(404).json({ success: false, message: err.message });
+    console.log("err", err);
   }
   const image = req.file;
   const imageName = Date.now() + "." + image.originalname.split(".").pop();

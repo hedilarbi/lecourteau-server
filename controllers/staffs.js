@@ -88,6 +88,7 @@ const deleteStaffMember = async (req, res) => {
 const updateStaffMember = async (req, res) => {
   const { id } = req.params;
   const { name, username, restaurant, role } = req.body;
+
   try {
     const { response } = await updateStaffMemberService(
       id,
@@ -125,7 +126,11 @@ const getStaffByToken = async (req, res) => {
   const token = req.headers.authorization.split(" ")[1];
 
   try {
-    const { response } = await getStaffByTokenService(token);
+    const { response, error } = await getStaffByTokenService(token);
+    if (error) {
+      return res.status(400).json({ message: error });
+    }
+
     res.status(200).json(response);
   } catch (error) {
     res.status(500).json({ message: error.message });

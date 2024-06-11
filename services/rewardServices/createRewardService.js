@@ -7,7 +7,8 @@ const createRewardService = async (item, points) => {
       points: parseInt(points),
     });
 
-    const response = await newReward.save();
+    await newReward.save();
+    const response = await newReward.populate("item");
     return { response };
   } catch (err) {
     return { error: err.message };

@@ -9,8 +9,9 @@ const {
 
 const createReward = async (req, res) => {
   const { item, points } = req.body;
+
   try {
-    const response = await createRewardService(item, points);
+    const { response } = await createRewardService(item, points);
     res.status(201).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -32,9 +33,10 @@ const getRewards = async (req, res) => {
 
 const deleteReward = async (req, res) => {
   const { id } = req.params;
+
   try {
     await deleteRewardsService(id);
-    res.status(200).json({ success: false, message: "reward deleted" });
+    res.status(200).json({ success: true, message: "reward deleted" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

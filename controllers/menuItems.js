@@ -63,6 +63,7 @@ const updateMenuItem = async (req, res) => {
   if (req.file) {
     firebaseUrl = req.file.firebaseUrl;
   }
+
   const { id } = req.params;
 
   try {
@@ -114,7 +115,7 @@ const getMenuItem = async (req, res) => {
   try {
     const { error, response } = await getMenuItemService(id);
     if (error) {
-      return res.status(400).json({ success: false, message: error });
+      return res.status(400).json(error);
     }
     res.status(200).json(response);
   } catch (err) {
@@ -128,11 +129,11 @@ const deleteMenuItem = async (req, res) => {
   try {
     const { error, response } = await deleteMenuItemService(id);
     if (error) {
-      return res.status(400).json({ success: false, message: error });
+      return res.status(400).json(error);
     }
     res.status(200).json({ success: true, message: "item deleted" });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ error: err.message });
   }
 };
 

@@ -14,6 +14,7 @@ const createCategory = async (req, res) => {
   try {
     const { error, response } = await createCategoryService(name, firebaseUrl);
     if (error) {
+      console.log(error);
       return res.status(400).json({ success: false, message: error });
     }
 
@@ -82,11 +83,11 @@ const deleteCategory = async (req, res) => {
   try {
     const { error } = await deleteCategoryService(id);
     if (error) {
-      return res.status(404).json({ success: false, message: error });
+      return res.status(404).json(error);
     }
     res.status(200).json({ message: "success" });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ error: err.message });
   }
 };
 

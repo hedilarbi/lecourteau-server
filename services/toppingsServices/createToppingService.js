@@ -7,13 +7,16 @@ const createToppingService = async (name, price, category, firebaseUrl) => {
     if (topping) {
       return { error: "Topping already exists" };
     }
+
     const newTopping = new Topping({
       name,
       image: firebaseUrl,
       category,
       price: parseFloat(price),
     });
-    const response = await newTopping.save();
+    await newTopping.save();
+    const response = await newTopping.populate("category");
+
     const restaurants = await mongoose.models.Restaurant.find().select(
       "toppings"
     );

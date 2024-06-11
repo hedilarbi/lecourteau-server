@@ -16,6 +16,7 @@ const createOffer = async (req, res) => {
   const { name, expireAt, items, price, customizations } = req.body;
   const parsedItems = JSON.parse(items);
   const parsedCustomization = JSON.parse(customizations);
+
   const itemList = parsedItems.map((item) => {
     return { item: item.item._id, quantity: item.quantity, size: item.size };
   });

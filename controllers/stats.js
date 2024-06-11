@@ -71,7 +71,6 @@ const testNotif = async (req, res) => {
       }),
     });
 
-    console.log(response);
     res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

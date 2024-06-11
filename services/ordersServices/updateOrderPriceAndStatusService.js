@@ -3,11 +3,11 @@ const { default: mongoose } = require("mongoose");
 const { IN_DELIVERY, DELIVERED } = require("../../utils/constants");
 const Order = require("../../models/Order");
 
-const updateStatusService = async (id, status) => {
+const updateOrderPriceAndStatusService = async (id, status, price) => {
   try {
     const response = await Order.findByIdAndUpdate(
       id,
-      { status },
+      { status, total_price: parseFloat(price) },
       { new: true }
     );
     const user = await mongoose.models.User.findById(response.user);
@@ -38,4 +38,4 @@ const updateStatusService = async (id, status) => {
   }
 };
 
-module.exports = updateStatusService;
+module.exports = updateOrderPriceAndStatusService;

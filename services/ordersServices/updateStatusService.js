@@ -1,6 +1,6 @@
 const { default: Expo } = require("expo-server-sdk");
 const { default: mongoose } = require("mongoose");
-const { IN_DELIVERY, DELIVERED } = require("../../utils/constants");
+const { IN_DELIVERY, DELIVERED, READY } = require("../../utils/constants");
 const Order = require("../../models/Order");
 
 const updateStatusService = async (id, status) => {
@@ -11,18 +11,23 @@ const updateStatusService = async (id, status) => {
       { new: true }
     );
     const user = await mongoose.models.User.findById(response.user);
-    let message = {};
-    if (status === IN_DELIVERY || status === DELIVERED) {
+
+    if (status === IN_DELIVERY || status === DELIVERED || status === READY) {
+      let message = "";
+      if (status === IN_DELIVERY) {
+        message = `Votre commande est en cours de livraison`;
+      } else if (status === DELIVERED) {
+        message = `Votre commande a été livrée, bon appétit!`;
+      } else if (status === READY) {
+        message = `Votre commande est prête`;
+      }
       const expo_token = user.expo_token;
       const expo = new Expo();
 
       message = {
         to: expo_token,
         sound: "default",
-        body:
-          status === IN_DELIVERY
-            ? `Votre commande est en cours de livraison`
-            : "Bon appétit!",
+        body: message,
         data: {
           order_id: id,
         },

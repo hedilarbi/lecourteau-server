@@ -33,7 +33,6 @@ const deleteCategoryService = async (id) => {
             if (rewards.length > 0) {
               await Promise.all(
                 rewards.map(async (reward) => {
-                  console.log(reward.item, menuItem._id);
                   if (reward.item.toString() === menuItem._id.toString()) {
                     await mongoose.models.Reward.findByIdAndDelete(reward._id);
                   }

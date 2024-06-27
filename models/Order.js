@@ -73,6 +73,8 @@ const orderSchema = new Schema({
     ref: "Restaurant",
   },
   discount: Number,
+  sub_total_after_discount: Number,
+  tip: Number,
 });
 
 module.exports = model("Order", orderSchema);

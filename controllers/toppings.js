@@ -91,7 +91,6 @@ const deleteTopping = async (req, res) => {
 
     res.status(200).json({ message: "success" });
   } catch (err) {
-    console.log("err", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };

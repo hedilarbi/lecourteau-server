@@ -14,13 +14,11 @@ const createCategory = async (req, res) => {
   try {
     const { error, response } = await createCategoryService(name, firebaseUrl);
     if (error) {
-      console.log(error);
       return res.status(400).json({ success: false, message: error });
     }
 
     res.status(201).json(response);
   } catch (error) {
-    console.log(error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

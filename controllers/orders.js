@@ -13,6 +13,7 @@ const createOrder = async (req, res) => {
 
   try {
     const { error, user, response } = await createOrderService(order);
+
     if (error) {
       return res.status(400).json({ success: false, error });
     }
@@ -97,7 +98,6 @@ const updatePriceAndStatus = async (req, res) => {
   try {
     const { error } = await updateOrderPriceAndStatusService(id, status, price);
     if (error) {
-      console.log("error", error);
       return res.status(400).json({ success: false, error });
     }
     res.status(200).json({ success: true });

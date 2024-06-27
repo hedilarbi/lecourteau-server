@@ -7,7 +7,6 @@ const createLocalOrder = async (req, res) => {
     const { table } = req.body;
     const { response, error } = await createLocalOrderService(table);
     if (error) {
-      console.log(error);
       return res.status(400).json({ error });
     }
     res.status(201).json(response);

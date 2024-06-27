@@ -37,7 +37,6 @@ const sendSMSs = async (req, res) => {
           body,
         });
       } catch (error) {
-        console.error(error.message);
         failedRequests.push(recipient);
       }
     }

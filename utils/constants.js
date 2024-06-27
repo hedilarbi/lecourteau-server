@@ -4,7 +4,7 @@ const DELIVERED = "Livreé";
 const PICKEDUP = "Ramassé";
 const READY = "Prête";
 const IN_DELIVERY = "En Livraison";
-const DONE = "Fini";
+const DONE = "Terminée";
 
 module.exports = {
   IN_DELIVERY,

@@ -33,6 +33,8 @@ const createOrderService = async (order) => {
       createdAt: new Date().toISOString(),
       restaurant: order.restaurant,
       discount: order.order.discount ? order.order.discount : 0,
+      sub_total_after_discount: parseFloat(order.order.subTotalAfterDiscount),
+      tip: parseFloat(order.order.tip),
     });
     const response = await newOrder.save();
 
@@ -105,7 +107,6 @@ const createOrderService = async (order) => {
     }
     return { response, user: newUser };
   } catch (err) {
-    console.log(err);
     return { error: err.message };
   }
 };

@@ -16,8 +16,6 @@ const createToppingCategoryService = async (name) => {
 
     return { response };
   } catch (error) {
-    // Handle the error here
-    console.error(error);
     return { error: error.message };
   }
 };

@@ -35,7 +35,7 @@ const {
 const {
   createUserService,
 } = require("../services/usersServices/createUserService");
-const e = require("express");
+
 const {
   addToFavoritesService,
 } = require("../services/usersServices/addToFavoritesService");
@@ -74,7 +74,7 @@ const setUserInfo = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const updatedUser = await setUserInfoService(
+    const { response, error } = await setUserInfoService(
       id,
       address,
       email,
@@ -82,9 +82,12 @@ const setUserInfo = async (req, res) => {
       coords,
       date_of_birth
     );
-    res.status(200).json(updatedUser);
+    if (error) {
+      return res.status(400).json(error);
+    }
+    res.status(200).json(response);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ error: err.message });
   }
 };
 

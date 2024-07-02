@@ -7,7 +7,8 @@ const updatePriceService = require("../services/ordersServices/updatePriceServic
 const orderDeliveredService = require("../services/ordersServices/orderDeliveredService");
 const reviewOrderService = require("../services/ordersServices/reviewOrderService");
 const updateOrderPriceAndStatusService = require("../services/ordersServices/updateOrderPriceAndStatusService");
-
+const nodemailer = require("nodemailer");
+require("dotenv").config();
 const createOrder = async (req, res) => {
   const { order } = req.body;
 
@@ -138,6 +139,25 @@ const reviewOrder = async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+};
+
+const testMail = async (req, res) => {
+  const transporter = nodemailer.createTransport({
+    host: "smtp.ethereal.email",
+    port: 587,
+    secure: false, // Use `true` for port 465, `false` for all other ports
+    auth: {
+      user: "maddison53@ethereal.email",
+      pass: "jn7jnAPss4f63QBp6D",
+    },
+  });
+
+  const mailOptions = {
+    from: "",
+    to: "",
+    subject: "Test Email",
+    text: "This is a test email",
+  };
 };
 
 module.exports = {

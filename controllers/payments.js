@@ -9,15 +9,28 @@ const createPayment = async (req, res) => {
   const { amount } = req.body;
   try {
     const paymentIntent = await stripe.paymentIntents.create({
-      amount, //lowest denomination of particular currency
+      amount,
       currency: "cad",
-      payment_method_types: ["card"], //by default
+      payment_method_types: ["card"],
     });
 
     const clientSecret = paymentIntent.client_secret;
 
     res.json({
       clientSecret: clientSecret,
+    });
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+};
+const createSetupIntent = async (req, res) => {
+  try {
+    const setupIntent = await stripe.setupIntents.create({
+      payment_method_types: ["card"],
+    });
+
+    res.json({
+      clientSecret: setupIntent.client_secret,
     });
   } catch (e) {
     res.json({ error: e.message });

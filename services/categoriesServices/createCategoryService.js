@@ -1,6 +1,6 @@
 const Category = require("../../models/Category");
 
-const createCategoryService = async (name, firebaseUrl) => {
+const createCategoryService = async (name, firebaseUrl, customizationArray) => {
   try {
     const category = await Category.findOne({ name });
     if (category) {
@@ -9,6 +9,7 @@ const createCategoryService = async (name, firebaseUrl) => {
     const newCategory = new Category({
       name,
       image: firebaseUrl,
+      customization: customizationArray,
     });
     const response = await newCategory.save();
     return { response };

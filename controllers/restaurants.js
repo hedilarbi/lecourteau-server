@@ -36,6 +36,9 @@ const {
 const {
   updateRestaurantOfferAvailabilityService,
 } = require("../services/restaurantsServices/updateRestaurantOfferAvailabilityService");
+const {
+  getRestaurantOfferService,
+} = require("../services/restaurantsServices/getRestaurantOfferService");
 
 const createRestaurant = async (req, res) => {
   const { name, address, location, phoneNumber } = req.body;
@@ -222,6 +225,23 @@ const updateRestaurantToppingAvailability = async (req, res) => {
     res.json({ message: error.message });
   }
 };
+
+const getRestaurantOffer = async (req, res) => {
+  const { restaurantId, id } = req.params;
+
+  try {
+    const { error, response } = await getRestaurantOfferService(
+      restaurantId,
+      id
+    );
+    if (error) {
+      res.status(500).json({ message: error.message });
+    }
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 module.exports = {
   createRestaurant,
   getRestaurants,
@@ -236,4 +256,5 @@ module.exports = {
   updateRestaurantOfferAvailability,
   updateRestaurantToppingAvailability,
   getRestaurantMenuItem,
+  getRestaurantOffer,
 };

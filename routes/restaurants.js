@@ -13,6 +13,7 @@ const {
   updateRestaurantOfferAvailability,
   updateRestaurantToppingAvailability,
   getRestaurantMenuItem,
+  getRestaurantOffer,
 } = require("../controllers/restaurants");
 const router = express.Router();
 
@@ -26,6 +27,7 @@ router.get("/orders/:id", getRestaurantOrders);
 router.delete("/delete/:id", deleteRestaurant);
 router.put("/update/:id", updateRestaurant);
 router.get("/:restaurantId/items/:id", getRestaurantMenuItem);
+router.get("/:restaurantId/offer/:id", getRestaurantOffer);
 router.put("/:id/items/:itemId", updateRestaurantItemAvailability);
 router.put("/:id/offers/:offerId", updateRestaurantOfferAvailability);
 router.put("/:id/toppings/:toppingId", updateRestaurantToppingAvailability);

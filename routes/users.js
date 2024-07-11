@@ -16,6 +16,7 @@ const {
   setUserInfo,
   updateUserExpoToken,
   updateUserDiscount,
+  savePayementDetails,
 } = require("../controllers/users");
 const router = express.Router();
 
@@ -25,6 +26,7 @@ router.put("/update/discount", updateUserDiscount);
 router.post("/create", createUser);
 router.get("/favorites/:id", getFavorites);
 router.put("/favorites/update/add/:id", addToFavorites);
+router.put("/card/add/:id", savePayementDetails);
 router.put("/favorites/update/remove/:id", removeFromFavorites);
 router.put("/addresses/update/add/:id", addToAddresses);
 router.put("/update/expoToken/:id", updateUserExpoToken);

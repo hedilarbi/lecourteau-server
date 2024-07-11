@@ -8,7 +8,13 @@ const getRestaurantMenuItemService = async (restaurantId, id) => {
         path: "menu_items",
         populate: {
           path: "menuItem",
-          populate: { path: "customization", populate: "category" },
+          populate: [
+            { path: "customization", populate: "category" },
+            {
+              path: "category",
+              populate: { path: "customization", populate: "category" },
+            },
+          ],
         },
       });
 

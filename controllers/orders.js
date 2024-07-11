@@ -8,6 +8,10 @@ const orderDeliveredService = require("../services/ordersServices/orderDelivered
 const reviewOrderService = require("../services/ordersServices/reviewOrderService");
 const updateOrderPriceAndStatusService = require("../services/ordersServices/updateOrderPriceAndStatusService");
 const nodemailer = require("nodemailer");
+const {
+  generateOrderConfirmationEmail,
+} = require("../utils/mailTemplateGenerators");
+const confirmOrderService = require("../services/ordersServices/confirmOrderService");
 require("dotenv").config();
 const createOrder = async (req, res) => {
   const { order } = req.body;
@@ -143,21 +147,52 @@ const reviewOrder = async (req, res) => {
 
 const testMail = async (req, res) => {
   const transporter = nodemailer.createTransport({
-    host: "smtp.ethereal.email",
-    port: 587,
-    secure: false, // Use `true` for port 465, `false` for all other ports
+    service: "icloud",
+    secure: false,
     auth: {
-      user: "maddison53@ethereal.email",
-      pass: "jn7jnAPss4f63QBp6D",
+      user: process.env.MAIL_USER,
+      pass: process.env.MAIL_PASS,
     },
   });
 
   const mailOptions = {
-    from: "",
-    to: "",
-    subject: "Test Email",
-    text: "This is a test email",
+    from: process.env.MAIL_USER,
+    to: "hedy.larbi@gmail.com",
+    subject: "Reçu commande Casse-croûte Courteau",
+
+    html: generateOrderConfirmationEmail(
+      "hedi larbi",
+      "XXXXXX",
+      "delivery",
+      "bla bla bla bla",
+      1000,
+      []
+    ),
   };
+
+  try {
+    transporter.sendMail(mailOptions);
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const confirmOrder = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { error } = confirmOrderService(id);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 };
 
 module.exports = {
@@ -170,4 +205,6 @@ module.exports = {
   reviewOrder,
   orderDelivered,
   updatePriceAndStatus,
+  testMail,
+  confirmOrder,
 };

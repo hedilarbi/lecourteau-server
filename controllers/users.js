@@ -252,6 +252,27 @@ const updateUserDiscount = async (req, res) => {
   }
 };
 
+const savePayementDetails = async (req, res) => {
+  try {
+    const { customerId, paymentMethodId } = req.body;
+
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) {
+      res.status(404).json({ error: "user does't exist" });
+      return;
+    }
+    exist = user.payement_cards.some((obj) => obj.customerId === customerId);
+    if (exist) {
+      res.status(403).json({ error: "card already saved" });
+    }
+    user.payement_cards.push({ customerId, paymentMethodId });
+    await user.save();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -268,4 +289,5 @@ module.exports = {
   setUserInfo,
   updateUserExpoToken,
   updateUserDiscount,
+  savePayementDetails,
 };

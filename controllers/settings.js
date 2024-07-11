@@ -1,4 +1,3 @@
-const Setting = require("../models/Setting");
 const {
   getSettingsService,
 } = require("../services/settingsServices/getSettingsService");

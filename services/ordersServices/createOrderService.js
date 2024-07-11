@@ -105,8 +105,10 @@ const createOrderService = async (order) => {
     if (restaurant.expo_token?.length > 0) {
       await expo.sendPushNotificationsAsync([dashboardMessage]);
     }
+
     return { response, user: newUser };
   } catch (err) {
+    console.log(err.message);
     return { error: err.message };
   }
 };

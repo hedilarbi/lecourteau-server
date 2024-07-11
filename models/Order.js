@@ -75,6 +75,10 @@ const orderSchema = new Schema({
   discount: Number,
   sub_total_after_discount: Number,
   tip: Number,
+  confirmed: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 module.exports = model("Order", orderSchema);

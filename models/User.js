@@ -41,6 +41,7 @@ const userSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  stripe_id: String,
 });
 
 module.exports = model("User", userSchema);

@@ -234,6 +234,7 @@ const getRestaurantOffer = async (req, res) => {
       restaurantId,
       id
     );
+    console.log(error);
     if (error) {
       res.status(500).json({ message: error.message });
     }

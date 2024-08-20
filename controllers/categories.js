@@ -8,14 +8,11 @@ const createCategory = async (req, res) => {
     firebaseUrl = req.file.firebaseUrl;
   }
 
-  const { name, customization } = req.body;
-  const customizationArray = JSON.parse(customization);
+  const { name } = req.body;
+
   try {
-    const { error, response } = await createCategoryService(
-      name,
-      firebaseUrl,
-      customizationArray
-    );
+    const { error, response } = await createCategoryService(name, firebaseUrl);
+
     if (error) {
       return res.status(400).json({ success: false, message: error });
     }
@@ -47,7 +44,7 @@ const getCategoriesNames = async (req, res) => {
 const getCategory = async (req, res) => {
   const { id } = req.params;
   try {
-    const response = await Category.findById(id).populate("customization");
+    const response = await Category.findById(id);
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -59,26 +56,19 @@ const updateCategory = async (req, res) => {
   if (req.file) {
     firebaseUrl = req.file.firebaseUrl;
   }
-  const { name, customization } = req.body;
+  const { name } = req.body;
   const { id } = req.params;
-  const customizationArray = JSON.parse(customization);
-  const newCustomization = customizationArray.map((custo) => {
-    return { _id: custo._id };
-  });
+
   try {
     let response;
     if (firebaseUrl) {
       response = await Category.findByIdAndUpdate(
         id,
-        { name, image: firebaseUrl, customization: newCustomization },
+        { name, image: firebaseUrl },
         { new: true }
       );
     } else {
-      response = await Category.findByIdAndUpdate(
-        id,
-        { name, customization: newCustomization },
-        { new: true }
-      );
+      response = await Category.findByIdAndUpdate(id, { name }, { new: true });
     }
     res.json(response);
   } catch (err) {

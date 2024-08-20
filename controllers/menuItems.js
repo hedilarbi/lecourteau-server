@@ -111,12 +111,15 @@ const getMenuItems = async (req, res) => {
 
 const getMenuItem = async (req, res) => {
   const { id } = req.params;
-
+  console.log(id);
   try {
     const { error, response } = await getMenuItemService(id);
+    console.log(error);
     if (error) {
       return res.status(400).json(error);
     }
+
+    console.log(response);
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

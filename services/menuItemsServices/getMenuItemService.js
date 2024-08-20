@@ -7,7 +7,6 @@ const getMenuItemService = async (id) => {
         path: "customization",
         populate: {
           path: "category",
-          populate: "customization",
         },
       })
       .populate("category");

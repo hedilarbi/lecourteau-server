@@ -1,5 +1,4 @@
 const Reward = require("../../models/Reward");
-
 const createRewardService = async (item, points) => {
   try {
     const newReward = new Reward({
@@ -7,11 +6,14 @@ const createRewardService = async (item, points) => {
       points: parseInt(points),
     });
 
+    // Save the new reward
     await newReward.save();
-    const response = await newReward.populate("item");
-    return { response };
+    // Populate the item after saving
+    const populatedReward = await newReward.populate("item").execPopulate();
+    return { response: populatedReward };
   } catch (err) {
-    return { error: err.message };
+    console.error("Error in createRewardService:", err);
+    return { error: err.message || "Failed to create reward." };
   }
 };
 

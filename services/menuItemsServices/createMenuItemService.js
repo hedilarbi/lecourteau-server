@@ -10,13 +10,12 @@ const createMenuItemService = async (
   category
 ) => {
   try {
-    const menuItem = await MenuItem.findOne({ name });
-    if (menuItem) {
-      return { error: "Item already exists" };
+    const existingMenuItem = await MenuItem.findOne({ name }); // Check if the item already exists
+    if (existingMenuItem) {
+      return { error: "Item already exists" }; // Return error if the item exists
     }
-    const menuItems = await MenuItem.find();
 
-    const order = menuItems.length;
+    const menuItemsCount = await MenuItem.countDocuments(); // Get the current number of menu items
     const newMenuItem = new MenuItem({
       name,
       image: firebaseUrl,
@@ -24,9 +23,12 @@ const createMenuItemService = async (
       description,
       customization: customizationArray,
       category,
-      order,
+      order: menuItemsCount, // Set the order based on the count
     });
-    const response = await newMenuItem.save();
+
+    const savedMenuItem = await newMenuItem.save(); // Save the new menu item
+
+    // Update related restaurants
     const restaurants = await mongoose.models.Restaurant.find().select(
       "menu_items"
     );
@@ -34,16 +36,18 @@ const createMenuItemService = async (
       await Promise.all(
         restaurants.map(async (restaurant) => {
           restaurant.menu_items.push({
-            menuItem: response._id,
+            menuItem: savedMenuItem._id,
             availability: true,
           });
-          await restaurant.save();
+          await restaurant.save(); // Save the updated restaurant
         })
       );
     }
-    return { response };
+
+    return { response: savedMenuItem }; // Return the saved menu item
   } catch (err) {
-    return { error: err.message };
+    console.error("Error in createMenuItemService:", err); // Log the error
+    return { error: err.message }; // Return error message
   }
 };
 

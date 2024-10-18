@@ -1,4 +1,3 @@
-const { Expo } = require("expo-server-sdk");
 const { default: mongoose } = require("mongoose");
 const sendNotificationsService = require("../services/notificationService.js/sendNotificationsService");
 const client = require("twilio")(
@@ -17,6 +16,7 @@ const sendNotifications = async (req, res) => {
     }
     res.json({ status: true, message: "Notifications sent" });
   } catch (err) {
+    console.error("Error sending notifications:", err);
     res.json({ status: false, message: err.message });
   }
 };
@@ -42,6 +42,7 @@ const sendSMSs = async (req, res) => {
     }
     res.json({ status: true });
   } catch (err) {
+    console.error("Error sending SMSs:", err);
     res.json({ status: false, message: err.message });
   }
   // if (failedRequests.length > 0) {

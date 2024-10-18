@@ -10,9 +10,16 @@ const updateStatusService = async (id, status) => {
       { status },
       { new: true }
     );
+
+    // Check if the order was found
+    if (!response) {
+      return { error: "Order not found" };
+    }
+
     const user = await mongoose.models.User.findById(response.user);
 
-    if (status === IN_DELIVERY || status === DELIVERED || status === READY) {
+    // Check if the status matches the conditions and send notifications
+    if ([IN_DELIVERY, DELIVERED, READY].includes(status)) {
       let message = "";
       if (status === IN_DELIVERY) {
         message = `Votre commande est en cours de livraison`;
@@ -21,22 +28,25 @@ const updateStatusService = async (id, status) => {
       } else if (status === READY) {
         message = `Votre commande est prête`;
       }
+
       const expo_token = user.expo_token;
       const expo = new Expo();
 
-      message = {
+      const pushMessage = {
         to: expo_token,
         sound: "default",
         body: message,
         data: {
           order_id: id,
         },
-
         priority: "high",
       };
 
-      const ticket = await expo.sendPushNotificationsAsync([message]);
+      if (expo_token && expo_token.length > 0) {
+        await expo.sendPushNotificationsAsync([pushMessage]);
+      }
     }
+
     return { error: null };
   } catch (err) {
     return { error: err.message };

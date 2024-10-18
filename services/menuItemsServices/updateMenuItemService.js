@@ -7,36 +7,25 @@ const updateMenuItemService = async (
   newPrices,
   description,
   category,
-  newCustomization
+  customization
 ) => {
   try {
-    let response;
+    const updateData = {
+      name,
+      prices: newPrices,
+      description,
+      category,
+      customization,
+    };
+
     if (firebaseUrl) {
-      response = await MenuItem.findByIdAndUpdate(
-        id,
-        {
-          name,
-          image: firebaseUrl,
-          prices: newPrices,
-          description,
-          category,
-          customization: newCustomization,
-        },
-        { new: true }
-      ).populate("customization category");
-    } else {
-      response = await MenuItem.findByIdAndUpdate(
-        id,
-        {
-          name,
-          prices: newPrices,
-          description,
-          category,
-          customization: newCustomization,
-        },
-        { new: true }
-      ).populate("customization category");
+      updateData.image = firebaseUrl;
     }
+
+    const response = await MenuItem.findByIdAndUpdate(id, updateData, {
+      new: true,
+    }).populate("customization category");
+
     return { response };
   } catch (err) {
     return { error: err.message };

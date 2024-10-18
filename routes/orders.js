@@ -9,13 +9,13 @@ const {
   reviewOrder,
   orderDelivered,
   updatePriceAndStatus,
-  testMail,
+
   confirmOrder,
 } = require("../controllers/orders");
 const router = express.Router();
 
 router.get("/", getOrders);
-router.post("/mail", testMail);
+
 router.put("/confirm/:id", confirmOrder);
 router.post("/create", createOrder);
 router.delete("/delete/:id", deleteOrder);

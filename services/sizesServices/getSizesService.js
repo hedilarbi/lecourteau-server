@@ -5,6 +5,7 @@ const getSizesService = async () => {
     const response = await Size.find();
     return { response };
   } catch (err) {
+    console.error("Error in getSizesService:", err); // Log the error
     return { error: err.message };
   }
 };

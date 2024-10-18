@@ -2,18 +2,22 @@ const Category = require("../../models/Category");
 
 const createCategoryService = async (name, firebaseUrl) => {
   try {
-    const category = await Category.findOne({ name });
-    if (category) {
-      return { error: "categorie existe déja" };
+    const existingCategory = await Category.findOne({ name });
+
+    if (existingCategory) {
+      return { error: "Category already exists" };
     }
+
     const newCategory = new Category({
       name,
       image: firebaseUrl,
     });
-    const response = await newCategory.save();
-    return { response };
+
+    const savedCategory = await newCategory.save();
+    return { response: savedCategory };
   } catch (err) {
-    return { error: err.message };
+    console.error("Error saving category:", err);
+    return { error: "An error occurred while saving the category." };
   }
 };
 

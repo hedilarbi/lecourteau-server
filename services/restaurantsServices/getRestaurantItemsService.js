@@ -1,5 +1,4 @@
 const Restaurant = require("../../models/Restaurant");
-
 const getRestaurantItemsService = async (id) => {
   try {
     const response = await Restaurant.findById(id)
@@ -8,6 +7,12 @@ const getRestaurantItemsService = async (id) => {
         path: "menu_items",
         populate: { path: "menuItem", populate: "category" },
       });
+
+    // Check if restaurant exists
+    if (!response) {
+      return { error: new Error("Restaurant not found") };
+    }
+
     return { response };
   } catch (error) {
     return { error: error.message };

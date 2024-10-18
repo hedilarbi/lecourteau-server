@@ -8,16 +8,30 @@ const getRestaurantMenuItemService = async (restaurantId, id) => {
         path: "menu_items",
         populate: {
           path: "menuItem",
-          populate: [{ path: "customization", populate: "category" }],
+          populate: [
+            { path: "category" },
+            { path: "customization", populate: { path: "category" } },
+          ],
         },
       });
 
-    const response = restaurant.menu_items.filter(
-      (item) => item.menuItem._id == id
+    // Check if restaurant exists
+    if (!restaurant) {
+      return { error: new Error("Restaurant not found") };
+    }
+
+    // Find the specific menu item within the restaurant's menu_items
+    const menuItem = restaurant.menu_items.find(
+      (item) => item.menuItem._id.toString() === id
     );
-    return { response };
-  } catch (err) {
-    return { error: err.message };
+
+    if (!menuItem) {
+      return { error: new Error("Menu item not found") };
+    }
+
+    return { response: menuItem };
+  } catch (error) {
+    return { error: error.message };
   }
 };
 

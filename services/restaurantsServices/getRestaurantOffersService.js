@@ -5,7 +5,13 @@ const getRestaurantOffersService = async (id) => {
     const response = await Restaurant.findById(id)
       .select("offers")
       .populate({ path: "offers", populate: "offer" });
-    return { response };
+
+    // Check if the restaurant exists
+    if (!response) {
+      return { error: new Error("Restaurant not found") };
+    }
+
+    return { response }; // Return the response containing offers
   } catch (error) {
     return { error: error.message };
   }

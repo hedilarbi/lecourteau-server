@@ -79,6 +79,7 @@ const orderSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  paymentIntentId: String,
 });
 
 module.exports = model("Order", orderSchema);

@@ -50,13 +50,18 @@ const createRestaurant = async (req, res) => {
       location,
       phoneNumber
     );
+
     if (error) {
-      res.status(500).json({ success: false, message: error.message });
+      return res.status(500).json({ success: false, message: error });
     }
 
     res.status(201).json(response);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Error creating restaurant:", error);
+    res.status(500).json({
+      success: false,
+      message: "An error occurred while creating the restaurant.",
+    });
   }
 };
 
@@ -65,60 +70,125 @@ const getRestaurants = async (req, res) => {
     const { error, response } = await getRestaurantsService();
 
     if (error) {
-      res.status(500).json({ success: false, message: error.message });
+      console.error("Error fetching restaurants:", error); // Log the error
+      return res.status(500).json({ success: false, message: error });
     }
+
+    // If no restaurants found, you can choose to return a different status
+    if (response.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No restaurants found." });
+    }
+
     res.status(200).json(response);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Error in getRestaurants:", error); // Log the error
+    res
+      .status(500)
+      .json({ success: false, message: "An unexpected error occurred." });
   }
 };
 const getRestaurant = async (req, res) => {
   const { id } = req.params;
   try {
-    const { response } = await getRestaurantService(id);
+    const { response, error } = await getRestaurantService(id);
 
-    res.status(200).json(response);
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-const deleteRestaurant = async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { error, response } = await deleteRestaurantService(id);
     if (error) {
-      res.status(500).json({ success: false, message: error.message });
+      console.error("Error fetching restaurant:", error);
+      return res.status(404).json({ success: false, message: error });
+    }
+
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Restaurant not found." });
     }
 
     res.status(200).json(response);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Error in getRestaurant:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "An unexpected error occurred." });
+  }
+};
+
+const deleteRestaurant = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { error, response } = await deleteRestaurantService(id);
+
+    // Handle error from service
+    if (error) {
+      console.error("Error deleting restaurant:", error);
+      return res.status(500).json({ success: false, message: error });
+    }
+
+    // Check if the restaurant was deleted
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Restaurant not found." });
+    }
+
+    res
+      .status(200)
+      .json({ success: true, message: "Restaurant deleted successfully." });
+  } catch (error) {
+    console.error("Error in deleteRestaurant:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "An unexpected error occurred." });
   }
 };
 const updateRestaurant = async (req, res) => {
   const { id } = req.params;
 
   try {
+    // Attempt to find and update the restaurant
     const response = await Restaurant.findByIdAndUpdate(id, req.body, {
       new: true,
+      runValidators: true, // Ensures validation is run on update
     });
 
+    // Check if the restaurant was found and updated
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Restaurant not found." });
+    }
+
+    // Respond with the updated restaurant
     res.status(200).json(response);
   } catch (error) {
+    console.error("Error updating restaurant:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 const getRestaurantItems = async (req, res) => {
   const { id } = req.params;
+
   try {
     const { error, response } = await getRestaurantItemsService(id);
+
     if (error) {
-      res.status(500).json({ message: error.message });
+      return res.status(500).json({ success: false, message: error.message });
     }
+
+    // Check if response is empty or null
+    if (!response || response.menu_items.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No menu items found for this restaurant.",
+      });
+    }
+
     res.status(200).json(response);
   } catch (error) {
-    res.json({ message: error.message });
+    console.error("Error fetching restaurant items:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -130,99 +200,165 @@ const getRestaurantMenuItem = async (req, res) => {
       restaurantId,
       id
     );
-    if (error) {
-      res.status(500).json({ message: error.message });
-    }
-    res.json(response);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
 
-const getRestaurantToppings = async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { error, response } = await getRestaurantToppingsService(id);
     if (error) {
-      res.status(500).json({ message: error.message });
+      console.error("Error fetching restaurant menu item:", error);
+      return res.status(500).json({ success: false, message: error.message });
     }
+
+    // Check if the response is empty or null
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Menu item not found." });
+    }
+
     res.status(200).json(response);
   } catch (error) {
-    res.json({ message: error.message });
+    console.error("Error fetching restaurant menu item:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+const getRestaurantToppings = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { error, response } = await getRestaurantToppingsService(id);
+
+    if (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+
+    // Check if toppings were found
+    if (!response || response.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No toppings found for this restaurant.",
+      });
+    }
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error fetching restaurant toppings:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 const getRestaurantOffers = async (req, res) => {
   const { id } = req.params;
+
   try {
     const { error, response } = await getRestaurantOffersService(id);
+
     if (error) {
-      res.status(500).json({ message: error.message });
+      return res.status(500).json({ success: false, message: error.message });
     }
+
+    // Check if the restaurant has offers
+    if (!response || response.offers.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No offers found for this restaurant.",
+      });
+    }
+
     res.status(200).json(response);
   } catch (error) {
-    res.json({ message: error.message });
+    console.error("Error fetching restaurant offers:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 const getRestaurantOrders = async (req, res) => {
   const { id } = req.params;
+
   try {
     const { response, error } = await getRestaurantOrdersService(id);
+
     if (error) {
-      res.status(500).json({ message: error.message });
+      return res.status(500).json({ success: false, message: error.message });
     }
+
+    // Check if the restaurant exists
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Restaurant not found." });
+    }
+
+    // Check if there are orders
+    if (response.orders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No orders found for this restaurant.",
+      });
+    }
+
     res.status(200).json(response);
   } catch (error) {
-    res.json({ message: error.message });
+    console.error("Error fetching restaurant orders:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
-
 const updateRestaurantItemAvailability = async (req, res) => {
   const { id, itemId } = req.params;
 
   try {
-    const { error, response } = await updateRestaurantItemAvailabilityService(
-      id,
-      itemId
-    );
+    const { error, status, restaurant } =
+      await updateRestaurantItemAvailabilityService(id, itemId);
+
     if (error) {
-      res.status(500).json({ message: error.message });
+      return res.status(500).json({ success: false, message: error });
     }
 
     res
       .status(200)
-      .json({ status: true, message: "Menu item availability updated" });
+      .json({ success: true, message: "Menu item availability updated" });
   } catch (error) {
-    res.json({ message: error.message });
+    console.error("Error updating menu item availability:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
+
 const updateRestaurantOfferAvailability = async (req, res) => {
   const { id, offerId } = req.params;
 
   try {
-    const { error, response } = await updateRestaurantOfferAvailabilityService(
+    const { error, status } = await updateRestaurantOfferAvailabilityService(
       id,
       offerId
     );
+
     if (error) {
-      res.status(500).json({ message: error.message });
+      return res.status(500).json({ success: false, message: error });
     }
-    res.status(200).json({ status: true, message: "updated" });
+
+    res
+      .status(200)
+      .json({ success: true, message: "Offer availability updated" });
   } catch (error) {
-    res.json({ message: error.message });
+    console.error("Error updating offer availability:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
+
 const updateRestaurantToppingAvailability = async (req, res) => {
   const { id, toppingId } = req.params;
 
   try {
-    const { error, response } =
-      await updateRestaurantToppingAvailabilityService(id, toppingId);
+    const { error, status } = await updateRestaurantToppingAvailabilityService(
+      id,
+      toppingId
+    );
+
     if (error) {
-      res.status(500).json({ message: error.message });
+      return res.status(500).json({ success: false, message: error });
     }
-    res.status(200).json({ status: true, message: "updated" });
+
+    res
+      .status(200)
+      .json({ success: true, message: "Topping availability updated" });
   } catch (error) {
-    res.json({ message: error.message });
+    console.error("Error updating topping availability:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -234,15 +370,24 @@ const getRestaurantOffer = async (req, res) => {
       restaurantId,
       id
     );
-    console.log(error);
+
     if (error) {
-      res.status(500).json({ message: error.message });
+      return res.status(500).json({ success: false, message: error });
     }
-    res.json(response);
+
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Offer not found" });
+    }
+
+    res.status(200).json({ success: true, offer: response });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Error fetching restaurant offer:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
+
 module.exports = {
   createRestaurant,
   getRestaurants,

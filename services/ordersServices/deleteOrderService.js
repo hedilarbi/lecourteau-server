@@ -2,10 +2,13 @@ const Order = require("../../models/Order");
 
 const deleteOrderService = async (id) => {
   try {
-    await Order.findByIdAndDelete(id);
-    return { error: null };
+    const order = await Order.findByIdAndDelete(id);
+    if (!order) {
+      return { error: "Order not found", success: false };
+    }
+    return { error: null, success: true };
   } catch (err) {
-    return { error: err.message };
+    return { error: err.message, success: false };
   }
 };
 module.exports = deleteOrderService;

@@ -7,6 +7,11 @@ const updatePriceService = async (id, price) => {
       { total_price: parseFloat(price) },
       { new: true }
     );
+
+    if (!response) {
+      return { error: "Order not found" };
+    }
+
     return { response };
   } catch (err) {
     return { error: err.message };

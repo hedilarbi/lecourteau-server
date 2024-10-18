@@ -14,6 +14,7 @@ const createOfferService = async (
     if (offer) {
       return { error: "Offer already exists" };
     }
+
     const newOffer = new Offer({
       name,
       image: firebaseUrl,
@@ -24,6 +25,7 @@ const createOfferService = async (
       createdAt: new Date(),
     });
     const response = await newOffer.save();
+
     const restaurants = await mongoose.models.Restaurant.find().select(
       "offers"
     );
@@ -31,10 +33,11 @@ const createOfferService = async (
       await Promise.all(
         restaurants.map(async (restaurant) => {
           restaurant.offers.push({ offer: response._id, availability: true });
-          await restaurant.save();
+          return restaurant.save();
         })
       );
     }
+
     return { response };
   } catch (err) {
     return { error: err.message };

@@ -2,10 +2,10 @@ const Offer = require("../../models/Offer");
 
 const getOffersService = async () => {
   try {
-    let response = await Offer.find()
+    const response = await Offer.find()
+      .sort({ createdAt: -1 })
       .populate("items.item")
       .populate("customizations");
-    response = response.reverse();
     return { response };
   } catch (err) {
     return { error: err.message };

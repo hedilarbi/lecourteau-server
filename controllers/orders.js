@@ -20,23 +20,27 @@ const createOrder = async (req, res) => {
     const { error, user, response } = await createOrderService(order);
 
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error creating order service:", error);
+      return res.status(400).json({ success: false, message: error });
     }
-    res.status(201).json({ user, orderId: response._id });
+    res.status(201).json({ success: true, user, orderId: response._id });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error creating order:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
 const getOrders = async (req, res) => {
   try {
-    const { response, error } = await getOrdersService();
+    const { response, error } = await getOrdersService(req.query);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error fetching orders:", error);
+      return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json(response);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error fetching orders:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -46,12 +50,14 @@ const getOrder = async (req, res) => {
   try {
     const { response, error } = await getOrderService(id);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error fetching order:", error);
+      return res.status(404).json({ success: false, message: error });
     }
 
     res.status(200).json(response);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error fetching order:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -59,13 +65,17 @@ const deleteOrder = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const { error } = await deleteOrderService(id);
+    const { error, success } = await deleteOrderService(id);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error deleting order:", error);
+      return res.status(404).json({ success: false, message: error });
     }
-    res.status(200).json({ message: "order deleted", success: true });
+    res
+      .status(200)
+      .json({ message: "Order deleted successfully", success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error deleting order:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -73,26 +83,40 @@ const updateStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   try {
-    const { error } = updateStatusService(id, status);
+    const { error } = await updateStatusService(id, status);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error updating order status:", error);
+      return res.status(400).json({ success: false, message: error });
     }
-    res.status(200).json({ success: true });
+    res
+      .status(200)
+      .json({ success: true, message: "Order status updated successfully" });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error updating order status:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 const updatePrice = async (req, res) => {
   const { id } = req.params;
   const { price } = req.body;
+
+  // Validate price
+  if (isNaN(price) || price < 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid price value" });
+  }
+
   try {
     const { response, error } = await updatePriceService(id, price);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error updating order price:", error);
+      return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json(response);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error updating order price:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -100,14 +124,23 @@ const updatePriceAndStatus = async (req, res) => {
   const { id } = req.params;
   const { status, price } = req.body;
 
+  // Validate inputs
+  if (!status || isNaN(price) || price < 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid status or price value" });
+  }
+
   try {
     const { error } = await updateOrderPriceAndStatusService(id, status, price);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error updating order price and status:", error);
+      return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error updating order price and status:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -115,68 +148,63 @@ const orderDelivered = async (req, res) => {
   const { orderId } = req.params;
   const { staffId } = req.body;
 
+  // Validate inputs
+  if (!orderId || !staffId) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Order ID and Staff ID are required" });
+  }
+
   try {
     const { error } = await orderDeliveredService(orderId, staffId);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error marking order as delivered:", error);
+      return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error marking order as delivered:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
 const reviewOrder = async (req, res) => {
   const { id } = req.params;
   const { comment, rating } = req.body;
+
+  // Validate inputs
+  if (!id || !comment || rating == null) {
+    return res.status(400).json({
+      success: false,
+      message: "Order ID, comment, and rating are required",
+    });
+  }
+
+  const parsedRating = parseInt(rating);
+  // Check if rating is a valid number between 1 and 5
+  if (isNaN(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+    return res.status(400).json({
+      success: false,
+      message: "Rating must be a number between 1 and 5",
+    });
+  }
+
   const review = {
     comment,
-    rating: parseInt(rating),
+    rating: parsedRating,
     status: true,
   };
+
   try {
-    const { error } = reviewOrderService(id, review);
+    const { error } = await reviewOrderService(id, review);
     if (error) {
-      return res.status(400).json({ success: false, error });
+      console.error("Error reviewing order:", error);
+      return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-const testMail = async (req, res) => {
-  const transporter = nodemailer.createTransport({
-    service: "icloud",
-    secure: false,
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.MAIL_PASS,
-    },
-  });
-
-  const mailOptions = {
-    from: process.env.MAIL_USER,
-    to: "hedy.larbi@gmail.com",
-    subject: "Reçu commande Casse-croûte Courteau",
-
-    html: generateOrderConfirmationEmail(
-      "hedi larbi",
-      "XXXXXX",
-      "delivery",
-      "bla bla bla bla",
-      1000,
-      []
-    ),
-  };
-
-  try {
-    transporter.sendMail(mailOptions);
-
-    res.status(200).json({ success: true });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error reviewing order:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -184,14 +212,15 @@ const confirmOrder = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const { error } = confirmOrderService(id);
+    const { error } = await confirmOrderService(id);
     if (error) {
+      console.error("Error confirming order service:", error);
       return res.status(400).json({ success: false, error });
     }
     res.status(200).json({ success: true });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error confirming order:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
   }
 };
 
@@ -205,6 +234,6 @@ module.exports = {
   reviewOrder,
   orderDelivered,
   updatePriceAndStatus,
-  testMail,
+
   confirmOrder,
 };

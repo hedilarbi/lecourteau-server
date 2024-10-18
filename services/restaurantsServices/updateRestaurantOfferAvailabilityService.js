@@ -4,24 +4,25 @@ const updateRestaurantOfferAvailabilityService = async (id, offerId) => {
   try {
     const restaurant = await Restaurant.findById(id);
     if (!restaurant) {
-      return res.status(404).json({ message: "Restaurant not found" });
+      return { error: "Restaurant not found" }; // Return error instead of responding directly
     }
 
-    const menuItemIndex = restaurant.offers.findIndex(
-      (offer) => offer._id == offerId
+    const offerIndex = restaurant.offers.findIndex(
+      (offer) => offer._id.toString() === offerId // Ensure to convert to string for comparison
     );
 
-    if (menuItemIndex === -1) {
-      return res.status(404).json({ message: "Menu item not found" });
+    if (offerIndex === -1) {
+      return { error: "Offer not found" }; // Return error instead of responding directly
     }
 
-    restaurant.offers[menuItemIndex].availability =
-      !restaurant.offers[menuItemIndex].availability;
+    // Toggle availability
+    restaurant.offers[offerIndex].availability =
+      !restaurant.offers[offerIndex].availability;
 
     await restaurant.save();
-    return { status: "success" };
+    return { status: "success" }; // Indicate success
   } catch (error) {
-    return { error: error.message };
+    return { error: error.message }; // Return error message for handling
   }
 };
 

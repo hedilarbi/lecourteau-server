@@ -10,6 +10,11 @@ const getMenuItemService = async (id) => {
         },
       })
       .populate("category");
+
+    if (!response) {
+      return { error: "Menu item not found" };
+    }
+
     return { response };
   } catch (err) {
     return { error: err.message };

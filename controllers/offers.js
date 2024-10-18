@@ -1,6 +1,3 @@
-const { default: mongoose } = require("mongoose");
-const { deleteImagesFromFirebase } = require("../firebase");
-const Offer = require("../models/Offer");
 const createOfferService = require("../services/offersServices/createOfferService");
 const getOffersService = require("../services/offersServices/getOffersService");
 const getOfferService = require("../services/offersServices/getOfferService");
@@ -13,17 +10,26 @@ const createOffer = async (req, res) => {
     firebaseUrl = req.file.firebaseUrl;
   }
 
-  const { name, expireAt, items, price, customizations } = req.body;
-  const parsedItems = JSON.parse(items);
-  const parsedCustomization = JSON.parse(customizations);
-
-  const itemList = parsedItems.map((item) => {
-    return { item: item.item._id, quantity: item.quantity, size: item.size };
-  });
-  const customizationList = parsedCustomization.map((item) => {
-    return item._id;
-  });
   try {
+    const { name, expireAt, items, price, customizations } = req.body;
+
+    if (!name || !expireAt || !items || !price || !customizations) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid input data" });
+    }
+
+    const parsedItems = JSON.parse(items);
+    const parsedCustomization = JSON.parse(customizations);
+
+    const itemList = parsedItems.map((item) => ({
+      item: item.item._id,
+      quantity: item.quantity,
+      size: item.size,
+    }));
+
+    const customizationList = parsedCustomization.map((item) => item._id);
+
     const { response, error } = await createOfferService(
       name,
       expireAt,
@@ -32,12 +38,13 @@ const createOffer = async (req, res) => {
       customizationList,
       firebaseUrl
     );
+
     if (error) {
       return res.status(500).json({ success: false, error });
     }
-    res.status(201).json(response);
+    res.status(201).json({ success: true, data: response });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -60,8 +67,9 @@ const getOffer = async (req, res) => {
     const { response, error } = await getOfferService(id);
 
     if (error) {
-      return res.status(500).json({ success: false, error });
+      return res.status(404).json({ success: false, message: error });
     }
+
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -71,12 +79,14 @@ const getOffer = async (req, res) => {
 const deleteOffer = async (req, res) => {
   const { id } = req.params;
   try {
-    const { error, response } = await deleteOfferService(id);
+    const { error } = await deleteOfferService(id);
     if (error) {
-      return res.status(500).json({ success: false, error });
+      return res.status(404).json({ success: false, message: error });
     }
 
-    res.status(200).json({ message: "offer deleted", success: true });
+    res
+      .status(200)
+      .json({ message: "Offer deleted successfully", success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -86,44 +96,41 @@ const updateOffer = async (req, res) => {
   if (req.file) {
     firebaseUrl = req.file.firebaseUrl;
   }
-  const {
-    name,
 
-    price,
-
-    exprireAt,
-    items,
-    customizations,
-  } = req.body;
-
+  const { name, price, expireAt, items, customizations } = req.body;
   const { id } = req.params;
 
-  const itemsArray = JSON.parse(items);
-  const customizationArray = JSON.parse(customizations);
-
-  const newCustomizations = customizationArray.map((custo) => {
-    return { _id: custo._id };
-  });
-  const newItems = itemsArray.map((custo) => {
-    return { item: custo.item._id, size: custo.size, quantity: custo.quantity };
-  });
   try {
+    const itemsArray = JSON.parse(items);
+    const customizationArray = JSON.parse(customizations);
+
+    const newCustomizations = customizationArray.map((custo) => ({
+      _id: custo._id,
+    }));
+    const newItems = itemsArray.map((item) => ({
+      item: item.item._id,
+      size: item.size,
+      quantity: item.quantity,
+    }));
     const { response, error } = await updateOfferService(
       id,
       name,
       newItems,
       newCustomizations,
       price,
-      exprireAt,
+      expireAt,
       firebaseUrl
     );
+
     if (error) {
-      return res.status(500).json({ success: false, error });
+      console.log("error updating offer", error);
+      return res.status(404).json({ success: false, message: error });
     }
 
     res.status(200).json(response);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Error updating offer:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

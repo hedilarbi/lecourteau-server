@@ -20,11 +20,20 @@ const getRestaurantOfferService = async (restaurantId, id) => {
           },
         },
       });
-    console.log(restaurant.offers[0]);
-    const response = restaurant.offers.filter((item) => item.offer._id == id);
-    return { response: response[0] };
+
+    if (!restaurant) {
+      return { error: new Error("Restaurant not found") };
+    }
+
+    // Find the specific offer by ID
+    const offer = restaurant.offers.find(
+      (item) => item.offer._id.toString() === id
+    );
+
+    return { response: offer || null }; // Return null if not found
   } catch (error) {
-    return { error: error.message };
+    console.error("Error in getRestaurantOfferService:", error);
+    return { error: error.message }; // Return error message
   }
 };
 

@@ -4,14 +4,19 @@ const {
 const {
   updateSettingsService,
 } = require("../services/settingsServices/updateSettingsService");
-
 const getSetting = async (req, res) => {
   try {
-    const { settings, restaurants } = await getSettingsService();
+    const { settings, restaurants, error } = await getSettingsService();
+
+    // Check if there was an error in the service function
+    if (error) {
+      return res.status(500).json({ success: false, message: error });
+    }
 
     res.status(200).json({ settings, restaurants });
   } catch (err) {
-    res.json({ error: err.message });
+    console.error("Error fetching settings:", err); // Log the error for debugging
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
@@ -21,12 +26,15 @@ const updateSettings = async (req, res) => {
 
   try {
     const { response, error } = await updateSettingsService(id, settings);
+
     if (error) {
-      return res.status(400).json({ message: error });
+      return res.status(400).json({ success: false, message: error });
     }
-    res.json(response);
+
+    res.status(200).json(response);
   } catch (err) {
-    res.json({ message: err.message });
+    console.error("Error updating settings:", err); // Log the error
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 

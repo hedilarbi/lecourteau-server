@@ -9,7 +9,12 @@ const getRestaurantToppingsService = async (id) => {
         populate: { path: "topping", populate: "category" },
       });
 
-    return { response };
+    // Check if the restaurant exists
+    if (!response) {
+      return { error: new Error("Restaurant not found") };
+    }
+
+    return { response: response.toppings }; // Return only the toppings
   } catch (error) {
     return { error: error.message };
   }

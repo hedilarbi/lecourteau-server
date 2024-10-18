@@ -6,47 +6,35 @@ const updateOfferService = async (
   newItems,
   newCustomizations,
   price,
-  exprireAt,
+  expireAt,
   firebaseUrl
 ) => {
   try {
-    let response;
-    if (firebaseUrl === null) {
-      response = await Offer.findByIdAndUpdate(
-        id,
-        {
-          name,
-          price: parseFloat(price),
-          exprireAt: new Date(exprireAt),
-          items: newItems,
-          customizations: newCustomizations,
-        },
-        { new: true }
-      )
-        .populate({
-          path: "items",
-          populate: "item",
-        })
-        .populate("customizations");
-    } else {
-      response = await Offer.findByIdAndUpdate(
-        id,
-        {
-          image: firebaseUrl,
-          name,
-          price: parseFloat(price),
-          exprireAt: new Date(exprireAt),
-          items: newItems,
-          customizations: newCustomizations,
-        },
-        { new: true }
-      )
-        .populate({
-          path: "items",
-          populate: "item",
-        })
-        .populate("customizations");
+    const updateData = {
+      name,
+      price: parseFloat(price),
+      expireAt: new Date(expireAt),
+      items: newItems,
+      customizations: newCustomizations,
+    };
+
+    if (firebaseUrl) {
+      updateData.image = firebaseUrl;
     }
+
+    const response = await Offer.findByIdAndUpdate(id, updateData, {
+      new: true,
+    })
+      .populate({
+        path: "items",
+        populate: "item",
+      })
+      .populate("customizations");
+
+    if (!response) {
+      return { error: "Offer not found" };
+    }
+
     return { response };
   } catch (err) {
     return { error: err.message };

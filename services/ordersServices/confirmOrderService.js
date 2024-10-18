@@ -1,6 +1,11 @@
 const Order = require("../../models/Order");
 require("dotenv").config();
 const nodemailer = require("nodemailer");
+const Stripe = require("stripe");
+
+const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
+  apiVersion: "2023-08-16",
+});
 const {
   generateOrderConfirmationEmail,
 } = require("../../utils/mailTemplateGenerators");
@@ -14,40 +19,53 @@ const confirmOrderService = async (id) => {
       .populate({ path: "offers", populate: "offer customizations" })
       .populate({ path: "rewards", populate: "item" })
       .populate({ path: "user" });
+
     if (!order) {
       return { error: "Order not found" };
     }
+
+    // Attempt to capture the payment
+    const paymentIntent = await stripe.paymentIntents.capture(
+      order.paymentIntentId
+    );
+
+    if (paymentIntent.status !== "succeeded") {
+      return { error: "Payment not confirmed" };
+    }
+
+    // Update order confirmation status
     order.confirmed = true;
     await order.save();
-    if (order.user.email) {
+
+    // Send confirmation email if the user has an email
+    if (order.user && order.user.email) {
       const transporter = nodemailer.createTransport({
         service: "icloud",
-        secure: false,
+
         auth: {
           user: process.env.MAIL_USER,
           pass: process.env.MAIL_PASS,
         },
       });
 
-      let items = [];
-      order.orderItems.map((item) => {
-        items.push({
-          name: item.item.name,
-          price: item.price,
-          customizations: item.customizations.map((customization) => {
-            return customization.name;
-          }),
-        });
-      });
+      // Build the items list for the email
+      const items = order.orderItems.map((item) => ({
+        name: item.item.name,
+        price: item.price,
+        customizations: item.customizations.map(
+          (customization) => customization.name
+        ),
+      }));
 
+      // Add offers if they exist
       if (order.offers.length > 0) {
-        order.offers.map((offer) => {
+        order.offers.forEach((offer) => {
           items.push({
             name: offer.offer.name,
             price: offer.price,
-            customizations: offer.customizations.map((customization) => {
-              return customization.name;
-            }),
+            customizations: offer.customizations.map(
+              (customization) => customization.name
+            ),
           });
         });
       }
@@ -56,7 +74,6 @@ const confirmOrderService = async (id) => {
         from: process.env.MAIL_USER,
         to: order.user.email,
         subject: "Reçu commande Casse-croûte Courteau",
-
         html: generateOrderConfirmationEmail(
           order.user.name,
           order.code,
@@ -66,10 +83,13 @@ const confirmOrderService = async (id) => {
           items
         ),
       };
-      transporter.sendMail(mailOptions);
+
+      await transporter.sendMail(mailOptions);
     }
+
     return { response: "Order confirmed" };
   } catch (err) {
+    console.error("Error in confirmOrderService:", err);
     return { error: err.message };
   }
 };

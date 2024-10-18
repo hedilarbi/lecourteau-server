@@ -8,18 +8,19 @@ const updateRestaurantItemAvailabilityService = async (id, itemId) => {
     }
 
     const menuItemIndex = restaurant.menu_items.findIndex(
-      (item) => item._id == itemId
+      (item) => item.menuItem.toString() === itemId // Ensure to convert to string for comparison
     );
 
     if (menuItemIndex === -1) {
       return { error: "Item not found" };
     }
 
+    // Toggle availability
     restaurant.menu_items[menuItemIndex].availability =
       !restaurant.menu_items[menuItemIndex].availability;
 
-    await restaurant.save();
-    return { status: "success" };
+    const updatedRestaurant = await restaurant.save(); // Save and get the updated document
+    return { status: "success", restaurant: updatedRestaurant }; // Optionally return the updated restaurant
   } catch (error) {
     return { error: error.message };
   }

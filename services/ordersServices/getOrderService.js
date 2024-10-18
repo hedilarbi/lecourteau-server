@@ -11,6 +11,11 @@ const getOrderService = async (id) => {
       .populate({ path: "rewards", populate: "item" })
       .populate({ path: "user", select: "name phone_number email" })
       .populate({ path: "delivery_by", select: "name" });
+
+    if (!response) {
+      return { error: "Order not found" };
+    }
+
     return { response };
   } catch (err) {
     return { error: err.message };

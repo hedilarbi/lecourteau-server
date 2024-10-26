@@ -129,7 +129,7 @@ const getMenuItem = async (req, res) => {
       console.error("Error fetching menu item:", error);
       return res.status(400).json({ success: false, message: error });
     }
-    console.log(response);
+
     return res.status(200).json(response);
   } catch (err) {
     console.error("Error fetching menu item 500:", err);

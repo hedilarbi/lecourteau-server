@@ -113,11 +113,13 @@ const loginStaff = async (req, res) => {
       expoToken
     );
     if (error) {
+      console.error("error in login service:", error);
       return res.status(400).json({ message: error });
     }
 
     res.status(200).json({ staff, token });
   } catch (error) {
+    console.error("error in login controller:", error);
     res.status(500).json({ message: error.message });
   }
 };

@@ -10,6 +10,7 @@ const loginStaffService = async (username, password, expoToken) => {
       return { error: "staff not found" };
     }
     const verify = await bcrypt.compare(password, staff.password);
+    console.log(verify);
     if (!verify) {
       return { error: "wrong password" };
     }

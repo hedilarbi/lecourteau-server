@@ -14,7 +14,9 @@ const createOrderService = async (order) => {
   try {
     const rewardsList = order.order.rewards.map((item) => item.id);
     const code = generateRandomCode(8).toUpperCase();
-    await stripe.paymentIntents.retrieve(order.order.paymentIntentId);
+    if (order.order.paymentMethod === "card" && order.order.paymentIntentId) {
+      await stripe.paymentIntents.retrieve(order.order.paymentIntentId);
+    }
 
     const newOrder = new Order({
       user: order.order.user_id,
@@ -39,6 +41,7 @@ const createOrderService = async (order) => {
       sub_total_after_discount: parseFloat(order.order.subTotalAfterDiscount),
       tip: parseFloat(order.order.tip),
       paymentIntentId: order.order.paymentIntentId,
+      payment_method: order.order.paymentMethod,
     });
 
     const response = await newOrder.save();

@@ -1,6 +1,7 @@
 const Category = require("../models/Category");
 const createCategoryService = require("../services/categoriesServices/createCategoryService");
 const deleteCategoryService = require("../services/categoriesServices/deleteCategoryService");
+const triCategoriesService = require("../services/categoriesServices/triCategoriesService");
 
 const createCategory = async (req, res) => {
   const {
@@ -37,7 +38,7 @@ const createCategory = async (req, res) => {
 const getCategories = async (req, res) => {
   try {
     const response = await Category.find();
-
+    response.sort((a, b) => a.order - b.order);
     return res.status(200).json(response);
   } catch (error) {
     console.error("Error fetching categories:", error);
@@ -51,6 +52,7 @@ const getCategories = async (req, res) => {
 const getCategoriesNames = async (req, res) => {
   try {
     const response = await Category.find().select("name");
+    response.sort((a, b) => a.order - b.order);
 
     return res.status(200).json(response);
   } catch (error) {
@@ -146,6 +148,40 @@ const deleteCategory = async (req, res) => {
   }
 };
 
+const triCategories = async (req, res) => {
+  const { list } = req.body;
+
+  try {
+    const { error } = await triCategoriesService(list);
+    if (error) {
+      console.error("Error updating category order service:", error);
+      return res.status(400).json({ success: false, message: error });
+    }
+    res.status(200).json({ success: true, message: "Success" });
+  } catch (err) {
+    console.error("Error updating category order:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+async function updateCategoryOrder() {
+  try {
+    // Step 1: Retrieve all categories
+    const categories = await Category.find();
+
+    // Step 2 & 3: Assign and update order based on index
+    const updatePromises = categories.map((category, index) => {
+      category.order = index; // Set the order field to the index
+      return category.save(); // Save the updated category
+    });
+
+    // Execute all update promises
+    await Promise.all(updatePromises);
+    res.status(200).json({ success: true, message: "Success" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+    console.error("Error updating category order:", error);
+  }
+}
 module.exports = {
   createCategory,
   getCategories,
@@ -153,4 +189,6 @@ module.exports = {
   updateCategory,
   getCategory,
   getCategoriesNames,
+  triCategories,
+  updateCategoryOrder,
 };

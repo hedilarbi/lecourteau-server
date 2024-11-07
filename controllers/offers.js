@@ -123,7 +123,7 @@ const updateOffer = async (req, res) => {
     );
 
     if (error) {
-      console.log("error updating offer", error);
+      console.error("error updating offer", error);
       return res.status(404).json({ success: false, message: error });
     }
 

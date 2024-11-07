@@ -5,7 +5,7 @@ const getRestaurantOrdersService = async (id) => {
     const response = await Restaurant.findById(id)
       .select("orders")
       .populate("orders");
-
+    // response.orders.sort((a, b) => b.createdAt - a.createdAt); // Sort orders by date
     // Check if the restaurant exists
     if (!response) {
       return { error: new Error("Restaurant not found") };

@@ -19,6 +19,7 @@ const orderSchema = new Schema({
       ],
       size: String,
       price: Number,
+      comment: String,
     },
   ],
   offers: [
@@ -80,6 +81,10 @@ const orderSchema = new Schema({
     default: false,
   },
   paymentIntentId: String,
+  payment_method: {
+    type: String,
+    default: "cash",
+  },
 });
 
 module.exports = model("Order", orderSchema);

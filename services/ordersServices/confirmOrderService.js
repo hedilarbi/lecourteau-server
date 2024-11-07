@@ -25,14 +25,15 @@ const confirmOrderService = async (id) => {
     }
 
     // Attempt to capture the payment
-    const paymentIntent = await stripe.paymentIntents.capture(
-      order.paymentIntentId
-    );
+    if (order.paymentIntentId) {
+      const paymentIntent = await stripe.paymentIntents.capture(
+        order.paymentIntentId
+      );
 
-    if (paymentIntent.status !== "succeeded") {
-      return { error: "Payment not confirmed" };
+      if (paymentIntent.status !== "succeeded") {
+        return { error: "Payment not confirmed" };
+      }
     }
-
     // Update order confirmation status
     order.confirmed = true;
     await order.save();

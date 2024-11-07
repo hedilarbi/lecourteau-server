@@ -49,7 +49,7 @@ const updateMenuItemImageInFirebase = async (req, res, next) => {
   try {
     await oldImageFile.delete();
   } catch (err) {
-    console.log("err", err);
+    console.error("err", err);
   }
   const image = req.file;
   const imageName = Date.now() + "." + image.originalname.split(".").pop();

@@ -1,17 +1,17 @@
-const MenuItem = require("../../models/MenuItem");
+const Category = require("../../models/Category");
 
-const triMenutItemsService = async (list) => {
+const triCategoriesService = async (list) => {
   try {
-    const menuItems = await MenuItem.find();
+    const categories = await Category.find();
 
     // Collect promises for saving the updated items
     const savePromises = list.map(async (item) => {
-      const menuItem = menuItems.find((i) => i._id.toString() === item.id);
-      if (!menuItem) {
+      const category = categories.find((cat) => cat._id.toString() === item.id);
+      if (!category) {
         return { error: `Item with ID ${item.id} not found` }; // Return error if item not found
       }
-      menuItem.order = item.order;
-      return menuItem.save(); // Return the save promise
+      category.order = item.order;
+      return category.save(); // Return the save promise
     });
 
     // Execute all save promises
@@ -22,4 +22,5 @@ const triMenutItemsService = async (list) => {
     return { error: err.message };
   }
 };
-module.exports = triMenutItemsService;
+
+module.exports = triCategoriesService;

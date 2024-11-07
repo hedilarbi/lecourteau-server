@@ -7,10 +7,11 @@ const createCategoryService = async (name, firebaseUrl) => {
     if (existingCategory) {
       return { error: "Category already exists" };
     }
-
+    const categoriesCount = await Category.countDocuments();
     const newCategory = new Category({
       name,
       image: firebaseUrl,
+      order: categoriesCount,
     });
 
     const savedCategory = await newCategory.save();

@@ -6,6 +6,8 @@ const {
   updateCategory,
   getCategory,
   getCategoriesNames,
+  triCategories,
+  updateCategoryOrder,
 } = require("../controllers/categories");
 const {
   uploadImageToFirebase,
@@ -18,6 +20,8 @@ const router = express.Router();
 
 router.get("/", getCategories);
 router.get("/names", getCategoriesNames);
+router.put("/tri", triCategories);
+router.put("/test", updateCategoryOrder);
 router.post(
   "/create",
   Multer.single("file"),

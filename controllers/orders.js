@@ -13,6 +13,12 @@ const {
 } = require("../utils/mailTemplateGenerators");
 const confirmOrderService = require("../services/ordersServices/confirmOrderService");
 require("dotenv").config();
+
+const logWithTimestamp = (message) => {
+  const timeStamp = new Date().toISOString();
+  console.error(`${timeStamp} - ${message}`);
+};
+
 const createOrder = async (req, res) => {
   const { order } = req.body;
 
@@ -20,26 +26,29 @@ const createOrder = async (req, res) => {
     const { error, user, response } = await createOrderService(order);
 
     if (error) {
-      console.error("Error creating order service:", error);
+      logWithTimestamp(`Error creating order service: ${error}`);
+
       return res.status(400).json({ success: false, message: error });
     }
     res.status(201).json({ success: true, user, orderId: response._id });
   } catch (err) {
-    console.error("Error creating order:", err);
+    logWithTimestamp(`Error creating order service: ${error}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 const getOrders = async (req, res) => {
   try {
-    const { response, error } = await getOrdersService(req.query);
+    const { response, error } = await getOrdersService();
     if (error) {
-      console.error("Error fetching orders:", error);
+      logWithTimestamp(`Error fetching orders service: ${error}`);
       return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json(response);
   } catch (err) {
-    console.error("Error fetching orders:", err);
+    logWithTimestamp(`Error fetching orders service: ${err}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -50,13 +59,15 @@ const getOrder = async (req, res) => {
   try {
     const { response, error } = await getOrderService(id);
     if (error) {
-      console.error("Error fetching order:", error);
+      logWithTimestamp(`Error fetching order service: ${error}`);
+
       return res.status(404).json({ success: false, message: error });
     }
 
     res.status(200).json(response);
   } catch (err) {
-    console.error("Error fetching order:", err);
+    logWithTimestamp(`Error fetching order service: ${err}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -67,14 +78,16 @@ const deleteOrder = async (req, res) => {
   try {
     const { error, success } = await deleteOrderService(id);
     if (error) {
-      console.error("Error deleting order:", error);
+      logWithTimestamp(`Error deleting order service: ${error}`);
+
       return res.status(404).json({ success: false, message: error });
     }
     res
       .status(200)
       .json({ message: "Order deleted successfully", success: true });
   } catch (err) {
-    console.error("Error deleting order:", err);
+    logWithTimestamp(`Error deleting order service: ${err}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -85,14 +98,16 @@ const updateStatus = async (req, res) => {
   try {
     const { error } = await updateStatusService(id, status);
     if (error) {
-      console.error("Error updating order status:", error);
+      logWithTimestamp(`Error updating order status: ${error}`);
+
       return res.status(400).json({ success: false, message: error });
     }
     res
       .status(200)
       .json({ success: true, message: "Order status updated successfully" });
   } catch (err) {
-    console.error("Error updating order status:", err);
+    logWithTimestamp(`Error updating order status: ${err}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -110,12 +125,14 @@ const updatePrice = async (req, res) => {
   try {
     const { response, error } = await updatePriceService(id, price);
     if (error) {
-      console.error("Error updating order price:", error);
+      logWithTimestamp(`Error updating order price: ${error}`);
+
       return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json(response);
   } catch (err) {
-    console.error("Error updating order price:", err);
+    logWithTimestamp(`Error updating order price: ${err}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -134,12 +151,13 @@ const updatePriceAndStatus = async (req, res) => {
   try {
     const { error } = await updateOrderPriceAndStatusService(id, status, price);
     if (error) {
-      console.error("Error updating order price and status:", error);
+      logWithTimestamp(`Error updating order price and status: ${error}`);
       return res.status(400).json({ success: false, message: error });
     }
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error("Error updating order price and status:", err);
+    logWithTimestamp(`Error updating order price and status: ${err}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -214,12 +232,14 @@ const confirmOrder = async (req, res) => {
   try {
     const { error } = await confirmOrderService(id);
     if (error) {
-      console.error("Error confirming order service:", error);
+      logWithTimestamp(`Error confirming order service: ${error}`);
+
       return res.status(400).json({ success: false, error });
     }
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error("Error confirming order:", err);
+    logWithTimestamp(`Error confirming order service: ${err}`);
+
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 };

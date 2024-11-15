@@ -3,7 +3,10 @@ const getOffersService = require("../services/offersServices/getOffersService");
 const getOfferService = require("../services/offersServices/getOfferService");
 const deleteOfferService = require("../services/offersServices/deleteOfferService");
 const updateOfferService = require("../services/offersServices/updateOfferService");
-
+const logWithTimestamp = (message) => {
+  const timeStamp = new Date().toISOString();
+  console.error(`${timeStamp} - ${message}`);
+};
 const createOffer = async (req, res) => {
   let firebaseUrl = null;
   if (req.file) {
@@ -40,10 +43,12 @@ const createOffer = async (req, res) => {
     );
 
     if (error) {
+      console.error("error creating offer service", error);
       return res.status(500).json({ success: false, error });
     }
     res.status(201).json({ success: true, data: response });
   } catch (err) {
+    console.error("Error creating offer controller:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -123,13 +128,14 @@ const updateOffer = async (req, res) => {
     );
 
     if (error) {
-      console.error("error updating offer", error);
+      logWithTimestamp(`Error updating offer service: ${error}`);
       return res.status(404).json({ success: false, message: error });
     }
 
     res.status(200).json(response);
   } catch (err) {
-    console.error("Error updating offer:", err);
+    logWithTimestamp(`Error updating offer service: ${err}`);
+
     res.status(500).json({ success: false, message: err.message });
   }
 };

@@ -76,13 +76,15 @@ const createOrderService = async (order) => {
     restaurant.orders.push(response._id);
     await restaurant.save();
 
-    await sendPushNotifications(
+    const { restauNotif } = await sendPushNotifications(
       user,
       restaurant,
       response._id,
       code,
       pointsEarned
     );
+
+    console.log("restauNotif", restauNotif);
 
     return { response, user: newUser };
   } catch (err) {
@@ -119,7 +121,7 @@ const sendPushNotifications = async (
   const expo = new Expo();
 
   const userMessage = {
-    to: user.expo_token,
+    to: user.expo_token || "",
     sound: "default",
     body: `Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${
       pointsEarned * 10
@@ -130,7 +132,7 @@ const sendPushNotifications = async (
   };
 
   const dashboardMessage = {
-    to: restaurant.expo_token,
+    to: restaurant.expo_token || "",
     body: `Nouvelle commande en attente, code:${code}`,
     channel: "default",
     data: { order_id: orderId },
@@ -142,8 +144,10 @@ const sendPushNotifications = async (
   if (user.expo_token?.length > 0) {
     await expo.sendPushNotificationsAsync([userMessage]);
   }
+  let restauNotif;
   if (restaurant.expo_token?.length > 0) {
-    await expo.sendPushNotificationsAsync([dashboardMessage]);
+    restauNotif = await expo.sendPushNotificationsAsync([dashboardMessage]);
   }
+  return restauNotif;
 };
 module.exports = createOrderService;

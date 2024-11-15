@@ -42,7 +42,9 @@ const confirmOrderService = async (id) => {
     if (order.user && order.user.email) {
       const transporter = nodemailer.createTransport({
         service: "icloud",
-
+        host: "smtp.mail.me.com",
+        port: 587,
+        secure: false,
         auth: {
           user: process.env.MAIL_USER,
           pass: process.env.MAIL_PASS,
@@ -90,9 +92,14 @@ const confirmOrderService = async (id) => {
 
     return { response: "Order confirmed" };
   } catch (err) {
-    console.error("Error in confirmOrderService:", err);
+    logWithTimestamp(`Error confirming order: ${err}`);
+
     return { error: err.message };
   }
+};
+const logWithTimestamp = (message) => {
+  const timeStamp = new Date().toISOString();
+  console.error(`${timeStamp} - ${message}`);
 };
 
 module.exports = confirmOrderService;

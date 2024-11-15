@@ -5,7 +5,10 @@ require("dotenv/config");
 const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
   apiVersion: "2023-08-16",
 });
-
+const logWithTimestamp = (message) => {
+  const timeStamp = new Date().toISOString();
+  console.error(`${timeStamp} - ${message}`);
+};
 const createPayment = async (req, res) => {
   const { amount, email, paymentMethod, saved } = req.body;
 
@@ -49,7 +52,7 @@ const createPayment = async (req, res) => {
 
     res.status(200).json(paymentIntent);
   } catch (error) {
-    console.error("Error creating payment:", error);
+    logWithTimestamp(`Error creating payment: ${error}`);
 
     res.status(500).json({
       success: false,
@@ -66,7 +69,8 @@ const createSetupIntent = async (req, res) => {
 
     res.status(200).json({ clientSecret: setupIntent.client_secret });
   } catch (error) {
-    console.error("Error creating setup intent:", error);
+    logWithTimestamp(`Error creating setup intent: ${error}`);
+
     res.status(500).json({
       success: false,
       error:

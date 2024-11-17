@@ -12,6 +12,7 @@ const {
   generateOrderConfirmationEmail,
 } = require("../utils/mailTemplateGenerators");
 const confirmOrderService = require("../services/ordersServices/confirmOrderService");
+const updateOrderPaymentStatusService = require("../services/ordersServices/updateOrderPaymentStatusService");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -244,6 +245,26 @@ const confirmOrder = async (req, res) => {
   }
 };
 
+const updateOrderPaymentStatus = async (req, res) => {
+  const { payment_status } = req.body;
+  const { id } = req.params;
+  try {
+    const { error } = await updateOrderPaymentStatusService(id, payment_status);
+    if (error) {
+      logWithTimestamp(`Error updating order payment status : ${error}`);
+      return res.status(400).json({ success: false, message: error });
+    }
+    return res.status(200).json({
+      success: true,
+      message: "Order payment status updated successfully",
+    });
+  } catch (err) {
+    logWithTimestamp(`Error updating order payment status controller: ${err}`);
+
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 module.exports = {
   createOrder,
   getOrders,
@@ -254,6 +275,6 @@ module.exports = {
   reviewOrder,
   orderDelivered,
   updatePriceAndStatus,
-
+  updateOrderPaymentStatus,
   confirmOrder,
 };

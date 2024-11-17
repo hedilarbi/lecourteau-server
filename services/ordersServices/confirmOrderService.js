@@ -33,6 +33,7 @@ const confirmOrderService = async (id) => {
       if (paymentIntent.status !== "succeeded") {
         return { error: "Payment not confirmed" };
       }
+      order.payment_status = true;
     }
     // Update order confirmation status
     order.confirmed = true;

@@ -85,6 +85,10 @@ const orderSchema = new Schema({
     type: String,
     default: "cash",
   },
+  payment_status: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 module.exports = model("Order", orderSchema);

@@ -59,6 +59,21 @@ const restaurantSchema = new Schema({
     },
   ],
   expo_token: String,
+  settings: {
+    working_hours: {
+      open: {
+        hours: String,
+        minutes: String,
+      },
+      close: {
+        hours: String,
+        minutes: String,
+      },
+    },
+    delivery: Boolean,
+    open: Boolean,
+    delivery_fee: Number,
+  },
 });
 
 module.exports = model("Restaurant", restaurantSchema);

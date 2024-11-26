@@ -388,6 +388,89 @@ const getRestaurantOffer = async (req, res) => {
   }
 };
 
+const setSettings = async (req, res) => {
+  try {
+    const restaurants = await Restaurant.find();
+
+    if (!restaurants) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No restaurants found." });
+    }
+
+    const settings = {
+      working_hours: {
+        open: {
+          hours: "10",
+          minutes: "15",
+        },
+        close: {
+          hours: "21",
+          minutes: "00",
+        },
+      },
+      delivery: true,
+      open: true,
+      delivery_fee: 1.49,
+    };
+
+    const updatePromises = restaurants.map((restaurant) => {
+      restaurant.settings = settings;
+      return restaurant.save();
+    });
+
+    await Promise.all(updatePromises);
+
+    res.status(200).json({
+      success: true,
+      message: "Settings updated for all restaurants.",
+    });
+  } catch (error) {
+    console.error("Error setting settings:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+const getRestaurantsSettings = async (req, res) => {
+  try {
+    const response = await Restaurant.find().select("settings name");
+
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No restaurants found." });
+    }
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error getting settings:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+const updateRestaurantSettings = async (req, res) => {
+  const { id } = req.params;
+  const { settings } = req.body;
+  try {
+    const restaurant = await Restaurant.findById(id);
+
+    if (!restaurant) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Restaurant not found." });
+    }
+
+    restaurant.settings = settings;
+    await restaurant.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Restaurant settings updated successfully.",
+    });
+  } catch (error) {
+    console.error("Error updating restaurant settings:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createRestaurant,
   getRestaurants,
@@ -403,4 +486,7 @@ module.exports = {
   updateRestaurantToppingAvailability,
   getRestaurantMenuItem,
   getRestaurantOffer,
+  setSettings,
+  getRestaurantsSettings,
+  updateRestaurantSettings,
 };

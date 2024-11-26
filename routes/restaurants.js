@@ -14,13 +14,19 @@ const {
   updateRestaurantToppingAvailability,
   getRestaurantMenuItem,
   getRestaurantOffer,
+  setSettings,
+  getRestaurantsSettings,
+  updateRestaurantSettings,
 } = require("../controllers/restaurants");
 const router = express.Router();
 
 router.post("/create", createRestaurant);
+router.get("/settings", getRestaurantsSettings);
 router.get("/", getRestaurants);
+router.put("/", setSettings);
 router.get("/:id", getRestaurant);
 router.get("/items/:id", getRestaurantItems);
+router.put("/update/settings/:id", updateRestaurantSettings);
 router.get("/toppings/:id", getRestaurantToppings);
 router.get("/offers/:id", getRestaurantOffers);
 router.get("/orders/:id", getRestaurantOrders);

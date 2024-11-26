@@ -142,14 +142,13 @@ const sendPushNotifications = async (
   };
 
   // Send push notifications if tokens are available
-  if (user.expo_token?.length > 0) {
-    await expo.sendPushNotificationsAsync([userMessage]);
-  }
+  // if (user.expo_token?.length > 0) {
+  //   await expo.sendPushNotificationsAsync([userMessage]);
+  // }
   let restauNotif;
   if (restaurant.expo_token?.length > 0) {
     restauNotif = await expo.sendPushNotificationsAsync([dashboardMessage]);
     console.log("restauNotif", restauNotif);
   }
-  return restauNotif;
 };
 module.exports = createOrderService;

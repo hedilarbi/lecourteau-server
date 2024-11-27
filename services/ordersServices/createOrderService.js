@@ -123,17 +123,6 @@ const sendPushNotifications = async (
     useFcmV1: true,
   });
 
-  const userMessage = {
-    to: user.expo_token,
-    sound: "default",
-    body: `Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${
-      pointsEarned * 10
-    } points de fidélité.`,
-    data: { order_id: orderId },
-    title: "Nouvelle Commande",
-    priority: "high",
-  };
-
   const dashboardMessage = {
     to: restaurant.expo_token,
     body: `Nouvelle commande en attente, code:${code}`,
@@ -143,14 +132,28 @@ const sendPushNotifications = async (
     priority: "high",
   };
 
+  let restauNotif;
+  if (restaurant.expo_token?.length > 0) {
+    try {
+      restauNotif = await expo.sendPushNotificationsAsync([dashboardMessage]);
+      console.log("restauNotif", restauNotif);
+    } catch (err) {
+      console.log("err", err);
+    }
+  }
+  // const userMessage = {
+  //   to: user.expo_token,
+  //   sound: "default",
+  //   body: `Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${
+  //     pointsEarned * 10
+  //   } points de fidélité.`,
+  //   data: { order_id: orderId },
+  //   title: "Nouvelle Commande",
+  //   priority: "high",
+  // };
   // Send push notifications if tokens are available
   // if (user.expo_token?.length > 0) {
   //   await expo.sendPushNotificationsAsync([userMessage]);
   // }
-  let restauNotif;
-  if (restaurant.expo_token?.length > 0) {
-    restauNotif = await expo.sendPushNotificationsAsync([dashboardMessage]);
-    console.log("restauNotif", restauNotif);
-  }
 };
 module.exports = createOrderService;

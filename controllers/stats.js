@@ -1,6 +1,6 @@
 const { default: mongoose } = require("mongoose");
 const { ON_GOING } = require("../utils/constants");
-
+const { Expo } = require("expo-server-sdk");
 const getInititalStats = async (req, res) => {
   try {
     const usersCount = await mongoose.models.User.countDocuments();
@@ -53,24 +53,27 @@ const getRestaurantStats = async (req, res) => {
 
 const testNotif = async (req, res) => {
   try {
-    const response = await fetch("https://fcm.googleapis.com/fcm/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `key=AAAAf0XCO7U:APA91bHqRonFXY9hWDOL5QttkvvLAJtMnAL2AK5jOERXOak1DRFYDdhEDpsYOh4pjAfG3ZDmhOlO49M-s7KDjPvlE6xNz1KqpQcQUnC2BjTukPZiX31ADwGFCZXrXASo_oU46knX2euk`,
-      },
-      body: JSON.stringify({
-        to: "dlIQp0RMQaC0DvCMa8wuCf:APA91bHjGvb3KbJUfvQgM0F_aTJyPUdjkEyrmBttZcwffHU4wkHtIdpfsP15k-tAtdFkDvmxa2S46o75r1UWwbA4Q0vfcQWkRlBQ7_gzvHNT2hk5OR2pSQLLrg06bvL3MSxgps3VRMPZ",
-        priority: "normal",
-        data: {
-          experienceId: "@hedilarbi95/lecourteau-dashboard",
-          scopeKey: "@hedilarbi95/lecourteau-dashboard",
-          title: "📧 You've got mail",
-          message: "Hello world! 🌐",
-        },
-      }),
+    const expo = new Expo({
+      useFcmV1: true,
     });
+    const dashboardMessage = {
+      to: "",
+      body: `Nouvelle commande en attente,`,
+      channel: "default",
 
+      title: "Nouvelle Commande",
+      priority: "high",
+    };
+    const chunks = expo.chunkPushNotifications([dashboardMessage]);
+    const tickets = [];
+    for (let chunk of chunks) {
+      try {
+        let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+        tickets.push(...ticketChunk);
+      } catch (error) {
+        console.error(error);
+      }
+    }
     res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

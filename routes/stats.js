@@ -8,6 +8,6 @@ const router = express.Router();
 
 router.get("/initial", getInititalStats);
 router.get("/initial/:id", getRestaurantStats);
-router.get("test", testNotif);
+router.get("/test", testNotif);
 
 module.exports = router;

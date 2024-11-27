@@ -432,7 +432,9 @@ const setSettings = async (req, res) => {
 };
 const getRestaurantsSettings = async (req, res) => {
   try {
-    const response = await Restaurant.find().select("settings name");
+    const response = await Restaurant.find().select(
+      "settings name location address"
+    );
 
     if (!response) {
       return res

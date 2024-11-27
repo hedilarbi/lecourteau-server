@@ -119,7 +119,9 @@ const sendPushNotifications = async (
   code,
   pointsEarned
 ) => {
-  const expo = new Expo();
+  const expo = new Expo({
+    useFcmV1: true,
+  });
 
   const userMessage = {
     to: user.expo_token,

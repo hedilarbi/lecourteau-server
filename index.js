@@ -16,7 +16,7 @@ const paymentsRoutes = require("./routes/payments");
 const statsRoutes = require("./routes/stats");
 const restaurantsRoutes = require("./routes/restaurants");
 const notifiersRoutes = require("./routes/notifies");
-
+const appRoutes = require("./routes/app");
 const sizesRoutes = require("./routes/sizes");
 require("dotenv/config");
 
@@ -44,8 +44,8 @@ app.use("/api/payments", paymentsRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/restaurants", restaurantsRoutes);
 app.use("/api/notifiers", notifiersRoutes);
-
 app.use("/api/sizes", sizesRoutes);
+app.use("/api/app", appRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,

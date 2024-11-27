@@ -57,7 +57,7 @@ const testNotif = async (req, res) => {
       useFcmV1: true,
     });
     const dashboardMessage = {
-      to: "ExponentPushToken[fAaZH0K-by2Z9Nl-N6blzm]",
+      to: "ExponentPushToken[3oAbv4L8LcFgGj5hk7kSfW]",
       body: `Nouvelle commande en attente,`,
       channel: "default",
       title: "Nouvelle Commande",

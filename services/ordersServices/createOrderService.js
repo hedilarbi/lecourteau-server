@@ -131,14 +131,45 @@ const sendPushNotifications = async (
     title: "Nouvelle Commande",
     priority: "high",
   };
+  if (restaurant.expo_token) {
+    const chunks = expo.chunkPushNotifications([dashboardMessage]);
+    const tickets = [];
+    for (let chunk of chunks) {
+      try {
+        let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+        tickets.push(...ticketChunk);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+    let receiptIds = [];
+    for (let ticket of tickets) {
+      if (ticket.status === "ok") {
+        receiptIds.push(ticket.id);
+      }
+    }
+    let receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
+    for (let chunk of receiptIdChunks) {
+      try {
+        let receipts = await expo.getPushNotificationReceiptsAsync(chunk);
+        console.log(receipts);
 
-  let restauNotif;
-  if (restaurant.expo_token?.length > 0) {
-    try {
-      restauNotif = await expo.sendPushNotificationsAsync([dashboardMessage]);
-      console.log("restauNotif", restauNotif);
-    } catch (err) {
-      console.log("err", err);
+        for (let receiptId in receipts) {
+          let { status, message, details } = receipts[receiptId];
+          if (status === "ok") {
+            continue;
+          } else if (status === "error") {
+            console.error(
+              `There was an error sending a notification: ${message}`
+            );
+            if (details && details.error) {
+              console.error(`The error code is ${details.error}`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(error);
+      }
     }
   }
   // const userMessage = {

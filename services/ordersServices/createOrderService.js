@@ -10,6 +10,7 @@ require("dotenv/config");
 const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
   apiVersion: "2023-08-16",
 });
+
 const createOrderService = async (order) => {
   try {
     const rewardsList = order.order.rewards.map((item) => item.id);
@@ -137,7 +138,7 @@ const sendPushNotifications = async (
     for (let chunk of chunks) {
       try {
         let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-        console.log("ticketChunk", ticketChunk);
+        console.log("ticketChunk", ticketChunk, "order Code", code);
         tickets.push(...ticketChunk);
       } catch (error) {
         console.error(error);
@@ -150,7 +151,7 @@ const sendPushNotifications = async (
       }
     }
     let receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
-    console.log("receiptIdChunks", receiptIdChunks);
+
     for (let chunk of receiptIdChunks) {
       try {
         let receipts = await expo.getPushNotificationReceiptsAsync(chunk);

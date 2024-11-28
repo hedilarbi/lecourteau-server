@@ -68,6 +68,7 @@ const testNotif = async (req, res) => {
     for (let chunk of chunks) {
       try {
         let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+        console.log("ticketChunk", ticketChunk);
         tickets.push(...ticketChunk);
       } catch (error) {
         console.error(error);
@@ -83,7 +84,7 @@ const testNotif = async (req, res) => {
     for (let chunk of receiptIdChunks) {
       try {
         let receipts = await expo.getPushNotificationReceiptsAsync(chunk);
-        console.log(receipts);
+        console.log("receips", receipts);
 
         for (let receiptId in receipts) {
           let { status, message, details } = receipts[receiptId];

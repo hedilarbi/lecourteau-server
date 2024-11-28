@@ -73,6 +73,35 @@ const testNotif = async (req, res) => {
         console.error(error);
       }
     }
+    let receiptIds = [];
+    for (let ticket of tickets) {
+      if (ticket.status === "ok") {
+        receiptIds.push(ticket.id);
+      }
+    }
+    let receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
+    for (let chunk of receiptIdChunks) {
+      try {
+        let receipts = await expo.getPushNotificationReceiptsAsync(chunk);
+        console.log(receipts);
+
+        for (let receiptId in receipts) {
+          let { status, message, details } = receipts[receiptId];
+          if (status === "ok") {
+            continue;
+          } else if (status === "error") {
+            console.error(
+              `There was an error sending a notification: ${message}`
+            );
+            if (details && details.error) {
+              console.error(`The error code is ${details.error}`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
     res.status(200).json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

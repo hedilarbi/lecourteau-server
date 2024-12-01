@@ -17,10 +17,12 @@ const {
   updateUserExpoToken,
   updateUserDiscount,
   savePayementDetails,
+  getUsersPagination,
 } = require("../controllers/users");
 const router = express.Router();
 
 router.get("/", getUsers);
+router.get("/pagination", getUsersPagination);
 router.get("/userByToken", getUserByToken);
 router.put("/update/discount", updateUserDiscount);
 router.post("/create", createUser);

@@ -12,6 +12,8 @@ const {
 
   confirmOrder,
   updateOrderPaymentStatus,
+  getFilteredOrders,
+  getRestaurantFilteredOrders,
 } = require("../controllers/orders");
 const router = express.Router();
 
@@ -19,6 +21,8 @@ router.get("/", getOrders);
 
 router.put("/confirm/:id", confirmOrder);
 router.post("/create", createOrder);
+router.get("/filter", getFilteredOrders);
+router.get("/filter/:id", getRestaurantFilteredOrders);
 router.delete("/delete/:id", deleteOrder);
 router.put("/review/:id", reviewOrder);
 router.put("/update/status/:id", updateStatus);

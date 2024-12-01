@@ -13,6 +13,7 @@ const {
 } = require("../utils/mailTemplateGenerators");
 const confirmOrderService = require("../services/ordersServices/confirmOrderService");
 const updateOrderPaymentStatusService = require("../services/ordersServices/updateOrderPaymentStatusService");
+const Order = require("../models/Order");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -265,6 +266,53 @@ const updateOrderPaymentStatus = async (req, res) => {
   }
 };
 
+const getFilteredOrders = async (req, res) => {
+  const { page = 1, limit = 15, status } = req.query;
+  try {
+    const query = status ? { status } : {}; // Filter by status if provided
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 }) // Sort by creation date (most recent first)
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+
+    const total = await Order.countDocuments(query);
+
+    res.json({
+      orders,
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    res.status(500).json({ error: "An error occurred while fetching orders." });
+  }
+};
+
+const getRestaurantFilteredOrders = async (req, res) => {
+  const { page = 1, limit = 15, status } = req.query;
+  const { id } = req.params;
+  try {
+    const query = status ? { status, restaurant: id } : { restaurant: id }; // Filter by status if provided
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 }) // Sort by creation date (most recent first)
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+
+    const total = await Order.countDocuments(query);
+
+    res.json({
+      orders,
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    res.status(500).json({ error: "An error occurred while fetching orders." });
+  }
+};
+
 module.exports = {
   createOrder,
   getOrders,
@@ -277,4 +325,6 @@ module.exports = {
   updatePriceAndStatus,
   updateOrderPaymentStatus,
   confirmOrder,
+  getFilteredOrders,
+  getRestaurantFilteredOrders,
 };

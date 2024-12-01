@@ -273,6 +273,24 @@ const savePayementDetails = async (req, res) => {
   }
 };
 
+const getUsersPagination = async (req, res) => {
+  const { page, limit } = req.query;
+  try {
+    const users = await User.find()
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    const total = await User.countDocuments();
+
+    res.status(200).json({
+      users,
+      pages: Math.ceil(total / limit),
+      page: page,
+    });
+  } catch {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -290,4 +308,5 @@ module.exports = {
   updateUserExpoToken,
   updateUserDiscount,
   savePayementDetails,
+  getUsersPagination,
 };

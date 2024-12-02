@@ -315,8 +315,15 @@ const getRestaurantFilteredOrders = async (req, res) => {
 
 const getNonConfirmedOrders = async (req, res) => {
   const { id } = req.params;
+
   try {
-    const orders = await Order.find({ confirmed: false, restaurant: id });
+    const tenMinutesAgo = new Date();
+    tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 10);
+    const orders = await Order.find({
+      confirmed: false,
+      restaurant: id,
+      createdAt: { $gte: tenMinutesAgo },
+    });
     res.json(orders);
   } catch (error) {
     res.status(500).json({ error: "An error occurred while fetching orders." });

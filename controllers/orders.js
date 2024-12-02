@@ -313,6 +313,16 @@ const getRestaurantFilteredOrders = async (req, res) => {
   }
 };
 
+const getNonConfirmedOrders = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const orders = await Order.find({ confirmed: false, restaurant: id });
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ error: "An error occurred while fetching orders." });
+  }
+};
+
 module.exports = {
   createOrder,
   getOrders,
@@ -327,4 +337,5 @@ module.exports = {
   confirmOrder,
   getFilteredOrders,
   getRestaurantFilteredOrders,
+  getNonConfirmedOrders,
 };

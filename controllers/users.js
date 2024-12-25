@@ -274,19 +274,26 @@ const savePayementDetails = async (req, res) => {
 };
 
 const getUsersPagination = async (req, res) => {
-  const { page, limit } = req.query;
+  const { page, limit, name } = req.query;
+
   try {
-    const users = await User.find()
+    let query = {};
+    if (name.length > 0) {
+      query.name = { $regex: name, $options: "i" }; // Case-insensitive search
+    }
+    const users = await User.find(query)
+      .select("name email ")
       .limit(limit * 1)
       .skip((page - 1) * limit);
-    const total = await User.countDocuments();
+    const total = await User.countDocuments(query);
 
     res.status(200).json({
       users,
       pages: Math.ceil(total / limit),
       page: page,
     });
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 };

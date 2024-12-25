@@ -267,10 +267,12 @@ const updateOrderPaymentStatus = async (req, res) => {
 };
 
 const getFilteredOrders = async (req, res) => {
-  const { page = 1, limit = 15, status } = req.query;
+  const { page = 1, limit = 15, status, code } = req.query;
   try {
     const query = status ? { status } : {}; // Filter by status if provided
-
+    if (code) {
+      query.code = { $regex: code, $options: "i" };
+    }
     const orders = await Order.find(query)
       .sort({ createdAt: -1 }) // Sort by creation date (most recent first)
       .skip((page - 1) * limit)
@@ -290,11 +292,14 @@ const getFilteredOrders = async (req, res) => {
 };
 
 const getRestaurantFilteredOrders = async (req, res) => {
-  const { page = 1, limit = 15, status } = req.query;
+  const { page = 1, limit = 15, status, code } = req.query;
+  console.log("code", code);
   const { id } = req.params;
   try {
     const query = status ? { status, restaurant: id } : { restaurant: id }; // Filter by status if provided
-
+    if (code) {
+      query.code = code;
+    }
     const orders = await Order.find(query)
       .sort({ createdAt: -1 }) // Sort by creation date (most recent first)
       .skip((page - 1) * limit)

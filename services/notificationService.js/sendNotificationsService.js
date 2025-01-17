@@ -23,10 +23,11 @@ const sendNotificationsService = async (title, body) => {
     let tickets = [];
     for (let chunk of chunks) {
       let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-
+      console.log(ticketChunk);
       tickets.push(...ticketChunk);
     }
   } catch (err) {
+    console.log(err);
     return { error: err.message };
   }
 };

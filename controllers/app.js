@@ -24,10 +24,10 @@ const getApp = async (req, res) => {
 
 const updateApp = async (req, res) => {
   try {
-    const { appVersion } = req.body;
+    const { appVersion, iosAppVersion } = req.body;
     const response = await App.findByIdAndUpdate(
       req.params.id,
-      { appVersion },
+      { appVersion, iosAppVersion },
       {
         new: true,
       }

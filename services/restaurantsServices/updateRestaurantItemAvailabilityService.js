@@ -20,6 +20,7 @@ const updateRestaurantItemAvailabilityService = async (id, itemId) => {
       !restaurant.menu_items[menuItemIndex].availability;
 
     const updatedRestaurant = await restaurant.save(); // Save and get the updated document
+
     return { status: "success", restaurant: updatedRestaurant }; // Optionally return the updated restaurant
   } catch (error) {
     return { error: error.message };

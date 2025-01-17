@@ -268,6 +268,7 @@ const updateOrderPaymentStatus = async (req, res) => {
 
 const getFilteredOrders = async (req, res) => {
   const { page = 1, limit = 15, status, code } = req.query;
+
   try {
     const query = status ? { status } : {}; // Filter by status if provided
     if (code) {
@@ -293,7 +294,7 @@ const getFilteredOrders = async (req, res) => {
 
 const getRestaurantFilteredOrders = async (req, res) => {
   const { page = 1, limit = 15, status, code } = req.query;
-  console.log("code", code);
+
   const { id } = req.params;
   try {
     const query = status ? { status, restaurant: id } : { restaurant: id }; // Filter by status if provided
@@ -323,7 +324,7 @@ const getNonConfirmedOrders = async (req, res) => {
 
   try {
     const tenMinutesAgo = new Date();
-    tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 10);
+    tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 20);
     const orders = await Order.find({
       confirmed: false,
       restaurant: id,

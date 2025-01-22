@@ -36,6 +36,7 @@ const sendNotifications = async (req, res) => {
     }
     res.json({ status: true, message: "notifications sent" });
   } catch (err) {
+    console.error("Error sending notifications:", err);
     res.status(500).json({ status: false, message: err.message });
   }
 };

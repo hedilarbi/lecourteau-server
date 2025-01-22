@@ -26,7 +26,7 @@ router.get("/new", getNewItems);
 router.post(
   "/create",
   Multer.single("file"),
-  optimizeImage,
+
   uploadImageToFirebase,
   createMenuItem
 );

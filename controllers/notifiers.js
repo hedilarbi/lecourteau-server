@@ -10,16 +10,26 @@ require("dotenv/config");
 const sendNotifications = async (req, res) => {
   const { title, body } = req.body;
   console.log("title", title);
+
   try {
+    // Respond immediately to the client
+    res.json({
+      status: true,
+      message: "Notifications are being sent in the background",
+    });
+
     let messages = [];
     let expo = new Expo();
     const users = await mongoose.models.User.find();
     console.log("users");
     const usersTokens = users.map((user) => user.expo_token);
     console.log("usersTokens", usersTokens.length);
+
     for (let pushToken of usersTokens) {
+      console.log("pushToken", pushToken);
       if (!Expo.isExpoPushToken(pushToken)) {
-        return { error: `invalid notification token` };
+        console.warn(`Invalid notification token: ${pushToken}`);
+        continue;
       }
 
       messages.push({
@@ -29,16 +39,22 @@ const sendNotifications = async (req, res) => {
         title,
       });
     }
+
     let chunks = expo.chunkPushNotifications(messages);
     let tickets = [];
     console.log("chunks");
+
     for (let chunk of chunks) {
-      let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-      console.log("ticketChunk");
-      tickets.push(...ticketChunk);
+      try {
+        let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+        console.log("ticketChunk", ticketChunk);
+        tickets.push(...ticketChunk);
+      } catch (error) {
+        console.error("Error sending chunk:", error);
+      }
     }
-    console.log("tickets");
-    res.json({ status: true, message: "notifications sent" });
+
+    console.log("Finished sending notifications");
   } catch (err) {
     console.error("Error sending notifications:", err);
     res.status(500).json({ status: false, message: err.message });

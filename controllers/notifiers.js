@@ -21,14 +21,11 @@ const sendNotifications = async (req, res) => {
     let messages = [];
     let expo = new Expo();
     const users = await mongoose.models.User.find();
-    console.log("users");
+
     const usersTokens = users.map((user) => user.expo_token);
-    console.log("usersTokens", usersTokens.length);
 
     for (let pushToken of usersTokens) {
-      console.log("pushToken", pushToken);
       if (!Expo.isExpoPushToken(pushToken)) {
-        console.warn(`Invalid notification token: ${pushToken}`);
         continue;
       }
 
@@ -42,12 +39,11 @@ const sendNotifications = async (req, res) => {
 
     let chunks = expo.chunkPushNotifications(messages);
     let tickets = [];
-    console.log("chunks");
 
     for (let chunk of chunks) {
       try {
         let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-        console.log("ticketChunk", ticketChunk);
+
         tickets.push(...ticketChunk);
       } catch (error) {
         console.error("Error sending chunk:", error);

@@ -9,12 +9,14 @@ require("dotenv/config");
 
 const sendNotifications = async (req, res) => {
   const { title, body } = req.body;
-
+  console.log("title", title);
   try {
     let messages = [];
     let expo = new Expo();
     const users = await mongoose.models.User.find();
+    console.log("users");
     const usersTokens = users.map((user) => user.expo_token);
+    console.log("usersTokens");
     for (let pushToken of usersTokens) {
       if (!Expo.isExpoPushToken(pushToken)) {
         return { error: `invalid notification token` };
@@ -29,9 +31,10 @@ const sendNotifications = async (req, res) => {
     }
     let chunks = expo.chunkPushNotifications(messages);
     let tickets = [];
+    console.log("chunks");
     for (let chunk of chunks) {
       let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-
+      console.log("ticketChunk");
       tickets.push(...ticketChunk);
     }
     res.json({ status: true, message: "notifications sent" });

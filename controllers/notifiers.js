@@ -16,7 +16,7 @@ const sendNotifications = async (req, res) => {
     const users = await mongoose.models.User.find();
     console.log("users");
     const usersTokens = users.map((user) => user.expo_token);
-    console.log("usersTokens");
+    console.log("usersTokens", usersTokens.length);
     for (let pushToken of usersTokens) {
       if (!Expo.isExpoPushToken(pushToken)) {
         return { error: `invalid notification token` };
@@ -37,6 +37,7 @@ const sendNotifications = async (req, res) => {
       console.log("ticketChunk");
       tickets.push(...ticketChunk);
     }
+    console.log("tickets");
     res.json({ status: true, message: "notifications sent" });
   } catch (err) {
     console.error("Error sending notifications:", err);

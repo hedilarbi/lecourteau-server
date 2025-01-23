@@ -524,12 +524,10 @@ const updateEmploie = async (req, res) => {
 
     await Promise.all(updatePromises);
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Settings updated for all restaurants.",
-      });
+    res.status(200).json({
+      success: true,
+      message: "Settings updated for all restaurants.",
+    });
   } catch (error) {
     console.error("Error updating restaurant:", error);
     res.status(500).json({ success: false, message: error.message });

@@ -48,10 +48,36 @@ const createOrderService = async (order) => {
       payment_method: order.order.paymentMethod,
     });
 
-    const response = await newOrder.save();
-
     // Fetch user and restaurant
-    const user = await mongoose.models.User.findById(order.order.user_id);
+    const user = await mongoose.models.User.findById(
+      order.order.user_id
+    ).populate("orders");
+    if (user.orders.length > 0) {
+      const lastOrder = user.orders[user.orders.length - 1];
+      const lastOrderTime = new Date(lastOrder.createdAt).getTime();
+      const currentTime = new Date().getTime();
+      const timeDifference = (currentTime - lastOrderTime) / 1000 / 60; // time difference in minutes
+
+      if (timeDifference <= 10) {
+        return {
+          error:
+            "You cannot place another order within 10 minutes of your last order.",
+        };
+      }
+    }
+
+    // Check if paymentIntentId of the last order already exists among the user's orders
+    const existingOrderWithPaymentIntent = user.orders.find(
+      (userOrder) => userOrder.paymentIntentId === order.order.paymentIntentId
+    );
+
+    if (existingOrderWithPaymentIntent) {
+      return {
+        error: "This payment intent has already been used for another order.",
+      };
+    }
+
+    const response = await newOrder.save();
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant
     );

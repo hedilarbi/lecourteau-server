@@ -473,6 +473,69 @@ const updateRestaurantSettings = async (req, res) => {
   }
 };
 
+const getRestaurantsList = async (req, res) => {
+  try {
+    const restaurants = await Restaurant.find().select("name");
+
+    if (!restaurants) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No restaurants found." });
+    }
+
+    res.status(200).json(restaurants);
+  } catch (error) {
+    console.error("Error fetching restaurants:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getRestaurantSettings = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const response = await Restaurant.findById(id).select(
+      "settings name location address"
+    );
+
+    if (!response) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No restaurants found." });
+    }
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error getting settings:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateEmploie = async (req, res) => {
+  const { emploie } = req.body;
+
+  try {
+    const restaurants = await Restaurant.find();
+
+    const updatePromises = restaurants.map((restaurant) => {
+      restaurant.settings.emploie_du_temps = emploie;
+      return restaurant.save();
+    });
+
+    await Promise.all(updatePromises);
+
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Settings updated for all restaurants.",
+      });
+  } catch (error) {
+    console.error("Error updating restaurant:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createRestaurant,
   getRestaurants,
@@ -491,4 +554,7 @@ module.exports = {
   setSettings,
   getRestaurantsSettings,
   updateRestaurantSettings,
+  getRestaurantsList,
+  getRestaurantSettings,
+  updateEmploie,
 };

@@ -267,12 +267,15 @@ const updateOrderPaymentStatus = async (req, res) => {
 };
 
 const getFilteredOrders = async (req, res) => {
-  const { page = 1, limit = 15, status, code } = req.query;
+  const { page = 1, limit = 15, status, code, restaurant } = req.query;
 
   try {
     const query = status ? { status } : {}; // Filter by status if provided
     if (code) {
       query.code = { $regex: code, $options: "i" };
+    }
+    if (restaurant.length > 0) {
+      query.restaurant = restaurant;
     }
     const orders = await Order.find(query)
       .sort({ createdAt: -1 }) // Sort by creation date (most recent first)
@@ -288,6 +291,7 @@ const getFilteredOrders = async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (error) {
+    console.error("Error fetching orders:", error);
     res.status(500).json({ error: "An error occurred while fetching orders." });
   }
 };

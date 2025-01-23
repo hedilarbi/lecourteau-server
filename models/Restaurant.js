@@ -70,9 +70,45 @@ const restaurantSchema = new Schema({
         minutes: String,
       },
     },
+    emploie_du_temps: {
+      lundi: {
+        open: { type: String, required: true }, // E.g., "08:00"
+        close: { type: String, required: true }, // E.g., "12:00"
+      },
+
+      mardi: {
+        open: { type: String, required: true },
+        close: { type: String, required: true },
+      },
+
+      mercredi: {
+        open: { type: String, required: true },
+        close: { type: String, required: true },
+      },
+
+      jeudi: {
+        open: { type: String, required: true },
+        close: { type: String, required: true },
+      },
+
+      vendredi: {
+        open: { type: String, required: true },
+        close: { type: String, required: true },
+      },
+      samedi: {
+        open: { type: String },
+        close: { type: String },
+      },
+
+      dimanche: {
+        open: { type: String },
+        close: { type: String },
+      },
+    },
     delivery: Boolean,
     open: Boolean,
     delivery_fee: Number,
+    delivery_range: Number,
   },
 });
 

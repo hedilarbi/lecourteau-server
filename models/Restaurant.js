@@ -72,28 +72,28 @@ const restaurantSchema = new Schema({
     },
     emploie_du_temps: {
       lundi: {
-        open: { type: String, required: true }, // E.g., "08:00"
-        close: { type: String, required: true }, // E.g., "12:00"
+        open: { type: String }, // E.g., "08:00"
+        close: { type: String }, // E.g., "12:00"
       },
 
       mardi: {
-        open: { type: String, required: true },
-        close: { type: String, required: true },
+        open: { type: String },
+        close: { type: String },
       },
 
       mercredi: {
-        open: { type: String, required: true },
-        close: { type: String, required: true },
+        open: { type: String },
+        close: { type: String },
       },
 
       jeudi: {
-        open: { type: String, required: true },
-        close: { type: String, required: true },
+        open: { type: String },
+        close: { type: String },
       },
 
       vendredi: {
-        open: { type: String, required: true },
-        close: { type: String, required: true },
+        open: { type: String },
+        close: { type: String },
       },
       samedi: {
         open: { type: String },

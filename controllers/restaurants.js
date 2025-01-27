@@ -68,7 +68,7 @@ const createRestaurant = async (req, res) => {
 const getRestaurants = async (req, res) => {
   try {
     const { error, response } = await getRestaurantsService();
-
+    console.log("response", response);
     if (error) {
       console.error("Error fetching restaurants:", error); // Log the error
       return res.status(500).json({ success: false, message: error });

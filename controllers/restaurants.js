@@ -513,7 +513,7 @@ const getRestaurantSettings = async (req, res) => {
 
 const updateEmploie = async (req, res) => {
   const { emploie } = req.body;
-
+  console.log(emploie);
   try {
     const restaurants = await Restaurant.find();
 

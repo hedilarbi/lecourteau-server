@@ -524,7 +524,7 @@ const updateEmploie = async (req, res) => {
     console.log("updated promise", updatePromises);
     const response = await Promise.all(updatePromises);
     console.log(response.data);
-
+    console.log("Settings updated for all restaurants.");
     res.status(200).json({
       success: true,
       message: "Settings updated for all restaurants.",

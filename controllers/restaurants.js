@@ -521,7 +521,7 @@ const updateEmploie = async (req, res) => {
       restaurant.settings.emploie_du_temps = emploie;
       return restaurant.save();
     });
-
+    console.log("updated promise", updatePromises);
     const response = await Promise.all(updatePromises);
     console.log(response.data);
 

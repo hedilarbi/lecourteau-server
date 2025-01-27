@@ -522,7 +522,8 @@ const updateEmploie = async (req, res) => {
       return restaurant.save();
     });
 
-    await Promise.all(updatePromises);
+    const response = await Promise.all(updatePromises);
+    console.log(response.data);
 
     res.status(200).json({
       success: true,

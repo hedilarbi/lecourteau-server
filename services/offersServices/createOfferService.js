@@ -6,7 +6,7 @@ const createOfferService = async (
   expireAt,
   itemList,
   price,
-  customizationList,
+
   firebaseUrl
 ) => {
   try {
@@ -20,7 +20,7 @@ const createOfferService = async (
       image: firebaseUrl,
       expireAt: new Date(expireAt),
       items: itemList,
-      customizations: customizationList,
+
       price: parseFloat(price),
       createdAt: new Date(),
     });

@@ -7,11 +7,22 @@ const getOrderService = async (id) => {
         path: "orderItems",
         populate: "customizations item",
       })
-      .populate({ path: "offers", populate: "offer customizations" })
+      .populate({
+        path: "offers",
+        populate: [
+          { path: "offer" },
+          {
+            path: "items.item",
+            select: "name",
+          },
+          {
+            path: "items.customizations",
+            select: "name",
+          },
+        ],
+      })
       .populate({ path: "rewards", populate: "item" })
-      .populate({ path: "user", select: "name phone_number email" })
-      .populate({ path: "delivery_by", select: "name" })
-      .populate("restaurant");
+      .populate({ path: "user", select: "name phone_number email" });
 
     if (!response) {
       return { error: "Order not found" };

@@ -14,16 +14,15 @@ const createOffer = async (req, res) => {
   }
 
   try {
-    const { name, expireAt, items, price, customizations } = req.body;
+    const { name, expireAt, items, price } = req.body;
 
-    if (!name || !expireAt || !items || !price || !customizations) {
+    if (!name || !expireAt || !items || !price) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid input data" });
     }
 
     const parsedItems = JSON.parse(items);
-    const parsedCustomization = JSON.parse(customizations);
 
     const itemList = parsedItems.map((item) => ({
       item: item.item._id,
@@ -31,14 +30,12 @@ const createOffer = async (req, res) => {
       size: item.size,
     }));
 
-    const customizationList = parsedCustomization.map((item) => item._id);
-
     const { response, error } = await createOfferService(
       name,
       expireAt,
       itemList,
       price,
-      customizationList,
+
       firebaseUrl
     );
 
@@ -102,16 +99,12 @@ const updateOffer = async (req, res) => {
     firebaseUrl = req.file.firebaseUrl;
   }
 
-  const { name, price, expireAt, items, customizations } = req.body;
+  const { name, price, expireAt, items } = req.body;
   const { id } = req.params;
 
   try {
     const itemsArray = JSON.parse(items);
-    const customizationArray = JSON.parse(customizations);
 
-    const newCustomizations = customizationArray.map((custo) => ({
-      _id: custo._id,
-    }));
     const newItems = itemsArray.map((item) => ({
       item: item.item._id,
       size: item.size,
@@ -121,7 +114,7 @@ const updateOffer = async (req, res) => {
       id,
       name,
       newItems,
-      newCustomizations,
+
       price,
       expireAt,
       firebaseUrl

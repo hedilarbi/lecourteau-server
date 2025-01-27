@@ -25,16 +25,17 @@ const createOrder = async (req, res) => {
   const { order } = req.body;
 
   try {
-    const { error, user, response } = await createOrderService(order);
+    const { error, response } = await createOrderService(order);
 
     if (error) {
       logWithTimestamp(`Error creating order service: ${error}`);
 
       return res.status(400).json({ success: false, message: error });
     }
-    res.status(201).json({ success: true, user, orderId: response._id });
+
+    res.status(201).json({ success: true, orderId: response._id });
   } catch (err) {
-    logWithTimestamp(`Error creating order service: ${error}`);
+    logWithTimestamp(`Error creating order service: ${err}`);
 
     res.status(500).json({ success: false, message: err.message });
   }
@@ -329,9 +330,11 @@ const getNonConfirmedOrders = async (req, res) => {
   try {
     const tenMinutesAgo = new Date();
     tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 20);
+
     const orders = await Order.find({
       confirmed: false,
       restaurant: id,
+      status: { $ne: "Annulé" },
       createdAt: { $gte: tenMinutesAgo },
     });
     res.json(orders);

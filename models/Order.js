@@ -28,10 +28,18 @@ const orderSchema = new Schema({
         type: Schema.Types.ObjectId,
         ref: "Offer",
       },
-      customizations: [
+      items: [
         {
-          type: Schema.Types.ObjectId,
-          ref: "Topping",
+          item: {
+            type: Schema.Types.ObjectId,
+            ref: "MenuItem",
+          },
+          customizations: [
+            {
+              type: Schema.Types.ObjectId,
+              ref: "Topping",
+            },
+          ],
         },
       ],
       price: Number,

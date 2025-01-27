@@ -9,6 +9,8 @@ const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
 const {
   generateOrderConfirmationEmail,
 } = require("../../utils/mailTemplateGenerators");
+const { default: mongoose } = require("mongoose");
+const { default: Expo } = require("expo-server-sdk");
 const confirmOrderService = async (id) => {
   try {
     const order = await Order.findById(id)
@@ -16,7 +18,7 @@ const confirmOrderService = async (id) => {
         path: "orderItems",
         populate: "customizations item",
       })
-      .populate({ path: "offers", populate: "offer customizations" })
+      .populate({ path: "offers", populate: "offer " })
       .populate({ path: "rewards", populate: "item" })
       .populate({ path: "user" });
 
@@ -24,22 +26,100 @@ const confirmOrderService = async (id) => {
       return { error: "Order not found" };
     }
 
-    // Attempt to capture the payment
-    if (order.paymentIntentId) {
-      const paymentIntent = await stripe.paymentIntents.capture(
-        order.paymentIntentId
-      );
+    try {
+      if (order.paymentIntentId) {
+        const paymentIntent = await stripe.paymentIntents.capture(
+          order.paymentIntentId
+        );
 
-      if (paymentIntent.status !== "succeeded") {
-        return { error: "Payment not confirmed" };
+        if (paymentIntent.status !== "succeeded") {
+          return { error: "Payment not confirmed" };
+        }
+        order.payment_status = true;
       }
-      order.payment_status = true;
+    } catch (err) {
+      order.status = "Annulé";
+      await order.save();
+
+      return { error: err.message };
     }
-    // Update order confirmation status
+
     order.confirmed = true;
+
     await order.save();
 
-    // Send confirmation email if the user has an email
+    const user = await mongoose.models.User.findById(order.user._id);
+
+    const pointsToremove = order.rewards.reduce(
+      (acc, item) => acc + item.points,
+      0
+    );
+
+    const pointsEarned = calculatePoints(order);
+
+    const totalPoints = Math.floor(pointsEarned * 10 - pointsToremove);
+
+    user.fidelity_points += totalPoints;
+
+    if (!user.firstOrderDiscountApplied) {
+      user.firstOrderDiscountApplied = true;
+    }
+
+    await user.save();
+
+    process.nextTick(() => sentNotification(user, order._id, pointsEarned));
+    process.nextTick(() => sendMail(order));
+
+    return { response: "Order confirmed" };
+  } catch (err) {
+    logWithTimestamp(`Error confirming order: ${err}`);
+
+    return { error: err.message };
+  }
+};
+
+const sentNotification = async (user, orderId, pointsEarned) => {
+  try {
+    const expo = new Expo({ useFcmV1: true });
+    const userMessage = {
+      to: user.expo_token,
+      sound: "default",
+      body: `Bienvenue chez Le Courteau ! Votre commande a été confirmée et est en cours de préparation, vous avez remporté ${
+        pointsEarned * 10
+      } points de fidélité.`,
+      data: { order_id: orderId },
+      title: "Commande confirmée",
+      priority: "high",
+    };
+
+    if (user.expo_token) {
+      const response = await expo.sendPushNotificationsAsync([userMessage]);
+    }
+  } catch (err) {
+    logWithTimestamp(`Error sending notifications: ${err.message}`);
+  }
+};
+
+const calculatePoints = (order) => {
+  let points = 0;
+
+  if (order.offers.length > 0) {
+    points += order.offers.reduce((acc, item) => acc + item.price, 0);
+  }
+
+  if (order.orderItems.length > 0) {
+    points += order.orderItems.reduce((acc, item) => acc + item.price, 0);
+  }
+
+  if (order.discount) {
+    points -= (points * order.discount) / 100;
+  }
+
+  return points;
+};
+
+const sendMail = async (order) => {
+  try {
     if (order.user && order.user.email) {
       const transporter = nodemailer.createTransport({
         service: "icloud",
@@ -51,25 +131,23 @@ const confirmOrderService = async (id) => {
           pass: process.env.MAIL_PASS,
         },
       });
+      let items = [];
 
-      // Build the items list for the email
-      const items = order.orderItems.map((item) => ({
-        name: item.item.name,
-        price: item.price,
-        customizations: item.customizations.map(
-          (customization) => customization.name
-        ),
-      }));
+      if (order.orderItems.length > 0) {
+        items = order.orderItems.map((item) => ({
+          name: item.item.name,
+          price: item.price,
+          customizations: item.customizations.map(
+            (customization) => customization.name
+          ),
+        }));
+      }
 
-      // Add offers if they exist
       if (order.offers.length > 0) {
         order.offers.forEach((offer) => {
           items.push({
             name: offer.offer.name,
             price: offer.price,
-            customizations: offer.customizations.map(
-              (customization) => customization.name
-            ),
           });
         });
       }
@@ -88,14 +166,10 @@ const confirmOrderService = async (id) => {
         ),
       };
 
-      await transporter.sendMail(mailOptions);
+      const response = await transporter.sendMail(mailOptions);
     }
-
-    return { response: "Order confirmed" };
   } catch (err) {
-    logWithTimestamp(`Error confirming order: ${err}`);
-
-    return { error: err.message };
+    logWithTimestamp(`Error sending email: ${err.message}`);
   }
 };
 const logWithTimestamp = (message) => {

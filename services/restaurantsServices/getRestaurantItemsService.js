@@ -8,10 +8,10 @@ const getRestaurantItemsService = async (id) => {
         populate: { path: "menuItem", populate: "category" },
       });
 
-    // Check if restaurant exists
     if (!response) {
       return { error: new Error("Restaurant not found") };
     }
+    response.menu_items.sort((a, b) => a.menuItem.order - b.menuItem.order);
 
     return { response };
   } catch (error) {

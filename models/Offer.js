@@ -14,12 +14,6 @@ const offerSchema = new Schema({
     },
   ],
   price: Number,
-  customizations: [
-    {
-      type: Schema.Types.ObjectId,
-      ref: "Topping",
-    },
-  ],
   createdAt: Date,
   expireAt: Date,
 });

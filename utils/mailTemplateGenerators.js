@@ -14,7 +14,7 @@ const generateOrderConfirmationEmail = (
     (item) =>
       `
     <p style='color:white'>${item.name} - ${item.price.toFixed(2)}$ (
-      ${item.customizations.map(
+      ${item.customizations?.map(
         (customization) => `<span style="color:gray"> ${customization}, </span>`
       )}  
     )</p>

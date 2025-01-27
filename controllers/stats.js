@@ -4,23 +4,56 @@ const { Expo } = require("expo-server-sdk");
 const getInititalStats = async (req, res) => {
   try {
     const usersCount = await mongoose.models.User.countDocuments();
-    const ordersCount = await mongoose.models.Order.countDocuments();
+    // const ordersCount = await mongoose.models.Order.countDocuments();
 
-    let onGoingOrders = await mongoose.models.Order.find({
-      status: ON_GOING,
+    // let onGoingOrders = await mongoose.models.Order.find({
+    //   status: ON_GOING,
+    // });
+    // onGoingOrders = onGoingOrders.reverse();
+    // const income = await mongoose.models.Order.aggregate([
+    //   {
+    //     $group: {
+    //       _id: null,
+    //       total: { $sum: "$total_price" },
+    //     },
+    //   },
+    // ]);
+
+    // const revenue = income.length ? income[0].total.toFixed(2) : 0;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const restaurants = await mongoose.models.Restaurant.find().populate(
+      "orders"
+    );
+
+    const restaurantStats = restaurants.map((restaurant) => {
+      const todayOrders = restaurant.orders.filter(
+        (order) =>
+          order.createdAt >= startOfDay &&
+          order.createdAt <= endOfDay &&
+          order.status !== "Annulé" &&
+          order.confirmed === true
+      );
+
+      const ordersCount = todayOrders.length;
+
+      const revenue = todayOrders.reduce(
+        (acc, order) => acc + order.total_price,
+        0
+      );
+
+      return {
+        restaurantId: restaurant._id,
+        restaurantName: restaurant.name,
+        ordersCount,
+        revenue: revenue.toFixed(2),
+      };
     });
-    onGoingOrders = onGoingOrders.reverse();
-    const income = await mongoose.models.Order.aggregate([
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total_price" },
-        },
-      },
-    ]);
-
-    const revenue = income.length ? income[0].total.toFixed(2) : 0;
-    res.status(200).json({ usersCount, ordersCount, onGoingOrders, revenue });
+    res.status(200).json({ usersCount, restaurantStats });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -34,15 +67,38 @@ const getRestaurantStats = async (req, res) => {
       "orders"
     );
 
-    const ordersCount = restaurent.orders.length;
+    // const ordersCount = restaurent.orders.length;
+
+    // const revenue = restaurent.orders.reduce(
+    //   (acc, order) => acc + order.total_price,
+    //   0
+    // );
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const todayOrders = restaurent.orders.filter(
+      (order) =>
+        order.createdAt >= startOfDay &&
+        order.createdAt <= endOfDay &&
+        order.status !== "Annulé" &&
+        order.confirmed === true
+    );
+
+    const ordersCount = todayOrders.length;
+
+    const revenue = todayOrders.reduce(
+      (acc, order) => acc + order.total_price,
+      0
+    );
+
     let onGoingOrders = restaurent.orders.filter(
       (order) => order.status === ON_GOING
     );
     onGoingOrders = onGoingOrders.reverse();
-    const revenue = restaurent.orders.reduce(
-      (acc, order) => acc + order.total_price,
-      0
-    );
     res
       .status(200)
       .json({ ordersCount, onGoingOrders, revenue: revenue.toFixed(2) });

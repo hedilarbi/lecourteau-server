@@ -66,7 +66,6 @@ const createOrderService = async (order) => {
       }
     }
 
-    // Check if paymentIntentId of the last order already exists among the user's orders
     const existingOrderWithPaymentIntent = user.orders.find(
       (userOrder) => userOrder.paymentIntentId === order.order.paymentIntentId
     );
@@ -78,77 +77,27 @@ const createOrderService = async (order) => {
     }
 
     const response = await newOrder.save();
+    user.orders.push(response._id);
+    await user.save();
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant
     );
 
-    // Calculate points to remove and earned points
-    const pointsToremove = order.order.rewards.reduce(
-      (acc, item) => acc + item.points,
-      0
-    );
-    const pointsEarned = calculatePoints(order);
-
-    const totalPoints = Math.floor(pointsEarned * 10 - pointsToremove);
-
-    // Update user's fidelity points and orders
-    user.fidelity_points += totalPoints;
-    user.orders.push(response._id);
-
-    // Apply first order discount if not yet applied
-    if (!user.firstOrderDiscountApplied) {
-      user.firstOrderDiscountApplied = true;
-    }
-
-    const newUser = await user.save();
-
-    // Update restaurant's orders
     restaurant.orders.push(response._id);
     await restaurant.save();
 
-    await sendPushNotifications(
-      user,
-      restaurant,
-      response._id,
-      code,
-      pointsEarned
-    );
+    const responseData = { response };
+    process.nextTick(() => sendNotifications(restaurant, response._id, code));
 
-    return { response, user: newUser };
+    return responseData;
   } catch (err) {
     console.error(err.message);
     return { error: err.message };
   }
 };
 
-const calculatePoints = (order) => {
-  let points = 0;
-
-  if (order.order.offers.length > 0) {
-    points += order.order.offers.reduce((acc, item) => acc + item.price, 0);
-  }
-
-  if (order.order.orderItems.length > 0) {
-    points += order.order.orderItems.reduce((acc, item) => acc + item.price, 0);
-  }
-
-  if (order.order.discount) {
-    points -= (points * order.order.discount) / 100;
-  }
-
-  return points;
-};
-
-const sendPushNotifications = async (
-  user,
-  restaurant,
-  orderId,
-  code,
-  pointsEarned
-) => {
-  const expo = new Expo({
-    useFcmV1: true,
-  });
+const sendNotifications = async (restaurant, orderId, code) => {
+  const expo = new Expo({ useFcmV1: true });
 
   const dashboardMessage = {
     to: restaurant.expo_token,
@@ -158,61 +107,15 @@ const sendPushNotifications = async (
     title: "Nouvelle Commande",
     priority: "high",
   };
-  if (restaurant.expo_token) {
-    const chunks = expo.chunkPushNotifications([dashboardMessage]);
-    const tickets = [];
-    for (let chunk of chunks) {
-      try {
-        let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-        console.log("ticketChunk", ticketChunk, "order Code", code);
-        tickets.push(...ticketChunk);
-      } catch (error) {
-        console.error(error);
-      }
-    }
-    let receiptIds = [];
-    for (let ticket of tickets) {
-      if (ticket.status === "ok") {
-        receiptIds.push(ticket.id);
-      }
-    }
-    let receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
 
-    for (let chunk of receiptIdChunks) {
-      try {
-        let receipts = await expo.getPushNotificationReceiptsAsync(chunk);
-
-        for (let receiptId in receipts) {
-          let { status, message, details } = receipts[receiptId];
-          if (status === "ok") {
-            continue;
-          } else if (status === "error") {
-            console.error(
-              `There was an error sending a notification: ${message}`
-            );
-            if (details && details.error) {
-              console.error(`The error code is ${details.error}`);
-            }
-          }
-        }
-      } catch (error) {
-        console.error(error);
-      }
+  try {
+    if (restaurant.expo_token) {
+      const response = await expo.sendPushNotificationsAsync([
+        dashboardMessage,
+      ]);
     }
+  } catch (err) {
+    console.error(`Error sending notifications: ${err.message}`);
   }
-  // const userMessage = {
-  //   to: user.expo_token,
-  //   sound: "default",
-  //   body: `Bienvenue chez Le Courteau ! Votre commande est en préparation et félicitations, vous avez remporté ${
-  //     pointsEarned * 10
-  //   } points de fidélité.`,
-  //   data: { order_id: orderId },
-  //   title: "Nouvelle Commande",
-  //   priority: "high",
-  // };
-  // Send push notifications if tokens are available
-  // if (user.expo_token?.length > 0) {
-  //   await expo.sendPushNotificationsAsync([userMessage]);
-  // }
 };
 module.exports = createOrderService;

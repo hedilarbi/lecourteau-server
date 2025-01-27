@@ -4,7 +4,7 @@ const updateOfferService = async (
   id,
   name,
   newItems,
-  newCustomizations,
+
   price,
   expireAt,
   firebaseUrl
@@ -15,7 +15,6 @@ const updateOfferService = async (
       price: parseFloat(price),
       expireAt: new Date(expireAt),
       items: newItems,
-      customizations: newCustomizations,
     };
 
     if (firebaseUrl) {
@@ -24,12 +23,10 @@ const updateOfferService = async (
 
     const response = await Offer.findByIdAndUpdate(id, updateData, {
       new: true,
-    })
-      .populate({
-        path: "items",
-        populate: "item",
-      })
-      .populate("customizations");
+    }).populate({
+      path: "items",
+      populate: "item",
+    });
 
     if (!response) {
       return { error: "Offer not found" };

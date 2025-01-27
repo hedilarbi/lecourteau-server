@@ -68,7 +68,7 @@ const createRestaurant = async (req, res) => {
 const getRestaurants = async (req, res) => {
   try {
     const { error, response } = await getRestaurantsService();
-    console.log("response", response);
+
     if (error) {
       console.error("Error fetching restaurants:", error); // Log the error
       return res.status(500).json({ success: false, message: error });
@@ -513,7 +513,7 @@ const getRestaurantSettings = async (req, res) => {
 
 const updateEmploie = async (req, res) => {
   const { emploie } = req.body;
-  console.log(emploie);
+
   try {
     const restaurants = await Restaurant.find();
 
@@ -521,10 +521,9 @@ const updateEmploie = async (req, res) => {
       restaurant.settings.emploie_du_temps = emploie;
       return restaurant.save();
     });
-    console.log("updated promise", updatePromises);
+
     const response = await Promise.all(updatePromises);
-    console.log(response.data);
-    console.log("Settings updated for all restaurants.");
+
     res.status(200).json({
       success: true,
       message: "Settings updated for all restaurants.",

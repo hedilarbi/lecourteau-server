@@ -58,10 +58,10 @@ const createOrderService = async (order) => {
       const currentTime = new Date().getTime();
       const timeDifference = (currentTime - lastOrderTime) / 1000 / 60; // time difference in minutes
 
-      if (timeDifference <= 10) {
+      if (timeDifference <= 1) {
         return {
           error:
-            "You cannot place another order within 10 minutes of your last order.",
+            "You cannot place another order within 1 minutes of your last order.",
         };
       }
     }

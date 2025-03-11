@@ -1,5 +1,6 @@
 const Stripe = require("stripe");
 const User = require("../models/User");
+const { default: mongoose } = require("mongoose");
 require("dotenv/config");
 
 const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
@@ -10,9 +11,26 @@ const logWithTimestamp = (message) => {
   console.error(`${timeStamp} - ${message}`);
 };
 const createPayment = async (req, res) => {
-  const { amount, email, paymentMethod, saved } = req.body;
+  const { amount, email, paymentMethod, saved, userId } = req.body;
 
   try {
+    if (userId) {
+      const user = await mongoose.models.User.findById(userId).populate(
+        "orders"
+      );
+      if (user.orders.length > 0) {
+        const lastOrder = user.orders[user.orders.length - 1];
+        const lastOrderTime = new Date(lastOrder.createdAt).getTime();
+        const currentTime = new Date().getTime();
+        const timeDifference = (currentTime - lastOrderTime) / 1000 / 60; // time difference in minutes
+        if (timeDifference <= 1) {
+          return {
+            error:
+              "Vous ne pouvez passer qu'une seule commande par minute. Veuillez réessayer plus tard.",
+          };
+        }
+      }
+    }
     let customer;
     const customers = await stripe.customers.list({ email });
 
@@ -31,9 +49,10 @@ const createPayment = async (req, res) => {
 
     // Attach payment method if not saved
     if (!saved) {
-      await stripe.paymentMethods.attach(paymentMethod, {
+      const response = await stripe.paymentMethods.attach(paymentMethod, {
         customer: customer.id,
       });
+      console.log(response);
     }
 
     // Create a payment intent
@@ -87,7 +106,7 @@ const getPaymentMethods = async (req, res) => {
       customer: customerId,
       type: "card",
     });
-
+    console.log(paymentMethods);
     res.status(200).json(paymentMethods.data);
   } catch (error) {
     console.error("Error fetching payment methods:", error);

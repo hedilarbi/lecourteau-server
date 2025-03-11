@@ -9,7 +9,6 @@ require("dotenv/config");
 
 const sendNotifications = async (req, res) => {
   const { title, body } = req.body;
-  console.log("title", title);
 
   try {
     // Respond immediately to the client
@@ -90,4 +89,29 @@ const sendSMSs = async (req, res) => {
   // return { message: successMessage, error: null };
 };
 
-module.exports = { sendNotifications, sendSMSs };
+const testNotification = async (req, res) => {
+  try {
+    const user = await mongoose.models.User.findOne({
+      phone_number: "+18196929494",
+    });
+    const expo = new Expo({ useFcmV1: true });
+    const userMessage = {
+      to: user.expo_token,
+      sound: "default",
+      body: `Bienvenue chez Le Courteau ! Votre commande a été confirmée et est en cours de préparation, vous avez remporté ${10} points de fidélité.`,
+      data: { order_id: "1234" },
+      title: "Commande confirmée",
+      priority: "high",
+    };
+
+    if (user.expo_token) {
+      const response = await expo.sendPushNotificationsAsync([userMessage]);
+    }
+    res.json({ status: true });
+  } catch (err) {
+    console.error("Error sending notifications:", err);
+    res.status(500).json({ status: false, message: err.message });
+  }
+};
+
+module.exports = { sendNotifications, sendSMSs, testNotification };

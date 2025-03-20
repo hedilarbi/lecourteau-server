@@ -8,7 +8,7 @@ const client = require("twilio")(
 require("dotenv/config");
 
 const sendNotifications = async (req, res) => {
-  const { title, body } = req.body;
+  const { title, body, item } = req.body;
 
   try {
     // Respond immediately to the client
@@ -27,13 +27,24 @@ const sendNotifications = async (req, res) => {
       if (!Expo.isExpoPushToken(pushToken)) {
         continue;
       }
-
-      messages.push({
-        to: pushToken,
-        sound: "default",
-        body,
-        title,
-      });
+      if (item) {
+        messages.push({
+          to: pushToken,
+          sound: "default",
+          body,
+          title,
+          data: { item },
+          priority: "high",
+        });
+      } else {
+        messages.push({
+          to: pushToken,
+          sound: "default",
+          body,
+          title,
+          priority: "high",
+        });
+      }
     }
 
     let chunks = expo.chunkPushNotifications(messages);

@@ -42,6 +42,10 @@ const userSchema = new Schema({
     default: false,
   },
   stripe_id: String,
+  isBanned: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 module.exports = model("User", userSchema);

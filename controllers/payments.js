@@ -52,7 +52,6 @@ const createPayment = async (req, res) => {
       const response = await stripe.paymentMethods.attach(paymentMethod, {
         customer: customer.id,
       });
-      console.log(response);
     }
 
     // Create a payment intent

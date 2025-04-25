@@ -282,7 +282,7 @@ const getUsersPagination = async (req, res) => {
       query.name = { $regex: name, $options: "i" }; // Case-insensitive search
     }
     const users = await User.find(query)
-      .select("name email ")
+      .select("name email phone_number isBanned ")
       .limit(limit * 1)
       .skip((page - 1) * limit);
     const total = await User.countDocuments(query);
@@ -295,6 +295,21 @@ const getUsersPagination = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+const banUser = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    user.isBanned = !user.isBanned;
+    await user.save();
+    res.status(200).json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -316,4 +331,5 @@ module.exports = {
   updateUserDiscount,
   savePayementDetails,
   getUsersPagination,
+  banUser,
 };

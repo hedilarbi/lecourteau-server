@@ -18,6 +18,7 @@ const {
   updateUserDiscount,
   savePayementDetails,
   getUsersPagination,
+  banUser,
 } = require("../controllers/users");
 const router = express.Router();
 
@@ -29,6 +30,7 @@ router.post("/create", createUser);
 router.get("/favorites/:id", getFavorites);
 router.put("/favorites/update/add/:id", addToFavorites);
 router.put("/card/add/:id", savePayementDetails);
+router.put("/ban/:id", banUser);
 router.put("/favorites/update/remove/:id", removeFromFavorites);
 router.put("/addresses/update/add/:id", addToAddresses);
 router.put("/update/expoToken/:id", updateUserExpoToken);

@@ -22,7 +22,8 @@ const getOrderService = async (id) => {
         ],
       })
       .populate({ path: "rewards", populate: "item" })
-      .populate({ path: "user", select: "name phone_number email" });
+      .populate({ path: "user", select: "name phone_number email" })
+      .populate("restaurant", "name");
 
     if (!response) {
       return { error: "Order not found" };

@@ -4,44 +4,31 @@ const { Expo } = require("expo-server-sdk");
 const getInititalStats = async (req, res) => {
   try {
     const usersCount = await mongoose.models.User.countDocuments();
-    // const ordersCount = await mongoose.models.Order.countDocuments();
 
-    // let onGoingOrders = await mongoose.models.Order.find({
-    //   status: ON_GOING,
-    // });
-    // onGoingOrders = onGoingOrders.reverse();
-    // const income = await mongoose.models.Order.aggregate([
-    //   {
-    //     $group: {
-    //       _id: null,
-    //       total: { $sum: "$total_price" },
-    //     },
-    //   },
-    // ]);
+    const startOfYesterday = new Date();
+    startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+    startOfYesterday.setHours(0, 0, 0, 0);
 
-    // const revenue = income.length ? income[0].total.toFixed(2) : 0;
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const endOfYesterday = new Date();
+    endOfYesterday.setDate(endOfYesterday.getDate() - 1);
+    endOfYesterday.setHours(23, 59, 59, 999);
 
     const restaurants = await mongoose.models.Restaurant.find().populate(
       "orders"
     );
 
     const restaurantStats = restaurants.map((restaurant) => {
-      const todayOrders = restaurant.orders.filter(
+      const yesterdayOrders = restaurant.orders.filter(
         (order) =>
-          order.createdAt >= startOfDay &&
-          order.createdAt <= endOfDay &&
+          order.createdAt >= startOfYesterday &&
+          order.createdAt <= endOfYesterday &&
           order.status !== "Annulé" &&
           order.confirmed === true
       );
 
-      const ordersCount = todayOrders.length;
+      const ordersCount = yesterdayOrders.length;
 
-      const revenue = todayOrders.reduce(
+      const revenue = yesterdayOrders.reduce(
         (acc, order) => acc + order.total_price,
         0
       );

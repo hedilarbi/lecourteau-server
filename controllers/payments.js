@@ -105,7 +105,7 @@ const getPaymentMethods = async (req, res) => {
       customer: customerId,
       type: "card",
     });
-    console.log(paymentMethods);
+
     res.status(200).json(paymentMethods.data);
   } catch (error) {
     console.error("Error fetching payment methods:", error);

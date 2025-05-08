@@ -14,6 +14,7 @@ const {
 const confirmOrderService = require("../services/ordersServices/confirmOrderService");
 const updateOrderPaymentStatusService = require("../services/ordersServices/updateOrderPaymentStatusService");
 const Order = require("../models/Order");
+const User = require("../models/User");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -267,19 +268,44 @@ const updateOrderPaymentStatus = async (req, res) => {
   }
 };
 
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); // Escape special regex chars
+};
+
 const getFilteredOrders = async (req, res) => {
-  const { page = 1, limit = 15, status, code, restaurant } = req.query;
+  const { page = 1, limit = 15, status, restaurant, search } = req.query;
 
   try {
-    const query = status ? { status } : {}; // Filter by status if provided
-    if (code) {
-      query.code = { $regex: code, $options: "i" };
-    }
-    if (restaurant.length > 0) {
+    let query = {};
+
+    if (status) query.status = status;
+
+    if (restaurant && restaurant.length > 0) {
       query.restaurant = restaurant;
     }
+
+    if (search) {
+      const escapedSearch = escapeRegex(search);
+      const matchingUsers = await User.find({
+        $or: [
+          { email: { $regex: escapedSearch, $options: "i" } },
+          { phone_number: { $regex: escapedSearch, $options: "i" } },
+        ],
+      }).select("_id");
+
+      query.$or = [{ code: { $regex: escapedSearch, $options: "i" } }];
+
+      if (matchingUsers.length > 0) {
+        query.$or.push({
+          user: { $in: matchingUsers.map((u) => u._id) },
+        });
+      }
+    }
+
     const orders = await Order.find(query)
-      .sort({ createdAt: -1 }) // Sort by creation date (most recent first)
+      .populate("user", "email phone_number")
+      .populate("restaurant")
+      .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
 
@@ -298,16 +324,54 @@ const getFilteredOrders = async (req, res) => {
 };
 
 const getRestaurantFilteredOrders = async (req, res) => {
-  const { page = 1, limit = 15, status, code } = req.query;
+  const {
+    page = 1,
+    limit = 15,
+    status,
+    search, // Replaces the 'code' parameter with unified search
+  } = req.query;
 
-  const { id } = req.params;
+  const { id } = req.params; // Restaurant ID from URL params
+
   try {
-    const query = status ? { status, restaurant: id } : { restaurant: id }; // Filter by status if provided
-    if (code) {
-      query.code = code;
+    // Base query always filters by restaurant
+    let query = { restaurant: id };
+
+    // Apply status filter if provided
+    if (status) query.status = status;
+
+    // Handle unified search (code/email/phone)
+    if (search) {
+      const escapedSearch = escapeRegex(search);
+
+      // Find matching users (for email/phone search)
+      const matchingUsers = await User.find({
+        $or: [
+          { email: { $regex: escapedSearch, $options: "i" } },
+          { phone_number: { $regex: escapedSearch, $options: "i" } },
+        ],
+      }).select("_id");
+
+      // Build the search conditions
+      const searchConditions = [
+        { code: { $regex: escapedSearch, $options: "i" } }, // Code match
+      ];
+
+      // Add user matches if found
+      if (matchingUsers.length > 0) {
+        searchConditions.push({
+          user: { $in: matchingUsers.map((u) => u._id) },
+        });
+      }
+
+      // Combine with existing query using $and
+      query.$and = [{ ...query }, { $or: searchConditions }];
     }
+
+    // Execute query with pagination
     const orders = await Order.find(query)
-      .sort({ createdAt: -1 }) // Sort by creation date (most recent first)
+      .populate("user", "email phone_number") // Include user contact info
+      .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
 
@@ -320,6 +384,7 @@ const getRestaurantFilteredOrders = async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (error) {
+    console.error("Error fetching restaurant orders:", error);
     res.status(500).json({ error: "An error occurred while fetching orders." });
   }
 };

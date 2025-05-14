@@ -1,31 +1,39 @@
 const sharp = require("sharp");
 
 const optimizeImage = (req, res, next) => {
-  if (!req.file) {
+  if (!req.file || !req.file.buffer) {
     return next();
   }
-  const image = req.file;
 
-  sharp(image.buffer)
+  sharp(req.file.buffer)
     .resize(700, 670, {
       fit: "cover",
       position: "center",
     })
-    .toFormat("jpeg")
+    .toFormat("jpeg") // Convert to JPEG
     .jpeg({ quality: 75, chromaSubsampling: "4:4:4" })
     .toBuffer()
     .then((data) => {
+      // Update the file properties to reflect JPEG conversion
       req.file.buffer = data;
       req.file.size = data.length;
       req.file.mimetype = "image/jpeg";
+
+      // Update the filename extension to .jpg (if originalname exists)
+      if (req.file.originalname) {
+        req.file.originalname = req.file.originalname.replace(
+          /\.[^/.]+$/, // Match the existing extension
+          ".jpg" // Replace with .jpg
+        );
+      }
+
       next();
     })
-
     .catch((err) => {
+      console.error("Sharp optimization error:", err);
       next(err);
     });
 };
-
 const optimizeImages = async (req, res, next) => {
   if (!req.files) {
     return next();

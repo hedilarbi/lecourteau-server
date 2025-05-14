@@ -15,10 +15,12 @@ const {
   getFilteredOrders,
   getRestaurantFilteredOrders,
   getNonConfirmedOrders,
+  getTotalRevenue,
 } = require("../controllers/orders");
 const router = express.Router();
 
 router.get("/", getOrders);
+router.get("/total-revenu", getTotalRevenue);
 router.get("/nonConfirmed/:id", getNonConfirmedOrders);
 router.put("/confirm/:id", confirmOrder);
 router.post("/create", createOrder);

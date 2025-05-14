@@ -408,6 +408,40 @@ const getNonConfirmedOrders = async (req, res) => {
   }
 };
 
+const getTotalRevenue = async (req, res) => {
+  const { startDate = "2025-05-02", endDate = "2025-05-11" } = req.query;
+  const restaurantId = "66f2a4819cef616aae15d525";
+
+  try {
+    const totalRevenue = await Order.aggregate([
+      {
+        $match: {
+          restaurant: restaurantId,
+          createdAt: {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate),
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: "$total_price" },
+        },
+      },
+    ]);
+
+    res.json({
+      totalRevenue: totalRevenue.length > 0 ? totalRevenue[0].totalRevenue : 0,
+    });
+  } catch (error) {
+    console.error("Error calculating total revenue:", error);
+    res
+      .status(500)
+      .json({ error: "An error occurred while calculating revenue." });
+  }
+};
+
 module.exports = {
   createOrder,
   getOrders,
@@ -423,4 +457,5 @@ module.exports = {
   getFilteredOrders,
   getRestaurantFilteredOrders,
   getNonConfirmedOrders,
+  getTotalRevenue,
 };

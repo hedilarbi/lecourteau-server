@@ -9,15 +9,14 @@ const getInititalStats = async (req, res) => {
     let endDate;
     if (date) {
       startDate = new Date(date);
-      startDate.setHours(0, 0, 0, 0);
-
+      startDate.setUTCHours(0, 0, 0, 0);
       endDate = new Date(date);
-      endDate.setHours(23, 59, 59, 999);
+      endDate.setUTCHours(23, 59, 59, 999);
     } else if (from && to) {
       startDate = new Date(from);
-      startDate.setHours(0, 0, 0, 0);
+      startDate.setUTCHours(0, 0, 0, 0);
       endDate = new Date(to);
-      endDate.setHours(23, 59, 59, 999);
+      endDate.setUTCHours(23, 59, 59, 999);
     }
 
     const restaurants = await mongoose.models.Restaurant.find().populate(

@@ -422,6 +422,8 @@ const getTotalRevenue = async (req, res) => {
             $gte: new Date(startDate),
             $lte: new Date(endDate),
           },
+          status: { $ne: "Annulé" },
+          confirmed: true,
         },
       },
       {

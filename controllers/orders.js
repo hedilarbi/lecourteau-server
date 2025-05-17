@@ -15,6 +15,7 @@ const confirmOrderService = require("../services/ordersServices/confirmOrderServ
 const updateOrderPaymentStatusService = require("../services/ordersServices/updateOrderPaymentStatusService");
 const Order = require("../models/Order");
 const User = require("../models/User");
+const { default: mongoose } = require("mongoose");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -416,7 +417,7 @@ const getTotalRevenue = async (req, res) => {
     const totalRevenue = await Order.aggregate([
       {
         $match: {
-          restaurant: restaurantId,
+          restaurant: new mongoose.Types.ObjectId(restaurantId),
           createdAt: {
             $gte: new Date(startDate),
             $lte: new Date(endDate),
@@ -427,12 +428,14 @@ const getTotalRevenue = async (req, res) => {
         $group: {
           _id: null,
           totalRevenue: { $sum: "$total_price" },
+          orderCount: { $sum: 1 }, // Count the number of orders
         },
       },
     ]);
 
-    res.json({
-      totalRevenue: totalRevenue.length > 0 ? totalRevenue[0].totalRevenue : 0,
+    res.status(200).json({
+      totalRevenue: totalRevenue[0]?.totalRevenue || 0,
+      orderCount: totalRevenue[0]?.orderCount || 0, // Return the count of orders
     });
   } catch (error) {
     console.error("Error calculating total revenue:", error);

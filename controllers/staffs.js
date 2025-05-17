@@ -31,7 +31,8 @@ const {
 const {
   getDriversOrdersService,
 } = require("../services/staffsServices/getDriversOrdersService");
-
+const saltRounds = 10;
+const bcrypt = require("bcrypt");
 const createStaff = async (req, res) => {
   let firebaseUrl = null;
   if (req.file) {
@@ -184,6 +185,24 @@ const getDriverOrders = async (req, res) => {
   }
 };
 
+const updatePassword = async (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body;
+
+  try {
+    const hashedPasword = await bcrypt.hash(password, saltRounds);
+    const staff = await Staff.findById(id);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+    staff.password = hashedPasword;
+    await staff.save();
+    res.status(200).json({ message: "Password updated successfully" });
+  } catch (error) {
+    res.json({ message: error.message });
+  }
+};
+
 module.exports = {
   loginStaff,
   createStaff,
@@ -196,4 +215,5 @@ module.exports = {
   getStaffOrder,
   getAvailableDrivers,
   getDriverOrders,
+  updatePassword,
 };

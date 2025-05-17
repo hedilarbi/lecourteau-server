@@ -3,13 +3,22 @@ const { ON_GOING } = require("../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const getInititalStats = async (req, res) => {
   try {
+    const { date, from, to } = req.query;
     const usersCount = await mongoose.models.User.countDocuments();
+    let startDate;
+    let endDate;
+    if (date) {
+      startDate = new Date(date);
+      startDate.setHours(0, 0, 0, 0);
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+      endDate = new Date(date);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (from && to) {
+      startDate = new Date(from);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(to);
+      endDate.setHours(23, 59, 59, 999);
+    }
 
     const restaurants = await mongoose.models.Restaurant.find().populate(
       "orders"
@@ -18,8 +27,8 @@ const getInititalStats = async (req, res) => {
     const restaurantStats = restaurants.map((restaurant) => {
       const todayOrders = restaurant.orders.filter(
         (order) =>
-          order.createdAt >= startOfDay &&
-          order.createdAt <= endOfDay &&
+          order.createdAt >= startDate &&
+          order.createdAt <= endDate &&
           order.status !== "Annulé" &&
           order.confirmed === true
       );
@@ -38,6 +47,7 @@ const getInititalStats = async (req, res) => {
         revenue: revenue.toFixed(2),
       };
     });
+
     res.status(200).json({ usersCount, restaurantStats });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

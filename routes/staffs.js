@@ -11,6 +11,7 @@ const {
   getAvailableDrivers,
   getStaffOrder,
   getDriverOrders,
+  updatePassword,
 } = require("../controllers/staffs");
 const {
   uploadImageToFirebase,
@@ -21,6 +22,7 @@ const { optimizeImage } = require("../middlewares/imageOptimizor");
 const router = express.Router();
 
 router.get("/", getStaffMembers);
+
 router.get("/available", getAvailableDrivers);
 router.put("/update/:id", Multer.single("file"), updateStaffMember);
 router.post(
@@ -32,6 +34,7 @@ router.post(
 );
 router.get("/:id/order", getStaffOrder);
 router.put("/affectOrder/:id", affectOrderToStaff);
+router.put("/updatePassword/:id", updatePassword);
 router.post("/login", loginStaff);
 router.get("/driver/orders/:id", getDriverOrders);
 router.get("/staffByToken", getStaffByToken);

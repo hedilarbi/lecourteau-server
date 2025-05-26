@@ -18,6 +18,7 @@ const updateToppingService = async (id, name, price, category, firebaseUrl) => {
     }
     return { response };
   } catch (err) {
+    console.error("Error updating topping:", err);
     return { error: err.message };
   }
 };

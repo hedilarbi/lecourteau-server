@@ -64,6 +64,7 @@ const updateTopping = async (req, res) => {
   if (req.file) {
     firebaseUrl = req.file.firebaseUrl;
   }
+
   const { name, category, price } = req.body;
   const { id } = req.params;
   try {

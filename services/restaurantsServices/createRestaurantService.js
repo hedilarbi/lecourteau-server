@@ -33,6 +33,42 @@ const createRestaurantService = async (
       toppings: toppingsIDs,
       offers: offersIDs,
       phone_number: phoneNumber,
+      settings: {
+        delivery: true,
+        open: true,
+        delivey_fee: 0,
+        delivery_range: 0,
+        emploie_du_temps: {
+          lundi: {
+            open: "08:00",
+            close: "20:00",
+          },
+          mardi: {
+            open: "08:00",
+            close: "20:00",
+          },
+          mercredi: {
+            open: "08:00",
+            close: "20:00",
+          },
+          jeudi: {
+            open: "08:00",
+            close: "20:00",
+          },
+          vendredi: {
+            open: "08:00",
+            close: "20:00",
+          },
+          samedi: {
+            open: "08:00",
+            close: "20:00",
+          },
+          dimanche: {
+            open: "08:00",
+            close: "20:00",
+          },
+        },
+      },
     });
 
     const response = await newRestaurant.save();

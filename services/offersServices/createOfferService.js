@@ -14,7 +14,7 @@ const createOfferService = async (
     if (offer) {
       return { error: "Offer already exists" };
     }
-
+    console.log(expireAt);
     const newOffer = new Offer({
       name,
       image: firebaseUrl,

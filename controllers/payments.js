@@ -74,7 +74,7 @@ const createPayment = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      error: error.message || "An error occurred while processing the payment.",
+      error: error || "An error occurred while processing the payment.",
     });
   }
 };
@@ -91,8 +91,7 @@ const createSetupIntent = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      error:
-        error.message || "An error occurred while creating the setup intent.",
+      error: error || "An error occurred while creating the setup intent.",
     });
   }
 };

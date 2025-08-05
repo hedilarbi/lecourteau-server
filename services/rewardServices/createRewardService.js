@@ -9,7 +9,7 @@ const createRewardService = async (item, points) => {
     // Save the new reward
     await newReward.save();
     // Populate the item after saving
-    const populatedReward = await newReward.populate("item").execPopulate();
+    const populatedReward = await newReward.populate("item");
     return { response: populatedReward };
   } catch (err) {
     console.error("Error in createRewardService:", err);

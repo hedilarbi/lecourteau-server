@@ -46,6 +46,9 @@ const createOrderService = async (order) => {
       tip: parseFloat(order.order.tip),
       paymentIntentId: order.order.paymentIntentId,
       payment_method: order.order.paymentMethod,
+      promoCode: order.order.promoCode
+        ? order.order.promoCode.promoCodeId
+        : null,
     });
 
     // Fetch user and restaurant

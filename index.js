@@ -18,6 +18,8 @@ const restaurantsRoutes = require("./routes/restaurants");
 const notifiersRoutes = require("./routes/notifies");
 const appRoutes = require("./routes/app");
 const sizesRoutes = require("./routes/sizes");
+const PromoCodesRoutes = require("./routes/promoCodes");
+const VedetteRoutes = require("./routes/vedettes");
 require("dotenv/config");
 
 const { createServer } = require("http");
@@ -46,6 +48,8 @@ app.use("/api/restaurants", restaurantsRoutes);
 app.use("/api/notifiers", notifiersRoutes);
 app.use("/api/sizes", sizesRoutes);
 app.use("/api/app", appRoutes);
+app.use("/api/promoCodes", PromoCodesRoutes);
+app.use("/api/vedettes", VedetteRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,

@@ -1,4 +1,5 @@
 const { Schema, model } = require("mongoose");
+const PromoCode = require("./PromoCode");
 
 const orderSchema = new Schema({
   user: {
@@ -96,6 +97,10 @@ const orderSchema = new Schema({
   payment_status: {
     type: Boolean,
     default: false,
+  },
+  promoCode: {
+    type: Schema.Types.ObjectId,
+    ref: "PromoCode",
   },
 });
 

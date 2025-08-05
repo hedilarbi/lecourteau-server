@@ -11,6 +11,7 @@ const {
 } = require("../../utils/mailTemplateGenerators");
 const { default: mongoose } = require("mongoose");
 const { default: Expo } = require("expo-server-sdk");
+const PromoCode = require("../../models/PromoCode");
 const confirmOrderService = async (id) => {
   try {
     const order = await Order.findById(id)
@@ -63,6 +64,27 @@ const confirmOrderService = async (id) => {
 
     if (!user.firstOrderDiscountApplied) {
       user.firstOrderDiscountApplied = true;
+    }
+    if (order.promoCode) {
+      const usedPromo = user.usedPromoCodes.find(
+        (used) => used.promoCode?.toString() === order.promoCode.toString()
+      );
+
+      if (!usedPromo) {
+        user.usedPromoCodes.push({
+          promoCode: order.promoCode,
+          numberOfUses: 1,
+        });
+      } else {
+        usedPromo.numberOfUses += 1;
+      }
+    }
+
+    const promoCode = await PromoCode.findById(order.promoCode);
+
+    if (promoCode) {
+      promoCode.totalUsage += 1;
+      await promoCode.save();
     }
 
     await user.save();

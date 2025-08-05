@@ -1,4 +1,5 @@
 const { Schema, model } = require("mongoose");
+const PromoCode = require("./PromoCode");
 
 const userSchema = new Schema({
   name: String,
@@ -46,6 +47,17 @@ const userSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  usedPromoCodes: [
+    {
+      promoCode: {
+        type: Schema.Types.ObjectId,
+        ref: "PromoCode",
+      },
+      numberOfUses: {
+        type: Number,
+      },
+    },
+  ],
 });
 
 module.exports = model("User", userSchema);

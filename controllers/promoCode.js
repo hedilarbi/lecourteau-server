@@ -9,6 +9,7 @@ const logWithTimestamp = (message) => {
 const createPromoCode = async (req, res) => {
   try {
     const promoCodeData = req.body;
+    const notifContent = promoCodeData.notifContent || {};
     const existingPromoCode = await PromoCode.findOne({
       code: promoCodeData.code,
     });
@@ -24,7 +25,10 @@ const createPromoCode = async (req, res) => {
       success: true,
       data: promoCode,
     });
-    if (promoCodeData.notifContent.body && promoCodeData.notifContent.title) {
+    if (
+      promoCodeData?.notifContent?.body &&
+      promoCodeData?.notifContent?.title
+    ) {
       let messages = [];
       let expo = new Expo();
       const users = await mongoose.models.User.find();
@@ -39,8 +43,8 @@ const createPromoCode = async (req, res) => {
         messages.push({
           to: pushToken,
           sound: "default",
-          body,
-          title,
+          body: notifContent.body,
+          title: notifContent.title,
           priority: "high",
         });
       }

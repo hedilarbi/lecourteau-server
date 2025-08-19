@@ -14,13 +14,13 @@ const createOfferService = async (
     if (offer) {
       return { error: "Offer already exists" };
     }
-    console.log(expireAt);
+    const slug = name.toLowerCase().replace(/\s+/g, "-");
     const newOffer = new Offer({
       name,
       image: firebaseUrl,
       expireAt: new Date(expireAt),
       items: itemList,
-
+      slug,
       price: parseFloat(price),
       createdAt: new Date(),
     });

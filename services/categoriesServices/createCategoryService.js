@@ -8,8 +8,10 @@ const createCategoryService = async (name, firebaseUrl) => {
       return { error: "Category already exists" };
     }
     const categoriesCount = await Category.countDocuments();
+    const slug = name.toLowerCase().replace(/\s+/g, "-");
     const newCategory = new Category({
       name,
+      slug,
       image: firebaseUrl,
       order: categoriesCount,
     });

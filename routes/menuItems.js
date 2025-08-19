@@ -10,6 +10,9 @@ const {
   updateMenuItemAvailability,
   getNewItems,
   triMenutItems,
+  createSlug,
+  getMenuItemBySlug,
+  getMenuItemsByCategorySlug,
 } = require("../controllers/menuItems");
 const {
   uploadImageToFirebase,
@@ -21,6 +24,7 @@ const router = express.Router();
 
 router.get("/", getMenuItems);
 router.put("/tri", triMenutItems);
+router.get("/slug", createSlug);
 router.get("/name", getItemsNames);
 router.get("/new", getNewItems);
 router.post(
@@ -38,8 +42,10 @@ router.put(
   updateMenuItem
 );
 router.put("update/availability/:id", updateMenuItemAvailability);
+router.get("/slug/:slug", getMenuItemBySlug);
 router.delete("/delete/:id", deleteMenuItem);
-router.get("/category/:id", getMenuItemsByCategory);
+router.get("/category/:categoryId", getMenuItemsByCategory);
 router.get("/:id", getMenuItem);
+router.get("/category/slug/:categorySlug", getMenuItemsByCategorySlug);
 
 module.exports = router;

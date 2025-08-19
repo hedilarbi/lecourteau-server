@@ -16,6 +16,7 @@ const createMenuItemService = async (
     }
 
     const menuItemsCount = await MenuItem.countDocuments(); // Get the current number of menu items
+    const slug = name.toLowerCase().replace(/\s+/g, "-");
     const newMenuItem = new MenuItem({
       name,
       image: firebaseUrl,
@@ -23,6 +24,7 @@ const createMenuItemService = async (
       description,
       customization: customizationArray,
       category,
+      slug,
       order: menuItemsCount, // Set the order based on the count
     });
 

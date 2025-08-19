@@ -3,6 +3,7 @@ const getOffersService = require("../services/offersServices/getOffersService");
 const getOfferService = require("../services/offersServices/getOfferService");
 const deleteOfferService = require("../services/offersServices/deleteOfferService");
 const updateOfferService = require("../services/offersServices/updateOfferService");
+const Offer = require("../models/Offer");
 const logWithTimestamp = (message) => {
   const timeStamp = new Date().toISOString();
   console.error(`${timeStamp} - ${message}`);
@@ -133,10 +134,54 @@ const updateOffer = async (req, res) => {
   }
 };
 
+const createSlugs = async (req, res) => {
+  try {
+    const offers = await Offer.find();
+    const updatedOffers = await Promise.all(
+      offers.map(async (offer) => {
+        const slug = offer.name.toLowerCase().replace(/\s+/g, "-");
+        return await Offer.findByIdAndUpdate(
+          offer._id,
+          { slug },
+          { new: true }
+        );
+      })
+    );
+    res.status(200).json(updatedOffers);
+  } catch (err) {
+    console.error("Error creating slugs:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+const getOfferBySlug = async (req, res) => {
+  const { slug } = req.params;
+
+  try {
+    const offer = await Offer.findOne({ slug }).populate({
+      path: "items",
+      populate: {
+        path: "item",
+        populate: { path: "customization", populate: "category" },
+      },
+    });
+    if (!offer) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Offer not found" });
+    }
+    res.status(200).json(offer);
+  } catch (error) {
+    console.error("Error fetching offer by slug:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createOffer,
   getOffers,
   getOffer,
   deleteOffer,
   updateOffer,
+  createSlugs,
+  getOfferBySlug,
 };

@@ -14,6 +14,12 @@ const createPayment = async (req, res) => {
   const { amount, email, paymentMethod, saved, userId } = req.body;
 
   try {
+    if (!amount || !email || !paymentMethod) {
+      return res.status(400).json({
+        success: false,
+        error: "Le montant, l'email et la méthode de paiement sont requis.",
+      });
+    }
     if (userId) {
       const user = await mongoose.models.User.findById(userId).populate(
         "orders"
@@ -24,10 +30,11 @@ const createPayment = async (req, res) => {
         const currentTime = new Date().getTime();
         const timeDifference = (currentTime - lastOrderTime) / 1000 / 60; // time difference in minutes
         if (timeDifference <= 1) {
-          return {
+          return res.status(400).json({
+            success: false,
             error:
-              "Vous ne pouvez passer qu'une seule commande par minute. Veuillez réessayer plus tard.",
-          };
+              "Vous avez déjà passé une commande il y a moins d'une minute. Veuillez attendre avant de passer une nouvelle commande.",
+          });
         }
       }
     }
@@ -70,7 +77,9 @@ const createPayment = async (req, res) => {
 
     res.status(200).json(paymentIntent);
   } catch (error) {
-    logWithTimestamp(`Error creating payment: ${error}`);
+    logWithTimestamp(
+      `Error creating payment: userId ${userId}, error: ${error}`
+    );
 
     res.status(500).json({
       success: false,
@@ -128,9 +137,36 @@ const verifyPayment = async (req, res) => {
   }
 };
 
+const catchError = (req, res) => {
+  try {
+    const { error, userId, source } = req.body;
+
+    if (!error) {
+      return res.status(400).json({
+        success: false,
+        error: "No error message provided.",
+      });
+    }
+    logWithTimestamp(
+      `Error caught in ${source}: user ${userId}, error: ${error}`
+    );
+    res.status(200).json({
+      success: true,
+      message: "Error in process order logged successfully.",
+    });
+  } catch (error) {
+    logWithTimestamp(`Error in catchError: ${error}`);
+    res.status(500).json({
+      success: false,
+      error: error.message || "An unexpected error occurred.",
+    });
+  }
+};
+
 module.exports = {
   createPayment,
   createSetupIntent,
   getPaymentMethods,
   verifyPayment,
+  catchError,
 };

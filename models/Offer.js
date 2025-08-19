@@ -3,6 +3,7 @@ const { Schema, model } = require("mongoose");
 const offerSchema = new Schema({
   name: String,
   image: String,
+  slug: String,
   items: [
     {
       item: {

@@ -1,4 +1,5 @@
 const MenuItem = require("../models/MenuItem");
+const Category = require("../models/Category");
 const createMenuItemService = require("../services/menuItemsServices/createMenuItemService");
 const getItemsNamesService = require("../services/menuItemsServices/getItemsNamesService");
 const updateMenuItemService = require("../services/menuItemsServices/updateMenuItemService");
@@ -154,10 +155,10 @@ const deleteMenuItem = async (req, res) => {
 };
 
 const getMenuItemsByCategory = async (req, res) => {
-  const { category } = req.params;
+  const { categoryId } = req.params;
 
   try {
-    const response = await MenuItem.find({ category })
+    const response = await MenuItem.find({ category: categoryId })
       .select("name prices image is_available") // Specify the fields you want to return
       .populate("category"); // Ensure you populate any relevant fields if needed
 
@@ -219,6 +220,79 @@ const triMenutItems = async (req, res) => {
   }
 };
 
+const createSlug = async (req, res) => {
+  try {
+    const menuItems = await MenuItem.find();
+    if (!menuItems || menuItems.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No menu items found" });
+    }
+    const updatedMenuItems = await Promise.all(
+      menuItems.map(async (item) => {
+        const slug = item.name.toLowerCase().replace(/\s+/g, "-");
+        return await MenuItem.findByIdAndUpdate(
+          item._id,
+          { slug },
+          { new: true }
+        );
+      })
+    );
+    res.status(200).json(updatedMenuItems);
+  } catch (error) {
+    console.error("Error creating slugs for menu items:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getMenuItemBySlug = async (req, res) => {
+  const { slug } = req.params;
+
+  try {
+    const menuItem = await MenuItem.findOne({ slug })
+      .populate({
+        path: "customization",
+        populate: {
+          path: "category",
+        },
+      })
+      .populate("category");
+    if (!menuItem) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Menu item not found" });
+    }
+    res.status(200).json(menuItem);
+  } catch (error) {
+    console.error("Error fetching menu item by slug:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getMenuItemsByCategorySlug = async (req, res) => {
+  try {
+    const { categorySlug } = req.params;
+
+    // Find the category by slug
+    const category = await Category.findOne({ slug: categorySlug });
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+    // Find menu items that belong to the category
+    const menuItems = await MenuItem.find({ category: category._id }).populate(
+      "category"
+    );
+
+    res.status(200).json(menuItems);
+  } catch (error) {
+    console.error("Error fetching menu items by category slug:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createMenuItem,
   updateMenuItem,
@@ -230,4 +304,7 @@ module.exports = {
   updateMenuItemAvailability,
   getNewItems,
   triMenutItems,
+  createSlug,
+  getMenuItemBySlug,
+  getMenuItemsByCategorySlug,
 };

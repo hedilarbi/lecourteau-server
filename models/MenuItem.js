@@ -2,6 +2,7 @@ const { Schema, model } = require("mongoose");
 
 const menuItemSchema = new Schema({
   name: String,
+  slug: String,
   image: String,
   prices: [
     {

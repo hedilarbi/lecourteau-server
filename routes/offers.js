@@ -5,6 +5,8 @@ const {
   getOffer,
   deleteOffer,
   updateOffer,
+  createSlugs,
+  getOfferBySlug,
 } = require("../controllers/offers");
 const {
   uploadImageToFirebase,
@@ -15,6 +17,7 @@ const { optimizeImage } = require("../middlewares/imageOptimizor");
 const router = express.Router();
 
 router.get("/", getOffers);
+router.get("/slug", createSlugs);
 router.post(
   "/create",
   Multer.single("file"),
@@ -34,6 +37,7 @@ router.put(
   updateMenuItemImageInFirebase,
   updateOffer
 );
+router.get("/slug/:slug", getOfferBySlug);
 router.get("/:id", getOffer);
 
 module.exports = router;

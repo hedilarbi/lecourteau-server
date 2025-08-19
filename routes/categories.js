@@ -8,6 +8,7 @@ const {
   getCategoriesNames,
   triCategories,
   updateCategoryOrder,
+  createSlugs,
 } = require("../controllers/categories");
 const {
   uploadImageToFirebase,
@@ -19,6 +20,7 @@ const { optimizeImage } = require("../middlewares/imageOptimizor");
 const router = express.Router();
 
 router.get("/", getCategories);
+router.get("/slug", createSlugs);
 router.get("/names", getCategoriesNames);
 router.put("/tri", triCategories);
 router.put("/test", updateCategoryOrder);

@@ -21,6 +21,13 @@ const createOrderService = async (order) => {
     if (order.order.paymentMethod === "card" && order.order.paymentIntentId) {
       await stripe.paymentIntents.retrieve(order.order.paymentIntentId);
     }
+    let coords = order.coords || {};
+    if (!order.coords?.latitude || !order.coords?.longitude) {
+      coords = {
+        latitude: 0,
+        longitude: 0,
+      };
+    }
 
     const newOrder = new Order({
       user: order.order.user_id,
@@ -29,12 +36,9 @@ const createOrderService = async (order) => {
       sub_total: parseFloat(order.order.subTotal),
       delivery_fee: parseFloat(order.order.deliveryFee),
       type: order.type,
-      coords: {
-        latitude: order.coords.latitude,
-        longitude: order.coords.longitude,
-      },
+      coords: coords,
       code,
-      address: order.address,
+      address: order.address || "",
       instructions: order.order.instructions,
       status: ON_GOING,
       offers: order.order.offers,
@@ -94,7 +98,6 @@ const createOrderService = async (order) => {
 
     return responseData;
   } catch (err) {
-    console.error(err.message);
     return { error: err.message };
   }
 };

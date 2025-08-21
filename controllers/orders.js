@@ -30,7 +30,9 @@ const createOrder = async (req, res) => {
     const { error, response } = await createOrderService(order);
 
     if (error) {
-      logWithTimestamp(`Error creating order service: ${error}`);
+      logWithTimestamp(
+        `Error creating order service: userId ${order.order.user_id}, error: ${error}`
+      );
 
       return res.status(400).json({ success: false, message: error });
     }

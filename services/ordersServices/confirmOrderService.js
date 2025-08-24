@@ -29,16 +29,19 @@ const logWithTimestamp = (msg, extra = {}) => {
  */
 async function claimOrderForCapture(orderId) {
   // Create a transient captureLock with a timestamp to avoid stuck locks
-  const now = new Date();
+  const STALE_MS = 2 * 60 * 1000;
+
   const order = await Order.findOneAndUpdate(
     {
       _id: orderId,
       confirmed: { $ne: true },
-      "locks.capturing": { $ne: true },
+      $or: [
+        { "locks.capturing": { $ne: true } },
+        { "locks.capturingAt": { $lt: new Date(Date.now() - STALE_MS) } },
+        { "locks.capturingAt": { $exists: false } },
+      ],
     },
-    {
-      $set: { "locks.capturing": true, "locks.capturingAt": now },
-    },
+    { $set: { "locks.capturing": true, "locks.capturingAt": new Date() } },
     { new: true }
   )
     .populate({ path: "orderItems", populate: "customizations item" })

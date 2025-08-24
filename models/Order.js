@@ -89,6 +89,10 @@ const orderSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  locks: {
+    capturing: { type: Boolean, default: false },
+    capturingAt: { type: Date },
+  },
   paymentIntentId: String,
   payment_method: {
     type: String,

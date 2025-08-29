@@ -54,9 +54,55 @@ const createPayment = async (req, res) => {
       );
     }
 
-    // Attach payment method if not saved
-    if (!saved) {
-      const response = await stripe.paymentMethods.attach(paymentMethod, {
+    const newPM = await stripe.paymentMethods.retrieve(paymentMethod);
+    if (newPM.type !== "card" || !newPM.card) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Méthode de paiement invalide." });
+    }
+
+    // 2) Look for an already saved card with the same fingerprint
+    //    (fallback to brand+last4+exp if fingerprint isn’t present)
+    const fp = newPM.card.fingerprint || null;
+
+    let existingPMToReuse = null;
+    // Paginate if you have heavy users; 100 is usually enough
+    let startingAfter = undefined;
+    do {
+      const list = await stripe.paymentMethods.list({
+        customer: customer.id,
+        type: "card",
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+
+      for (const pm of list.data) {
+        const sameFingerprint =
+          fp && pm.card && pm.card.fingerprint && pm.card.fingerprint === fp;
+        const sameFallback =
+          !fp &&
+          pm.card &&
+          pm.card.last4 === newPM.card.last4 &&
+          pm.card.brand === newPM.card.brand &&
+          pm.card.exp_month === newPM.card.exp_month &&
+          pm.card.exp_year === newPM.card.exp_year;
+
+        if (sameFingerprint || sameFallback) {
+          existingPMToReuse = pm;
+          break;
+        }
+      }
+
+      if (existingPMToReuse || !list.has_more) break;
+      startingAfter = list.data[list.data.length - 1].id;
+    } while (true);
+
+    // 3) Attach only if it’s truly new
+    let pmToUseId = paymentMethod;
+    if (existingPMToReuse) {
+      pmToUseId = existingPMToReuse.id; // reuse
+    } else if (!saved) {
+      await stripe.paymentMethods.attach(paymentMethod, {
         customer: customer.id,
       });
     }
@@ -66,13 +112,10 @@ const createPayment = async (req, res) => {
       customer: customer.id,
       amount,
       currency: "cad",
-      payment_method: paymentMethod,
+      payment_method: pmToUseId, // pm_xxx (saved or newly attached)
       capture_method: "manual",
-      confirm: true,
-      automatic_payment_methods: {
-        enabled: true,
-        allow_redirects: "never",
-      },
+      confirm: true, // you keep server-side confirm
+      payment_method_types: ["card"],
     });
 
     res.status(200).json(paymentIntent);

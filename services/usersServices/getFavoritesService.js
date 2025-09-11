@@ -4,7 +4,7 @@ const getFavoritesService = async (id) => {
   try {
     const user = await User.findById(id)
       .select("favorites")
-      .populate({ path: "favorites", select: "name image" });
+      .populate({ path: "favorites", select: "name image slug" });
     if (!user) {
       return { error: "User not found" };
     }

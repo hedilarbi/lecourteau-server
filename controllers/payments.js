@@ -116,6 +116,7 @@ const createPayment = async (req, res) => {
       capture_method: "manual",
       confirm: true, // you keep server-side confirm
       payment_method_types: ["card"],
+      confirmation_method: "manual",
     });
 
     res.status(200).json(paymentIntent);
@@ -128,6 +129,15 @@ const createPayment = async (req, res) => {
       success: false,
       error: error || "An error occurred while processing the payment.",
     });
+  }
+};
+const confirmPayment = async (req, res) => {
+  const { paymentIntentId } = req.body;
+  try {
+    const pi = await stripe.paymentIntents.confirm(paymentIntentId);
+    res.json({ success: true, data: pi });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
   }
 };
 
@@ -159,7 +169,6 @@ const getPaymentMethods = async (req, res) => {
 
     res.status(200).json(paymentMethods.data);
   } catch (error) {
-    console.error("Error fetching payment methods:", error);
     res.status(500).json({
       success: false,
       error:
@@ -212,4 +221,5 @@ module.exports = {
   getPaymentMethods,
   verifyPayment,
   catchError,
+  confirmPayment,
 };

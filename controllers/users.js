@@ -135,7 +135,7 @@ const addToFavorites = async (req, res) => {
 
   try {
     const { error, user } = await addToFavoritesService(id, itemId);
-
+    console.log(error);
     if (error) {
       return res.status(400).json({ success: false, error });
     }
@@ -199,6 +199,7 @@ const addToAddresses = async (req, res) => {
 
 const deleteFromAddresses = async (req, res) => {
   const { id, addressId } = req.params;
+
   try {
     const { error, user } = await deleteFromAddressesService(id, addressId);
     if (error) {

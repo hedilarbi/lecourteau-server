@@ -40,7 +40,7 @@ const getRewards = async (req, res) => {
     // Fetch rewards from the database, populating the item field
     let response = await Reward.find().populate({
       path: "item",
-      select: "name",
+      select: "name image slug",
     });
 
     // Reverse the array if needed (assumed to get the latest rewards first)

@@ -194,7 +194,7 @@ const verifyPromoCode = async (req, res) => {
     const usedPromo = user.usedPromoCodes.find(
       (used) => used.promoCode?.toString() === promoCode._id.toString()
     );
-    console.log("usedPromo", usedPromo);
+
     if (usedPromo) {
       if (
         typeof promoCode.usagePerUser === "number" &&

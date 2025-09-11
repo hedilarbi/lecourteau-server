@@ -15,6 +15,7 @@ const createOrderService = async (order) => {
   try {
     const rewardsList = order.order.rewards.map((item) => item.id);
     const code = generateRandomCode(8).toUpperCase();
+
     if (order.order.paymentMethod !== "card") {
       return { error: "Payment method not supported" };
     }

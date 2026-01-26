@@ -1,9 +1,10 @@
 const { default: mongoose } = require("mongoose");
-const { ON_GOING } = require("../utils/constants");
+const { ON_GOING, SCHEDULED } = require("../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const getInititalStats = async (req, res) => {
   try {
     const { date, from, to } = req.query;
+
     const usersCount = await mongoose.models.User.countDocuments();
     let startDate;
     let endDate;
@@ -19,33 +20,53 @@ const getInititalStats = async (req, res) => {
       endDate.setUTCHours(23, 59, 59, 999);
     }
 
-    const restaurants = await mongoose.models.Restaurant.find().populate(
-      "orders"
-    );
+    const restaurants = await mongoose.models.Restaurant.find(
+      {},
+      { name: 1 }
+    ).lean();
 
-    const restaurantStats = restaurants.map((restaurant) => {
-      const todayOrders = restaurant.orders.filter(
-        (order) =>
-          order.createdAt >= startDate &&
-          order.createdAt <= endDate &&
-          order.status !== "Annulé" &&
-          order.confirmed === true
+    let restaurantStats = restaurants.map((restaurant) => ({
+      restaurantId: restaurant._id,
+      restaurantName: restaurant.name,
+      ordersCount: 0,
+      revenue: "0.00",
+    }));
+
+    if (startDate && endDate) {
+      const orderStats = await mongoose.models.Order.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            status: { $ne: "Annulé" },
+            confirmed: true,
+            restaurant: { $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: "$restaurant",
+            ordersCount: { $sum: 1 },
+            revenue: { $sum: "$total_price" },
+          },
+        },
+      ]);
+
+      const statsByRestaurantId = new Map(
+        orderStats.map((stat) => [String(stat._id), stat])
       );
 
-      const ordersCount = todayOrders.length;
+      restaurantStats = restaurants.map((restaurant) => {
+        const stat = statsByRestaurantId.get(String(restaurant._id));
+        const revenue = stat ? stat.revenue : 0;
 
-      const revenue = todayOrders.reduce(
-        (acc, order) => acc + order.total_price,
-        0
-      );
-
-      return {
-        restaurantId: restaurant._id,
-        restaurantName: restaurant.name,
-        ordersCount,
-        revenue: revenue.toFixed(2),
-      };
-    });
+        return {
+          restaurantId: restaurant._id,
+          restaurantName: restaurant.name,
+          ordersCount: stat ? stat.ordersCount : 0,
+          revenue: revenue.toFixed(2),
+        };
+      });
+    }
 
     res.status(200).json({ usersCount, restaurantStats });
   } catch (err) {
@@ -57,45 +78,26 @@ const getRestaurantStats = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const restaurent = await mongoose.models.Restaurant.findById(id).populate(
-      "orders"
-    );
-
-    // const ordersCount = restaurent.orders.length;
-
-    // const revenue = restaurent.orders.reduce(
-    //   (acc, order) => acc + order.total_price,
-    //   0
-    // );
-
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-
-    const todayOrders = restaurent.orders.filter(
-      (order) =>
-        order.createdAt >= startOfDay &&
-        order.createdAt <= endOfDay &&
-        order.status !== "Annulé" &&
-        order.confirmed === true
-    );
-
-    const ordersCount = todayOrders.length;
-
-    const revenue = todayOrders.reduce(
-      (acc, order) => acc + order.total_price,
-      0
-    );
-
-    let onGoingOrders = restaurent.orders.filter(
-      (order) => order.status === ON_GOING
-    );
-    onGoingOrders = onGoingOrders.reverse();
-    res
-      .status(200)
-      .json({ ordersCount, onGoingOrders, revenue: revenue.toFixed(2) });
+    const [onGoingOrders, nonConfirmedOrders] = await Promise.all([
+      mongoose.models.Order.find({
+        restaurant: id,
+        status: ON_GOING,
+        confirmed: true,
+      })
+        .sort({ createdAt: -1 })
+        .lean(),
+      mongoose.models.Order.find({
+        restaurant: id,
+        confirmed: false,
+        status: { $in: [ON_GOING, SCHEDULED] },
+      })
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+    res.status(200).json({
+      onGoingOrders,
+      nonConfirmedOrders,
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

@@ -7,15 +7,14 @@ const updatePriceService = require("../services/ordersServices/updatePriceServic
 const orderDeliveredService = require("../services/ordersServices/orderDeliveredService");
 const reviewOrderService = require("../services/ordersServices/reviewOrderService");
 const updateOrderPriceAndStatusService = require("../services/ordersServices/updateOrderPriceAndStatusService");
-const nodemailer = require("nodemailer");
-const {
-  generateOrderConfirmationEmail,
-} = require("../utils/mailTemplateGenerators");
+
 const confirmOrderService = require("../services/ordersServices/confirmOrderService");
 const updateOrderPaymentStatusService = require("../services/ordersServices/updateOrderPaymentStatusService");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const { default: mongoose } = require("mongoose");
+const { ON_GOING } = require("../utils/constants");
+const Audit = require("../models/Audit");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -102,7 +101,23 @@ const deleteOrder = async (req, res) => {
 const updateStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+  const staff = req.staff;
+
   try {
+    const staffId = staff.id;
+    console.log("Staff ID in updateStatus:", staffId);
+    if (!staffId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Unauthorized: No staff ID found." });
+    }
+
+    const staffMember = await mongoose.models.Staff.findById(staffId);
+    if (!staffMember) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Staff member not found." });
+    }
     const { error } = await updateStatusService(id, status);
     if (error) {
       logWithTimestamp(`Error updating order status: ${error}`);
@@ -112,6 +127,16 @@ const updateStatus = async (req, res) => {
     res
       .status(200)
       .json({ success: true, message: "Order status updated successfully" });
+
+    const auditData = {
+      detailsModel: "Order",
+      userId: staffId,
+      action: [`Mise à jour du statut de la commande à ${status}`],
+      timestamp: new Date(),
+      details: id,
+    };
+
+    await Audit.create(auditData);
   } catch (err) {
     logWithTimestamp(`Error updating order status: ${err}`);
 
@@ -235,8 +260,23 @@ const reviewOrder = async (req, res) => {
 
 const confirmOrder = async (req, res) => {
   const { id } = req.params;
+  const staff = req.staff;
 
   try {
+    const staffId = staff.id;
+    if (!staffId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Unauthorized: No staff ID found." });
+    }
+
+    const staffMember = await mongoose.models.Staff.findById(staffId);
+    if (!staffMember) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Staff member not found." });
+    }
+
     const { error } = await confirmOrderService(id);
     if (error) {
       logWithTimestamp(`Error confirming order service: ${error}`);
@@ -244,6 +284,14 @@ const confirmOrder = async (req, res) => {
       return res.status(400).json({ success: false, error });
     }
     res.status(200).json({ success: true });
+    const auditData = {
+      detailsModel: "Order",
+      userId: staffId,
+      action: ["Confirmation de la commande"],
+      timestamp: new Date(),
+      details: id,
+    };
+    await Audit.create(auditData);
   } catch (err) {
     logWithTimestamp(`Error confirming order service: ${err}`);
 
@@ -392,21 +440,33 @@ const getRestaurantFilteredOrders = async (req, res) => {
   }
 };
 
-const getNonConfirmedOrders = async (req, res) => {
+const orderChecker = async (req, res) => {
   const { id } = req.params;
 
   try {
     const tenMinutesAgo = new Date();
     tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 20);
 
-    const orders = await Order.find({
+    const nonConfirmedOrders = await Order.find({
       confirmed: false,
       restaurant: id,
       status: { $ne: "Annulé" },
       createdAt: { $gte: tenMinutesAgo },
     });
-    res.json(orders);
+
+    const now = new Date();
+    const in45Min = new Date(now.getTime() + 45 * 60 * 1000);
+
+    const onGoingOrders = await Order.find({
+      restaurant: id,
+      status: ON_GOING,
+
+      "scheduled.scheduledFor": { $gte: now, $lte: in45Min, $ne: null },
+      "scheduled.processed": true,
+    });
+    res.json({ nonConfirmedOrders, onGoingOrders });
   } catch (error) {
+    console.error("Error fetching orders:", error);
     res.status(500).json({ error: "An error occurred while fetching orders." });
   }
 };
@@ -463,6 +523,6 @@ module.exports = {
   confirmOrder,
   getFilteredOrders,
   getRestaurantFilteredOrders,
-  getNonConfirmedOrders,
+  orderChecker,
   getTotalRevenue,
 };

@@ -15,11 +15,18 @@ const triMenutItemsService = require("../services/menuItemsServices/triMenuItems
 const createMenuItem = async (req, res) => {
   let firebaseUrl = req.file ? req.file.firebaseUrl : null; // Set firebaseUrl if a file is uploaded
 
-  const { name, description, prices, customization, category } = req.body;
+  const {
+    name,
+    description,
+    prices,
+
+    category,
+    customizationGroup,
+  } = req.body;
 
   try {
     const pricesArray = JSON.parse(prices); // Parse the prices from the request body
-    const customizationArray = JSON.parse(customization); // Parse customization options
+    // Parse customization options
 
     // Filter and format prices
     const newPrices = pricesArray
@@ -34,8 +41,9 @@ const createMenuItem = async (req, res) => {
       firebaseUrl,
       newPrices,
       description,
-      customizationArray,
-      category
+
+      category,
+      customizationGroup
     );
 
     if (error) {
@@ -72,7 +80,14 @@ const getItemsNames = async (req, res) => {
 
 const updateMenuItem = async (req, res) => {
   const { id } = req.params;
-  const { name, prices, description, category, customization } = req.body;
+  const {
+    name,
+    prices,
+    description,
+    category,
+    customization,
+    customizationGroup,
+  } = req.body;
 
   // Initialize firebaseUrl if a file is uploaded
   const firebaseUrl = req.file ? req.file.firebaseUrl : null;
@@ -96,15 +111,18 @@ const updateMenuItem = async (req, res) => {
       newPrices,
       description,
       category,
-      customizationArray
+      customizationArray,
+      customizationGroup
     );
 
     if (error) {
+      console.error("Error updating menu item:", error);
       return res.status(400).json({ success: false, message: error });
     }
 
     return res.status(200).json(response);
   } catch (err) {
+    console.error("Error updating menu item 500:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -256,7 +274,12 @@ const getMenuItemBySlug = async (req, res) => {
           path: "category",
         },
       })
-      .populate("category");
+      .populate("category")
+      .populate({
+        path: "customization_group",
+        populate: { path: "toppings" },
+      });
+    console.log(menuItem);
     if (!menuItem) {
       return res
         .status(404)

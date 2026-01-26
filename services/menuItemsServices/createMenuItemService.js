@@ -6,8 +6,9 @@ const createMenuItemService = async (
   firebaseUrl,
   newPrices,
   description,
-  customizationArray,
-  category
+
+  category,
+  customizationGroup
 ) => {
   try {
     const existingMenuItem = await MenuItem.findOne({ name }); // Check if the item already exists
@@ -22,10 +23,11 @@ const createMenuItemService = async (
       image: firebaseUrl,
       prices: newPrices,
       description,
-      customization: customizationArray,
+
       category,
       slug,
       order: menuItemsCount, // Set the order based on the count
+      customization_group: customizationGroup || null,
     });
 
     const savedMenuItem = await newMenuItem.save(); // Save the new menu item

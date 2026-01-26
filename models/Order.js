@@ -106,6 +106,19 @@ const orderSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: "PromoCode",
   },
+  scheduled: {
+    isScheduled: {
+      type: Boolean,
+      default: false, // false = commande normale, true = commande programmée
+    },
+    scheduledFor: {
+      type: Date, // date/heure de livraison souhaitée
+    },
+    processed: {
+      type: Boolean,
+      default: false, // passe à true quand la commande a été envoyée au resto / prise en charge
+    },
+  },
 });
 
 module.exports = model("Order", orderSchema);

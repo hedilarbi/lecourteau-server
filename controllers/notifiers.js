@@ -1,5 +1,5 @@
 const { default: mongoose } = require("mongoose");
-const sendNotificationsService = require("../services/notificationService.js/sendNotificationsService");
+
 const { default: Expo } = require("expo-server-sdk");
 const client = require("twilio")(
   process.env.TWILIO_ACCOUNT_SID,

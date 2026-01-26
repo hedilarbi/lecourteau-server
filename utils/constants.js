@@ -5,6 +5,7 @@ const PICKEDUP = "Ramassé";
 const READY = "Prête";
 const IN_DELIVERY = "En Livraison";
 const DONE = "Terminée";
+const SCHEDULED = "Programmé";
 
 module.exports = {
   IN_DELIVERY,
@@ -14,4 +15,5 @@ module.exports = {
   CANCELED,
   ON_GOING,
   DONE,
+  SCHEDULED,
 };

@@ -7,7 +7,8 @@ const updateMenuItemService = async (
   newPrices,
   description,
   category,
-  customization
+  customization,
+  customizationGroup
 ) => {
   try {
     const updateData = {
@@ -16,6 +17,7 @@ const updateMenuItemService = async (
       description,
       category,
       customization,
+      customization_group: customizationGroup,
     };
 
     if (firebaseUrl) {

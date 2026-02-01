@@ -10,6 +10,7 @@ const { default: Expo } = require("expo-server-sdk");
 const {
   generateOrderConfirmationEmail,
 } = require("../../utils/mailTemplateGenerators");
+const { CANCELED } = require("../../utils/constants");
 const nodemailer = require("nodemailer");
 
 const logWithTimestamp = (msg, extra = {}) => {
@@ -178,16 +179,13 @@ module.exports = async function confirmOrderService(orderId) {
     }
 
     if (pi.status === "canceled") {
+      console.log("PaymentIntent is canceled:", pi.id);
       // Actual canceled PI => mark order canceled (your choice)
-      order.status = "Annulé";
+      order.status = CANCELED;
+      order.payment_status = false;
+      order.confirmed = false;
       await order.save();
       return { error: "PaymentIntent is canceled" };
-    }
-
-    if (pi.status !== "requires_capture") {
-      // Unexpected state: don't cancel the order; bubble up a safe error
-      logWithTimestamp("PI not capturable", { status: pi.status, id: pi.id });
-      return { error: `PaymentIntent not capturable (status: ${pi.status})` };
     }
 
     // 4) Capture with an idempotency key (dedupe retries)
@@ -240,6 +238,20 @@ module.exports = async function confirmOrderService(orderId) {
       );
       process.nextTick(() => sendMail(order));
       return { response: "Order already captured; confirmed" };
+    }
+
+    // If Stripe reports the PI as canceled while capturing, keep the order canceled in DB
+    if (/paymentintent.*cancell?ed/i.test(msg)) {
+      order.status = CANCELED;
+      order.payment_status = false;
+      order.confirmed = false;
+      await order.save();
+      logWithTimestamp("Marked order canceled after capture attempt", {
+        orderId,
+        code,
+        msg,
+      });
+      return { error: msg };
     }
 
     logWithTimestamp("Error confirming order", { orderId, code, msg });

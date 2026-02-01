@@ -24,7 +24,7 @@ const setUserInfoService = async (
           name: name,
           email: email,
           is_profile_setup: true,
-          date_of_birth: new Date(date_of_birth),
+          date_of_birth: date_of_birth ? new Date(date_of_birth) : null,
         },
         $push: {
           addresses: newAddress,
@@ -35,6 +35,7 @@ const setUserInfoService = async (
 
     return { response };
   } catch (err) {
+    console.log("Error in setUserInfoService:", err);
     return { error: err.message };
   }
 };

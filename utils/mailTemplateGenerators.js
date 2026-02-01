@@ -8,7 +8,7 @@ const generateOrderConfirmationEmail = (
 ) => {
   const date = formatDateToFrench();
 
-  orderType = type === "delivery" ? "a livrer" : "a emporter";
+  orderType = type === "delivery" ? "à livrer" : "à emporter";
 
   let itemsList = items.map(
     (item) =>
@@ -79,7 +79,7 @@ const generateOrderConfirmationEmail = (
         </div>
           <h1 style="margin-top:20px;font-size:32px;color:white">Merci pour votre commande, ${name}!</h1>
 
-<p style="margin-top:20px;font-size:16px;color:white"> Votre commande ${orderType} chez Casse-croûte Courteau  été passée avec succès, votre code de commande est <strong > ${code} </strong> </p>
+<p style="margin-top:20px;font-size:16px;color:white"> Votre commande ${orderType} chez Casse-croûte Courteau a été passée avec succès, votre code de commande est <strong > ${code} </strong> </p>
 
 <p style="margin-top:20px;font-size:20px;color:white"><strong >Total:</strong> ${total} $</p>
 
@@ -87,7 +87,7 @@ const generateOrderConfirmationEmail = (
 ${itemsList}
 </div>
 
-<p style='margin-top:20px;font-size:16px;color:white'><strong >Livrer a:</strong> ${address} </p>
+${type === "delivery" ? `<p style='margin-top:20px;font-size:16px;color:white'><strong >Livrer à:</strong> ${address} </p>` : ""}
     </div>
  
 </body>

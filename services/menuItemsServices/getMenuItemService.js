@@ -9,7 +9,11 @@ const getMenuItemService = async (id) => {
           path: "category",
         },
       })
-      .populate("category");
+      .populate("category")
+      .populate({
+        path: "customization_group",
+        populate: { path: "toppings" },
+      });
 
     if (!response) {
       return { error: "Menu item not found" };

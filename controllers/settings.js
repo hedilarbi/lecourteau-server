@@ -30,8 +30,7 @@ const updateSettings = async (req, res) => {
     if (error) {
       return res.status(400).json({ success: false, message: error });
     }
-    const timeStamp = new Date().toISOString();
-    console.log(`${timeStamp} - Settings updated successfully for ID: ${id}`); // Log the success message with timestamp
+
     res.status(200).json(response);
   } catch (err) {
     console.error("Error updating settings:", err); // Log the error

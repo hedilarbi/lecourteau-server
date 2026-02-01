@@ -1,6 +1,6 @@
 const { default: mongoose } = require("mongoose");
 const Order = require("../../models/Order");
-const { ON_GOING } = require("../../utils/constants");
+const { ON_GOING, SCHEDULED } = require("../../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const generateRandomCode = require("../../utils/generateOrderCode");
 const { default: Stripe } = require("stripe");
@@ -41,7 +41,7 @@ const createOrderService = async (order) => {
       code,
       address: order.address || "",
       instructions: order.order.instructions,
-      status: ON_GOING,
+      status: order.order.scheduled.isScheduled ? SCHEDULED : ON_GOING,
       offers: order.order.offers,
       rewards: rewardsList,
       createdAt: new Date().toISOString(),
@@ -54,6 +54,10 @@ const createOrderService = async (order) => {
       promoCode: order.order.promoCode
         ? order.order.promoCode.promoCodeId
         : null,
+      scheduled: {
+        isScheduled: order.order.scheduled.isScheduled || false,
+        scheduledFor: order.order.scheduled.scheduledFor || null,
+      },
     });
 
     // Fetch user and restaurant
@@ -90,9 +94,6 @@ const createOrderService = async (order) => {
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant
     );
-
-    restaurant.orders.push(response._id);
-    await restaurant.save();
 
     const responseData = { response };
     process.nextTick(() => sendNotifications(restaurant, response._id, code));

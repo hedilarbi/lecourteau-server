@@ -39,6 +39,7 @@ const {
 const {
   getRestaurantOfferService,
 } = require("../services/restaurantsServices/getRestaurantOfferService");
+const Audit = require("../models/Audit");
 
 const createRestaurant = async (req, res) => {
   const { name, address, location, phoneNumber } = req.body;
@@ -70,7 +71,6 @@ const getRestaurants = async (req, res) => {
     const { error, response } = await getRestaurantsService();
 
     if (error) {
-      console.error("Error fetching restaurants:", error); // Log the error
       return res.status(500).json({ success: false, message: error });
     }
 
@@ -460,6 +460,35 @@ const updateRestaurantSettings = async (req, res) => {
         .json({ success: false, message: "Restaurant not found." });
     }
 
+    let auditData = {
+      userId: id,
+      action: [],
+      timestamp: new Date(),
+      details: id,
+    };
+    if (settings.open !== restaurant.settings.open) {
+      const string =
+        "modification état ouverture à " + settings.open ? "ouverte" : "fermée";
+      auditData.action.push(string);
+    }
+
+    if (settings.delivery !== restaurant.settings.delivery) {
+      const string =
+        "modification état livraison à " + settings.delivery
+          ? "active"
+          : "inactive";
+      auditData.action.push(string);
+    }
+    if (settings.delivery_fee !== restaurant.settings.delivery_fee) {
+      const string =
+        "modification frais de livraison à " + settings.delivery_fee;
+      auditData.action.push(string);
+    }
+    if (settings.emploie_du_temps !== restaurant.settings.emploie_du_temps) {
+      const string = "modification de l'emploie du temps";
+      auditData.action.push(string);
+    }
+
     restaurant.settings = settings;
     await restaurant.save();
 
@@ -467,6 +496,7 @@ const updateRestaurantSettings = async (req, res) => {
       success: true,
       message: "Restaurant settings updated successfully.",
     });
+    await Audit.create(auditData);
   } catch (error) {
     console.error("Error updating restaurant settings:", error);
     res.status(500).json({ success: false, message: error.message });

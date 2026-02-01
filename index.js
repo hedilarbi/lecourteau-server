@@ -20,6 +20,10 @@ const appRoutes = require("./routes/app");
 const sizesRoutes = require("./routes/sizes");
 const PromoCodesRoutes = require("./routes/promoCodes");
 const VedetteRoutes = require("./routes/vedettes");
+const auditRoutes = require("./routes/audit");
+const sizesGroupesRoutes = require("./routes/sizeGroups");
+const toppingGroupsRoutes = require("./routes/toppingGroups");
+const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
 require("dotenv/config");
 
 const { createServer } = require("http");
@@ -50,12 +54,17 @@ app.use("/api/sizes", sizesRoutes);
 app.use("/api/app", appRoutes);
 app.use("/api/promoCodes", PromoCodesRoutes);
 app.use("/api/vedettes", VedetteRoutes);
+app.use("/api/audits", auditRoutes);
+app.use("/api/sizeGroups", sizesGroupesRoutes);
+app.use("/api/toppingGroups", toppingGroupsRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,
 
   { useNewUrlParser: true }
 );
+
+startScheduledOrdersJob();
 
 httpServer.listen(process.env.PORT, () => {
   console.log("listening on port 5000");

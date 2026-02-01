@@ -33,6 +33,7 @@ const {
 } = require("../services/staffsServices/getDriversOrdersService");
 const saltRounds = 10;
 const bcrypt = require("bcrypt");
+const Audit = require("../models/Audit");
 const createStaff = async (req, res) => {
   let firebaseUrl = null;
   if (req.file) {
@@ -119,6 +120,14 @@ const loginStaff = async (req, res) => {
     }
 
     res.status(200).json({ staff, token });
+
+    const auditData = {
+      userId: staff._id,
+      action: ["Connexion"],
+      timestamp: new Date(),
+      details: staff.restaurant,
+    };
+    await Audit.create(auditData);
   } catch (error) {
     console.error("error in login controller:", error);
     res.status(500).json({ message: error.message });

@@ -45,10 +45,16 @@ const createUser = async (req, res) => {
   const { phone_number } = req.body;
 
   try {
+    if (!phone_number) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Phone number is required" });
+    }
     const { user, token, error } = await createUserService(phone_number);
     if (error) {
       return res.status(400).json(error);
     }
+
     res.status(200).json({ user, token });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -82,6 +88,7 @@ const setUserInfo = async (req, res) => {
       coords,
       date_of_birth
     );
+
     if (error) {
       return res.status(400).json(error);
     }
@@ -135,7 +142,7 @@ const addToFavorites = async (req, res) => {
 
   try {
     const { error, user } = await addToFavoritesService(id, itemId);
-    console.log(error);
+
     if (error) {
       return res.status(400).json({ success: false, error });
     }
@@ -199,7 +206,6 @@ const addToAddresses = async (req, res) => {
 
 const deleteFromAddresses = async (req, res) => {
   const { id, addressId } = req.params;
-
   try {
     const { error, user } = await deleteFromAddressesService(id, addressId);
     if (error) {
@@ -218,7 +224,7 @@ const getUserByToken = async (req, res) => {
     const { error, user } = await getUserByTokenService(token);
 
     if (error) {
-      return res.status(404).json({ error });
+      return res.status(401).json({ error });
     }
     res.status(200).json(user);
   } catch (err) {

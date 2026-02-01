@@ -12,10 +12,13 @@ const getRestaurantOfferService = async (restaurantId, id) => {
             path: "items",
             populate: {
               path: "item",
-              populate: {
-                path: "customization",
-                populate: { path: "category" },
-              },
+              populate: [
+                {
+                  path: "customization",
+                  populate: { path: "category" },
+                },
+                { path: "customization_group", populate: { path: "toppings" } },
+              ],
             },
           },
         },

@@ -28,7 +28,7 @@ const getVedettes = async (req, res) => {
   try {
     const vedettes = await Vedette.find().populate("menuItem");
     vedettes.sort((a, b) => a.order - b.order);
-    console.log(vedettes);
+
     res.status(200).json(vedettes);
   } catch (err) {
     console.error(`Error fetching vedettes: ${err.message}`);

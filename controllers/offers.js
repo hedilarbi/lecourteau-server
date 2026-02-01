@@ -161,7 +161,10 @@ const getOfferBySlug = async (req, res) => {
       path: "items",
       populate: {
         path: "item",
-        populate: { path: "customization", populate: "category" },
+        populate: [
+          { path: "customization", populate: "category" },
+          { path: "customization_group", populate: { path: "toppings" } },
+        ],
       },
     });
     if (!offer) {

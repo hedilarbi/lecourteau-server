@@ -6,7 +6,10 @@ const getOfferService = async (id) => {
       path: "items",
       populate: {
         path: "item",
-        populate: { path: "customization", populate: "category" },
+        populate: [
+          { path: "customization", populate: "category" },
+          { path: "customization_group", populate: { path: "toppings" } },
+        ],
       },
     });
 

@@ -3,7 +3,7 @@ const { default: mongoose } = require("mongoose");
 const { default: Expo } = require("expo-server-sdk");
 const client = require("twilio")(
   process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
+  process.env.TWILIO_AUTH_TOKEN,
 );
 require("dotenv/config");
 
@@ -59,8 +59,6 @@ const sendNotifications = async (req, res) => {
         console.error("Error sending chunk:", error);
       }
     }
-
-    console.log("Finished sending notifications");
   } catch (err) {
     console.error("Error sending notifications:", err);
     res.status(500).json({ status: false, message: err.message });

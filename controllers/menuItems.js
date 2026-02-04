@@ -43,7 +43,7 @@ const createMenuItem = async (req, res) => {
       description,
 
       category,
-      customizationGroup
+      customizationGroup,
     );
 
     if (error) {
@@ -112,7 +112,7 @@ const updateMenuItem = async (req, res) => {
       description,
       category,
       customizationArray,
-      customizationGroup
+      customizationGroup,
     );
 
     if (error) {
@@ -200,7 +200,7 @@ const updateMenuItemAvailability = async (req, res) => {
   try {
     const { error, response } = await updateMenuItemAvailabilityService(
       id,
-      status
+      status,
     );
     if (error) {
       return res.status(400).json({ success: false, message: error });
@@ -252,9 +252,9 @@ const createSlug = async (req, res) => {
         return await MenuItem.findByIdAndUpdate(
           item._id,
           { slug },
-          { new: true }
+          { new: true },
         );
-      })
+      }),
     );
     res.status(200).json(updatedMenuItems);
   } catch (error) {
@@ -279,7 +279,7 @@ const getMenuItemBySlug = async (req, res) => {
         path: "customization_group",
         populate: { path: "toppings" },
       });
-    console.log(menuItem);
+
     if (!menuItem) {
       return res
         .status(404)
@@ -306,7 +306,7 @@ const getMenuItemsByCategorySlug = async (req, res) => {
     }
     // Find menu items that belong to the category
     const menuItems = await MenuItem.find({ category: category._id }).populate(
-      "category"
+      "category",
     );
 
     res.status(200).json(menuItems);

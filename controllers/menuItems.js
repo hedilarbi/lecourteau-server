@@ -43,7 +43,7 @@ const createMenuItem = async (req, res) => {
       description,
 
       category,
-      customizationGroup,
+      customizationGroup
     );
 
     if (error) {
@@ -112,7 +112,7 @@ const updateMenuItem = async (req, res) => {
       description,
       category,
       customizationArray,
-      customizationGroup,
+      customizationGroup
     );
 
     if (error) {

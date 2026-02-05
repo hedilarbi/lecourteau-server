@@ -22,7 +22,7 @@ const getInititalStats = async (req, res) => {
 
     const restaurants = await mongoose.models.Restaurant.find(
       {},
-      { name: 1 },
+      { name: 1 }
     ).lean();
 
     let restaurantStats = restaurants.map((restaurant) => ({
@@ -52,7 +52,7 @@ const getInititalStats = async (req, res) => {
       ]);
 
       const statsByRestaurantId = new Map(
-        orderStats.map((stat) => [String(stat._id), stat]),
+        orderStats.map((stat) => [String(stat._id), stat])
       );
 
       restaurantStats = restaurants.map((restaurant) => {

@@ -4,7 +4,7 @@ const generateOrderConfirmationEmail = (
   type,
   address,
   total,
-  items
+  items,
 ) => {
   const date = formatDateToFrench();
 
@@ -15,10 +15,11 @@ const generateOrderConfirmationEmail = (
       `
     <p style='color:white'>${item.name} - ${item.price.toFixed(2)}$ (
       ${item.customizations?.map(
-        (customization) => `<span style="color:gray"> ${customization}, </span>`
+        (customization) =>
+          `<span style="color:gray"> ${customization}, </span>`,
       )}  
     )</p>
-  `
+  `,
   );
 
   return ` 
@@ -50,8 +51,7 @@ const generateOrderConfirmationEmail = (
             display: flex;
          
             width: 100%;
-           
-        }
+       }
         .header img {
             max-width: 150px;
             height: 150px;
@@ -71,7 +71,7 @@ const generateOrderConfirmationEmail = (
 <body >
     <div class="container">
         <div class="header" >
-            <img src="https://firebasestorage.googleapis.com/v0/b/lecourteau-19bdb.appspot.com/o/icon.png?alt=media&token=dde8431f-d60d-40d0-9fe9-403c3bce5cd2" alt="Your Image">
+            <img src="https://firebasestorage.googleapis.com/v0/b/lecourteau-19bdb.appspot.com/o/icon.png?alt=media&token=dde8431f-d60d-40d0-9fe9-40>
             <div class="text" >
                <p style='color:white'> <strong >Total:</strong> ${total} $</p>
 <p style='color:white' > ${date}</p>

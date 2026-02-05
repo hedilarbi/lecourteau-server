@@ -43,11 +43,16 @@ const uploadImageToFirebase = (req, res, next) => {
 const updateMenuItemImageInFirebase = async (req, res, next) => {
   if (!req.body.fileToDelete || !req.file) return next();
 
+  if (!req.body.fileToDelete.includes(BUCKET_NAME)) return next();
+
   const oldImageName = req.body.fileToDelete.split("/").pop();
 
   const oldImageFile = bucket.file(oldImageName);
   try {
-    await oldImageFile.delete();
+    const [exists] = await oldImageFile.exists();
+    if (exists) {
+      await oldImageFile.delete();
+    }
   } catch (err) {
     console.error("err", err);
   }

@@ -55,14 +55,14 @@ const createOrderService = async (order) => {
         ? order.order.promoCode.promoCodeId
         : null,
       scheduled: {
-        isScheduled: order.order.scheduled.isScheduled || false,
-        scheduledFor: order.order.scheduled.scheduledFor || null,
+        isScheduled: order.order.scheduled?.isScheduled || false,
+        scheduledFor: order.order.scheduled?.scheduledFor || null,
       },
     });
 
     // Fetch user and restaurant
     const user = await mongoose.models.User.findById(
-      order.order.user_id
+      order.order.user_id,
     ).populate("orders");
     if (user.orders.length > 0) {
       const lastOrder = user.orders[user.orders.length - 1];
@@ -79,7 +79,7 @@ const createOrderService = async (order) => {
     }
 
     const existingOrderWithPaymentIntent = user.orders.find(
-      (userOrder) => userOrder.paymentIntentId === order.order.paymentIntentId
+      (userOrder) => userOrder.paymentIntentId === order.order.paymentIntentId,
     );
 
     if (existingOrderWithPaymentIntent) {
@@ -92,7 +92,7 @@ const createOrderService = async (order) => {
     user.orders.push(response._id);
     await user.save();
     const restaurant = await mongoose.models.Restaurant.findById(
-      order.restaurant
+      order.restaurant,
     );
 
     const responseData = { response };

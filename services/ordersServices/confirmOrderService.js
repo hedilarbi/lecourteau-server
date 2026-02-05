@@ -17,7 +17,7 @@ const logWithTimestamp = (msg, extra = {}) => {
   const timeStamp = new Date().toISOString();
   console.error(
     `${timeStamp} - ${msg}`,
-    Object.keys(extra).length ? extra : ""
+    Object.keys(extra).length ? extra : "",
   );
 };
 
@@ -43,7 +43,7 @@ async function claimOrderForCapture(orderId) {
       ],
     },
     { $set: { "locks.capturing": true, "locks.capturingAt": new Date() } },
-    { new: true }
+    { new: true },
   )
     .populate({ path: "orderItems", populate: "customizations item" })
     .populate({ path: "offers", populate: "offer " })
@@ -56,7 +56,7 @@ async function claimOrderForCapture(orderId) {
 async function releaseCaptureLock(orderId) {
   await Order.updateOne(
     { _id: orderId },
-    { $unset: { "locks.capturing": "", "locks.capturingAt": "" } }
+    { $unset: { "locks.capturing": "", "locks.capturingAt": "" } },
   );
 }
 
@@ -103,7 +103,7 @@ async function sendMail(order) {
           order.type,
           order.address,
           order.total_price.toFixed(2),
-          items
+          items,
         ),
       };
 
@@ -172,15 +172,13 @@ module.exports = async function confirmOrderService(orderId) {
       // Loyalty + promo bookkeeping (run once; guard via flags if needed)
       await finalizeLoyaltyAndPromo(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order))
+        sendPush(order.user, order._id, calculatePoints(order)),
       );
       process.nextTick(() => sendMail(order));
       return { response: "Order already captured; confirmed" };
     }
 
     if (pi.status === "canceled") {
-      console.log("PaymentIntent is canceled:", pi.id);
-      // Actual canceled PI => mark order canceled (your choice)
       order.status = CANCELED;
       order.payment_status = false;
       order.confirmed = false;
@@ -194,7 +192,7 @@ module.exports = async function confirmOrderService(orderId) {
       pi.id,
       // You can optionally set { amount_to_capture } here
       {},
-      { idempotencyKey }
+      { idempotencyKey },
     );
 
     if (captured.status !== "succeeded") {
@@ -214,7 +212,7 @@ module.exports = async function confirmOrderService(orderId) {
     // 6) Loyalty + promo bookkeeping
     await finalizeLoyaltyAndPromo(order);
     process.nextTick(() =>
-      sendPush(order.user, order._id, calculatePoints(order))
+      sendPush(order.user, order._id, calculatePoints(order)),
     );
     process.nextTick(() => sendMail(order));
 
@@ -234,7 +232,7 @@ module.exports = async function confirmOrderService(orderId) {
       await order.save();
       await finalizeLoyaltyAndPromo(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order))
+        sendPush(order.user, order._id, calculatePoints(order)),
       );
       process.nextTick(() => sendMail(order));
       return { response: "Order already captured; confirmed" };
@@ -266,7 +264,7 @@ async function finalizeLoyaltyAndPromo(order) {
   const user = await mongoose.models.User.findById(order.user._id);
   const pointsToremove = (order.rewards || []).reduce(
     (acc, it) => acc + it.points,
-    0
+    0,
   );
   const pointsEarned = calculatePoints(order);
   const totalPoints = Math.floor(pointsEarned * 10 - pointsToremove);
@@ -275,7 +273,7 @@ async function finalizeLoyaltyAndPromo(order) {
 
   if (order.promoCode) {
     const used = user.usedPromoCodes.find(
-      (u) => String(u.promoCode) === String(order.promoCode)
+      (u) => String(u.promoCode) === String(order.promoCode),
     );
     if (!used)
       user.usedPromoCodes.push({ promoCode: order.promoCode, numberOfUses: 1 });

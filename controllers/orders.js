@@ -30,7 +30,7 @@ const createOrder = async (req, res) => {
 
     if (error) {
       logWithTimestamp(
-        `Error creating order service: userId ${order.order.user_id}, error: ${error}`
+        `Error creating order service: userId ${order.order.user_id}, error: ${error}`,
       );
 
       return res.status(400).json({ success: false, message: error });
@@ -105,7 +105,7 @@ const updateStatus = async (req, res) => {
 
   try {
     const staffId = staff.id;
-    console.log("Staff ID in updateStatus:", staffId);
+
     if (!staffId) {
       return res
         .status(401)

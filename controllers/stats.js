@@ -3,7 +3,7 @@ const { ON_GOING, SCHEDULED } = require("../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const getInititalStats = async (req, res) => {
   try {
-    const { date, from, to } = req.query;
+    const { date, from, to, restaurantId } = req.query;
 
     const usersCount = await mongoose.models.User.countDocuments();
     let startDate;
@@ -20,9 +20,56 @@ const getInititalStats = async (req, res) => {
       endDate.setUTCHours(23, 59, 59, 999);
     }
 
+    if (restaurantId) {
+      const restaurant = await mongoose.models.Restaurant.findById(
+        restaurantId,
+        { name: 1 },
+      ).lean();
+      if (!restaurant) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Restaurant not found" });
+      }
+      let restaurantStats = [
+        {
+          restaurantId: restaurant._id,
+          restaurantName: restaurant.name,
+          ordersCount: 0,
+          revenue: "0.00",
+        },
+      ];
+      if (startDate && endDate) {
+        const orderStats = await mongoose.models.Order.aggregate([
+          {
+            $match: {
+              createdAt: { $gte: startDate, $lte: endDate },
+              status: { $ne: "Annulé" },
+              confirmed: true,
+              restaurant: new mongoose.Types.ObjectId(restaurantId),
+            },
+          },
+          {
+            $group: {
+              _id: "$restaurant",
+              ordersCount: { $sum: 1 },
+              revenue: { $sum: "$total_price" },
+            },
+          },
+        ]);
+
+        if (orderStats.length > 0) {
+          const stat = orderStats[0];
+          restaurantStats[0].ordersCount = stat.ordersCount;
+          restaurantStats[0].revenue = stat.revenue.toFixed(2);
+        }
+      }
+
+      return res.status(200).json({ usersCount, restaurantStats });
+    }
+
     const restaurants = await mongoose.models.Restaurant.find(
       {},
-      { name: 1 }
+      { name: 1 },
     ).lean();
 
     let restaurantStats = restaurants.map((restaurant) => ({
@@ -52,7 +99,7 @@ const getInititalStats = async (req, res) => {
       ]);
 
       const statsByRestaurantId = new Map(
-        orderStats.map((stat) => [String(stat._id), stat])
+        orderStats.map((stat) => [String(stat._id), stat]),
       );
 
       restaurantStats = restaurants.map((restaurant) => {
@@ -70,6 +117,7 @@ const getInititalStats = async (req, res) => {
 
     res.status(200).json({ usersCount, restaurantStats });
   } catch (err) {
+    console.error("Error fetching initial stats:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 };

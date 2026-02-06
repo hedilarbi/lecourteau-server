@@ -40,6 +40,7 @@ const {
   getRestaurantOfferService,
 } = require("../services/restaurantsServices/getRestaurantOfferService");
 const Audit = require("../models/Audit");
+const { mongo, default: mongoose } = require("mongoose");
 
 const createRestaurant = async (req, res) => {
   const { name, address, location, phoneNumber } = req.body;
@@ -49,7 +50,7 @@ const createRestaurant = async (req, res) => {
       name,
       address,
       location,
-      phoneNumber
+      phoneNumber,
     );
 
     if (error) {
@@ -198,7 +199,7 @@ const getRestaurantMenuItem = async (req, res) => {
   try {
     const { error, response } = await getRestaurantMenuItemService(
       restaurantId,
-      id
+      id,
     );
 
     if (error) {
@@ -324,7 +325,7 @@ const updateRestaurantOfferAvailability = async (req, res) => {
   try {
     const { error, status } = await updateRestaurantOfferAvailabilityService(
       id,
-      offerId
+      offerId,
     );
 
     if (error) {
@@ -346,7 +347,7 @@ const updateRestaurantToppingAvailability = async (req, res) => {
   try {
     const { error, status } = await updateRestaurantToppingAvailabilityService(
       id,
-      toppingId
+      toppingId,
     );
 
     if (error) {
@@ -368,7 +369,7 @@ const getRestaurantOffer = async (req, res) => {
   try {
     const { error, response } = await getRestaurantOfferService(
       restaurantId,
-      id
+      id,
     );
 
     if (error) {
@@ -433,7 +434,7 @@ const setSettings = async (req, res) => {
 const getRestaurantsSettings = async (req, res) => {
   try {
     const response = await Restaurant.find().select(
-      "settings name location address"
+      "settings name location address",
     );
 
     if (!response) {
@@ -450,6 +451,7 @@ const getRestaurantsSettings = async (req, res) => {
 };
 const updateRestaurantSettings = async (req, res) => {
   const { id } = req.params;
+  console.log("Received settings update request for restaurant ID:", id);
   const { settings } = req.body;
   try {
     const restaurant = await Restaurant.findById(id);
@@ -459,33 +461,57 @@ const updateRestaurantSettings = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Restaurant not found." });
     }
-
     let auditData = {
-      userId: id,
+      userId: null,
       action: [],
       timestamp: new Date(),
       details: id,
     };
+    const staff = await mongoose.models.Staff.findOne({ restaurant: id });
+
+    if (!staff) {
+      const admin = await mongoose.models.Staff.findOne({ role: "admin" });
+      if (admin) {
+        auditData = {
+          userId: admin._id,
+          action: [],
+          timestamp: new Date(),
+          details: id,
+        };
+      }
+    } else {
+      auditData = {
+        userId: staff._id,
+        action: [],
+        timestamp: new Date(),
+        details: id,
+      };
+    }
+
     if (settings.open !== restaurant.settings.open) {
       const string =
-        "modification état ouverture à " + settings.open ? "ouverte" : "fermée";
+        "modification état ouverture à " +
+        (settings.open ? "ouverte" : "fermée");
+
       auditData.action.push(string);
     }
 
     if (settings.delivery !== restaurant.settings.delivery) {
       const string =
-        "modification état livraison à " + settings.delivery
-          ? "active"
-          : "inactive";
+        "modification état livraison à " +
+        (settings.delivery ? "active" : "inactive");
+
       auditData.action.push(string);
     }
     if (settings.delivery_fee !== restaurant.settings.delivery_fee) {
       const string =
         "modification frais de livraison à " + settings.delivery_fee;
+
       auditData.action.push(string);
     }
     if (settings.emploie_du_temps !== restaurant.settings.emploie_du_temps) {
       const string = "modification de l'emploie du temps";
+
       auditData.action.push(string);
     }
 
@@ -525,7 +551,7 @@ const getRestaurantSettings = async (req, res) => {
 
   try {
     const response = await Restaurant.findById(id).select(
-      "settings name location address"
+      "settings name location address",
     );
 
     if (!response) {

@@ -451,7 +451,8 @@ const getRestaurantsSettings = async (req, res) => {
 };
 const updateRestaurantSettings = async (req, res) => {
   const { id } = req.params;
-  console.log("Received settings update request for restaurant ID:", id);
+  const staff = req.staff;
+
   const { settings } = req.body;
   try {
     const restaurant = await Restaurant.findById(id);
@@ -461,32 +462,15 @@ const updateRestaurantSettings = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Restaurant not found." });
     }
+
+    const staffId = staff ? staff.id : null;
+
     let auditData = {
-      userId: null,
+      userId: staffId,
       action: [],
       timestamp: new Date(),
       details: id,
     };
-    const staff = await mongoose.models.Staff.findOne({ restaurant: id });
-
-    if (!staff) {
-      const admin = await mongoose.models.Staff.findOne({ role: "admin" });
-      if (admin) {
-        auditData = {
-          userId: admin._id,
-          action: [],
-          timestamp: new Date(),
-          details: id,
-        };
-      }
-    } else {
-      auditData = {
-        userId: staff._id,
-        action: [],
-        timestamp: new Date(),
-        details: id,
-      };
-    }
 
     if (settings.open !== restaurant.settings.open) {
       const string =

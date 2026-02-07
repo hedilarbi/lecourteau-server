@@ -21,6 +21,7 @@ const {
   getRestaurantSettings,
   updateEmploie,
 } = require("../controllers/restaurants");
+const authStaff = require("../middlewares/authStaff");
 const router = express.Router();
 
 router.post("/create", createRestaurant);
@@ -32,7 +33,7 @@ router.put("/emploie", updateEmploie);
 router.get("/list", getRestaurantsList);
 router.get("/:id", getRestaurant);
 router.get("/items/:id", getRestaurantItems);
-router.put("/update/settings/:id", updateRestaurantSettings);
+router.put("/update/settings/:id", authStaff, updateRestaurantSettings);
 router.get("/toppings/:id", getRestaurantToppings);
 router.get("/offers/:id", getRestaurantOffers);
 router.get("/orders/:id", getRestaurantOrders);

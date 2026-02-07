@@ -132,6 +132,7 @@ const getRestaurantStats = async (req, res) => {
         status: ON_GOING,
         confirmed: true,
       })
+        .populate({ path: "user", select: "name" })
         .sort({ createdAt: -1 })
         .lean(),
       mongoose.models.Order.find({

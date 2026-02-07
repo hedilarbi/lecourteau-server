@@ -63,6 +63,13 @@ const orderSchema = new Schema({
     longitude: Number,
   },
   address: String,
+  detailed_address: {
+    street_address: String,
+    city: String,
+    state: String,
+    postal_code: String,
+    country: String,
+  },
   status: String,
   createdAt: Date,
   code: String,

@@ -9,6 +9,7 @@ const affectOrderToStaffService = async (orderId, id) => {
       orderId,
       {
         delivery_by: id,
+        delivery_provider: "staff",
       },
       { new: true }
     );

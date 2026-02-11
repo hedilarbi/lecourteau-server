@@ -23,6 +23,7 @@ const VedetteRoutes = require("./routes/vedettes");
 const auditRoutes = require("./routes/audit");
 const sizesGroupesRoutes = require("./routes/sizeGroups");
 const toppingGroupsRoutes = require("./routes/toppingGroups");
+const uberDirectRoutes = require("./routes/uberDirect");
 const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
 require("dotenv/config");
 
@@ -33,8 +34,21 @@ const httpServer = createServer(app);
 
 app.use(cors());
 
-app.use(bodyParser.json({ limit: "1000mb", extended: true }));
-app.use(bodyParser.urlencoded({ limit: "1000mb", extended: true }));
+const captureRawBody = (req, res, buffer) => {
+  if (!buffer || !buffer.length) return;
+  req.rawBody = buffer.toString("utf8");
+};
+
+app.use(
+  bodyParser.json({ limit: "1000mb", extended: true, verify: captureRawBody }),
+);
+app.use(
+  bodyParser.urlencoded({
+    limit: "1000mb",
+    extended: true,
+    verify: captureRawBody,
+  }),
+);
 
 app.use("/api/users", usersRoutes);
 app.use("/api/categories", categoriesRoutes);
@@ -57,6 +71,7 @@ app.use("/api/vedettes", VedetteRoutes);
 app.use("/api/audits", auditRoutes);
 app.use("/api/sizeGroups", sizesGroupesRoutes);
 app.use("/api/toppingGroups", toppingGroupsRoutes);
+app.use("/api/uber-direct", uberDirectRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,

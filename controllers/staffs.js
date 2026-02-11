@@ -48,7 +48,7 @@ const createStaff = async (req, res) => {
       password,
       role,
       restaurant,
-      firebaseUrl
+      firebaseUrl,
     );
     if (error) {
       return res.status(400).json({ message: error });
@@ -97,7 +97,7 @@ const updateStaffMember = async (req, res) => {
       name,
       username,
       restaurant,
-      role
+      role,
     );
 
     res.status(200).json(response);
@@ -112,7 +112,7 @@ const loginStaff = async (req, res) => {
     const { error, staff, token } = await loginStaffService(
       username,
       password,
-      expoToken
+      expoToken,
     );
     if (error) {
       console.error("error in login service:", error);

@@ -8,6 +8,7 @@ const restaurantSchema = new Schema({
     latitude: Number,
   },
   phone_number: String,
+  uberCustomerId: String,
   orders: [
     {
       type: Schema.Types.ObjectId,

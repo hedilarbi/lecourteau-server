@@ -1,6 +1,15 @@
 const User = require("../../models/User");
 
-const addToAddressesService = async (id, address, coords) => {
+const addToAddressesService = async (
+  id,
+  address,
+  coords,
+  street_address,
+  city,
+  state,
+  postal_code,
+  country,
+) => {
   try {
     const user = await User.findById(id);
     if (!user) {
@@ -12,6 +21,11 @@ const addToAddressesService = async (id, address, coords) => {
         latitude: coords.latitude,
         longitude: coords.longitude,
       },
+      street_address,
+      city,
+      state,
+      postal_code,
+      country,
     });
     await user.save();
     return { user };

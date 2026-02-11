@@ -86,7 +86,7 @@ const setUserInfo = async (req, res) => {
       email,
       name,
       coords,
-      date_of_birth
+      date_of_birth,
     );
 
     if (error) {
@@ -191,10 +191,20 @@ const getFavorites = async (req, res) => {
 };
 
 const addToAddresses = async (req, res) => {
-  const { address, coords } = req.body;
+  const { address, coords, street_address, city, state, postal_code, country } =
+    req.body;
   const { id } = req.params;
   try {
-    const { error, user } = await addToAddressesService(id, address, coords);
+    const { error, user } = await addToAddressesService(
+      id,
+      address,
+      coords,
+      street_address,
+      city,
+      state,
+      postal_code,
+      country,
+    );
     if (error) {
       return res.status(404).json({ error });
     }
@@ -251,7 +261,7 @@ const updateUserDiscount = async (req, res) => {
   try {
     const response = await User.updateMany(
       {},
-      { firstOrderDiscountApplied: false }
+      { firstOrderDiscountApplied: false },
     );
     res.status(200).json(response);
   } catch (err) {

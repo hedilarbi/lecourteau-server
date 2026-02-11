@@ -143,6 +143,74 @@ const updateStatus = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+const updateDeliveryProvider = async (req, res) => {
+  const { id } = req.params;
+  const { delivery_provider } = req.body;
+  const staff = req.staff;
+
+  try {
+    const staffId = staff?.id;
+    if (!staffId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Utilisateur non autorisé." });
+    }
+
+    const normalizedProvider =
+      delivery_provider === null ? null : delivery_provider;
+    const allowedProviders = ["staff", "uber_direct", null];
+    if (!allowedProviders.includes(normalizedProvider)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Fournisseur de livraison invalide. Valeurs acceptées: staff, uber_direct ou null.",
+      });
+    }
+
+    const order = await Order.findById(id).select(
+      "uber_delivery_id delivery_provider uber_status",
+    );
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Commande introuvable." });
+    }
+
+    const uberStatus = String(order.uber_status || "").toLowerCase().trim();
+    const isUberDeliveryClosed = ["canceled", "cancelled", "returned"].includes(
+      uberStatus,
+    );
+
+    if (
+      normalizedProvider === "staff" &&
+      order.delivery_provider === "uber_direct" &&
+      order.uber_delivery_id &&
+      !isUberDeliveryClosed
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Impossible de basculer en livraison interne: annulez d'abord la livraison Uber Direct.",
+      });
+    }
+
+    const updatedOrder = await Order.findByIdAndUpdate(
+      id,
+      { delivery_provider: normalizedProvider },
+      { new: true },
+    ).select("delivery_provider uber_delivery_id uber_status uber_pickup_eta");
+
+    return res.status(200).json({
+      success: true,
+      message: "Fournisseur de livraison mis à jour avec succès.",
+      data: updatedOrder,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const updatePrice = async (req, res) => {
   const { id } = req.params;
   const { price } = req.body;
@@ -515,6 +583,7 @@ module.exports = {
   getOrder,
   deleteOrder,
   updateStatus,
+  updateDeliveryProvider,
   updatePrice,
   reviewOrder,
   orderDelivered,

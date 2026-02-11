@@ -13,6 +13,11 @@ const userSchema = new Schema({
         latitude: Number,
         longitude: Number,
       },
+      street_address: String,
+      city: String,
+      state: String,
+      postal_code: String,
+      country: String,
     },
   ],
   orders: [

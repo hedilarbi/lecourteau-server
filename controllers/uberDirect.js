@@ -22,6 +22,35 @@ const ORG_SCOPE = process.env.UBER_DIRECT_ORG_SCOPE || "direct.organizations";
 const WEBHOOK_TOLERANCE_SECONDS = Number(
   process.env.UBER_DIRECT_WEBHOOK_TOLERANCE_SECONDS || 300,
 );
+const UBER_DIRECT_WEBHOOK_LOGS =
+  String(process.env.UBER_DIRECT_WEBHOOK_LOGS || "true")
+    .toLowerCase()
+    .trim() !== "false";
+
+const logWebhook = (message, meta = {}) => {
+  if (!UBER_DIRECT_WEBHOOK_LOGS) return;
+  const timestamp = new Date().toISOString();
+  if (meta && Object.keys(meta).length > 0) {
+    console.log(
+      `[UberDirectWebhook] ${timestamp} - ${message} ${JSON.stringify(meta)}`,
+    );
+    return;
+  }
+  console.log(`[UberDirectWebhook] ${timestamp} - ${message}`);
+};
+
+const logWebhookError = (message, error, meta = {}) => {
+  if (!UBER_DIRECT_WEBHOOK_LOGS) return;
+  const timestamp = new Date().toISOString();
+  const payload = {
+    ...meta,
+    error: error?.message || String(error),
+    stack: error?.stack,
+  };
+  console.error(
+    `[UberDirectWebhook] ${timestamp} - ${message} ${JSON.stringify(payload)}`,
+  );
+};
 
 const getUberDirectAccessToken = async (req, res) => {
   try {
@@ -506,6 +535,18 @@ const extractManifestReferenceFromPayload = (payload = {}) =>
   payload?.data?.manifest?.reference ||
   payload?.event_data?.manifest_reference;
 
+const buildWebhookLogMeta = (payload = {}) => ({
+  event_id: payload?.id || null,
+  event_type: payload?.kind || payload?.event_type || payload?.type || null,
+  status: extractUberStatusFromPayload(payload),
+  delivery_id: extractDeliveryIdFromPayload(payload),
+  manifest_reference: extractManifestReferenceFromPayload(payload),
+  created: payload?.created || payload?.meta?.created || null,
+  courier_imminent:
+    payload?.data?.courier_imminent ?? payload?.courier_imminent ?? null,
+  live_mode: payload?.live_mode ?? payload?.data?.live_mode ?? null,
+});
+
 const parseIsoDateOrNull = (value) => {
   if (!value) return undefined;
   const parsed = new Date(value);
@@ -907,8 +948,16 @@ const updateDelivery = async (req, res) => {
 const cancelDelivery = async (req, res) => {
   try {
     const { restaurantId, deliveryId } = req.params;
+    logWebhook("Annulation livraison demandee", {
+      restaurant_id: restaurantId,
+      delivery_id: deliveryId,
+    });
     const { customerId, error } = await getRestaurantCustomerId(restaurantId);
     if (error) {
+      logWebhook("Annulation impossible: restaurant introuvable", {
+        restaurant_id: restaurantId,
+        delivery_id: deliveryId,
+      });
       return res.status(400).json({ success: false, message: error });
     }
 
@@ -958,10 +1007,27 @@ const cancelDelivery = async (req, res) => {
           orderUpdates,
         );
       }
+
+      logWebhook("Annulation Uber enregistree sur la commande", {
+        restaurant_id: restaurantId,
+        delivery_id: deliveryId,
+        uber_status: resolvedStatus,
+      });
+    } else {
+      logWebhook("Annulation Uber echouee", {
+        restaurant_id: restaurantId,
+        delivery_id: deliveryId,
+        status_code: result.status || null,
+        error: result.error || null,
+      });
     }
 
     return sendUberResponse(res, result);
   } catch (err) {
+    logWebhookError("Erreur annulation livraison", err, {
+      restaurant_id: req.params?.restaurantId,
+      delivery_id: req.params?.deliveryId,
+    });
     return res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -988,20 +1054,28 @@ const getProofOfDelivery = async (req, res) => {
 
 const handleUberDirectWebhook = async (req, res) => {
   try {
+    const payload = req.body || {};
+    const webhookMeta = buildWebhookLogMeta(payload);
+    logWebhook("Webhook recu", webhookMeta);
+
     const rawPayload =
       typeof req.rawBody === "string" && req.rawBody.length
         ? req.rawBody
-        : JSON.stringify(req.body || {});
+        : JSON.stringify(payload || {});
 
     const signatureValidation = verifyWebhookSignature(req, rawPayload);
     if (!signatureValidation.ok) {
+      logWebhook("Signature webhook invalide", {
+        ...webhookMeta,
+        reason: signatureValidation.message,
+      });
       return res.status(signatureValidation.status || 401).json({
         success: false,
         message: signatureValidation.message,
       });
     }
+    logWebhook("Signature webhook valide", webhookMeta);
 
-    const payload = req.body || {};
     const deliveryId = extractDeliveryIdFromPayload(payload);
     const uberStatus = extractUberStatusFromPayload(payload);
     const trackingUrl = extractTrackingUrlFromPayload(payload);
@@ -1027,15 +1101,28 @@ const handleUberDirectWebhook = async (req, res) => {
     }
 
     if (!order) {
+      logWebhook("Webhook sans commande correspondante", webhookMeta);
       return res.status(200).json({
         success: true,
         message: "Webhook received. No matching order found.",
       });
     }
+    logWebhook("Commande trouvee pour webhook", {
+      ...webhookMeta,
+      order_id: order._id,
+      current_order_status: order.status,
+      current_uber_status: order.uber_status || null,
+    });
 
     const resolvedEventTimestamp = extractEventTimestamp(payload);
 
     if (isWebhookEventStale(order, resolvedEventTimestamp)) {
+      logWebhook("Webhook ignore (event ancien)", {
+        ...webhookMeta,
+        order_id: order._id,
+        incoming_event_at: resolvedEventTimestamp,
+        current_event_at: order.uber_last_event_at || null,
+      });
       return res.status(200).json({
         success: true,
         message: "Webhook ignored: older event.",
@@ -1045,6 +1132,10 @@ const handleUberDirectWebhook = async (req, res) => {
     if (
       isWebhookEventDuplicate(order, resolvedEventTimestamp, eventType, uberStatus)
     ) {
+      logWebhook("Webhook ignore (event duplique)", {
+        ...webhookMeta,
+        order_id: order._id,
+      });
       return res.status(200).json({
         success: true,
         message: "Webhook ignored: duplicate event.",
@@ -1076,22 +1167,46 @@ const handleUberDirectWebhook = async (req, res) => {
       webhookUpdates.delivery_provider = nextDeliveryProvider;
     }
     await Order.findByIdAndUpdate(order._id, webhookUpdates);
+    logWebhook("Commande mise a jour depuis webhook", {
+      ...webhookMeta,
+      order_id: order._id,
+      mapped_order_status: mappedStatus,
+      delivery_provider: webhookUpdates.delivery_provider ?? null,
+      updated_fields: Object.keys(webhookUpdates),
+    });
 
     if (mappedStatus && mappedStatus !== order.status) {
       const { error } = await updateStatusService(order._id, mappedStatus);
       if (error) {
+        logWebhook("Echec mise a jour du statut commande", {
+          ...webhookMeta,
+          order_id: order._id,
+          mapped_order_status: mappedStatus,
+          error,
+        });
         return res.status(500).json({
           success: false,
           message: error,
         });
       }
+      logWebhook("Statut commande synchronise avec Uber", {
+        ...webhookMeta,
+        order_id: order._id,
+        old_order_status: order.status,
+        new_order_status: mappedStatus,
+      });
     }
 
+    logWebhook("Webhook traite avec succes", {
+      ...webhookMeta,
+      order_id: order._id,
+    });
     return res.status(200).json({
       success: true,
       message: "Webhook processed successfully.",
     });
   } catch (err) {
+    logWebhookError("Erreur traitement webhook", err, buildWebhookLogMeta(req.body || {}));
     return res.status(500).json({
       success: false,
       message: err.message,

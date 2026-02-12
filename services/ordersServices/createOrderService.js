@@ -41,7 +41,7 @@ const createOrderService = async (order) => {
       code,
       address: order.address || "",
       instructions: order.order.instructions,
-      status: order.order.scheduled.isScheduled ? SCHEDULED : ON_GOING,
+      status: order.order.scheduled?.isScheduled ? SCHEDULED : ON_GOING,
       offers: order.order.offers,
       rewards: rewardsList,
       createdAt: new Date().toISOString(),

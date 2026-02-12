@@ -6,15 +6,20 @@ function startScheduledOrdersJob() {
   cron.schedule("* * * * *", async () => {
     try {
       const now = new Date();
-      const in30Min = new Date(now.getTime() + 45 * 60 * 1000);
+      const in45Min = new Date(now.getTime() + 45 * 60 * 1000);
+      const in30Min = new Date(now.getTime() + 30 * 60 * 1000);
 
-      // On "débloque" les commandes dont scheduledFor est dans <= 30 min
+      // On "débloque" les commandes dont scheduledFor est dans <= 45 min si delivery, sinon <= 30 min
       const res = await Order.updateMany(
         {
           status: SCHEDULED,
           "scheduled.isScheduled": true,
           "scheduled.processed": false,
-          "scheduled.scheduledFor": { $lte: in30Min, $ne: null },
+          "scheduled.scheduledFor": { $ne: null },
+          $or: [
+            { type: "delivery", "scheduled.scheduledFor": { $lte: in45Min } },
+            { type: { $ne: "delivery" }, "scheduled.scheduledFor": { $lte: in30Min } },
+          ],
         },
         {
           $set: {

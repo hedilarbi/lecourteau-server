@@ -90,6 +90,7 @@ const orderSchema = new Schema({
     index: true,
   },
   uber_status: String,
+  uber_courier_imminent: Boolean,
   uber_tracking_url: String,
   uber_pickup_eta: Date,
   uber_dropoff_eta: Date,

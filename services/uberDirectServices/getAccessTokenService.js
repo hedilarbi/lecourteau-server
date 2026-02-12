@@ -6,8 +6,24 @@ const DEFAULT_SCOPE = "eats.deliveries";
 const DEFAULT_AUTH_HOST = "auth.uber.com";
 const DEFAULT_AUTH_PATH = "/oauth/v2/token";
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
+const UBER_DIRECT_TOKEN_LOGS =
+  String(process.env.UBER_DIRECT_TOKEN_LOGS || "true")
+    .toLowerCase()
+    .trim() !== "false";
 
 const tokenCache = new Map();
+
+const logToken = (message, meta = {}) => {
+  if (!UBER_DIRECT_TOKEN_LOGS) return;
+  const timestamp = new Date().toISOString();
+  if (meta && Object.keys(meta).length) {
+    console.log(
+      `[UberDirectToken] ${timestamp} - ${message} ${JSON.stringify(meta)}`,
+    );
+    return;
+  }
+  console.log(`[UberDirectToken] ${timestamp} - ${message}`);
+};
 
 const isTokenValid = (expiresAt) => {
   if (!expiresAt) return false;
@@ -27,6 +43,9 @@ const requestAccessToken = async (scope) => {
   const scopeValue = scope || process.env.UBER_DIRECT_SCOPE || DEFAULT_SCOPE;
 
   if (!clientId || !clientSecret) {
+    logToken("Credentials manquants pour auth Uber Direct", {
+      scope: scopeValue,
+    });
     return { error: "Missing Uber Direct client credentials." };
   }
 
@@ -64,17 +83,32 @@ const requestAccessToken = async (scope) => {
         }
 
         if (res.statusCode < 200 || res.statusCode >= 300) {
+          logToken("Echec auth Uber Direct", {
+            scope: scopeValue,
+            status: res.statusCode,
+            error: parsed?.error || parsed?.message || null,
+          });
           return resolve({
             error: parsed?.error || "Uber Direct auth error.",
             details: parsed,
           });
         }
 
+        logToken("Token Uber Direct obtenu depuis auth API", {
+          scope: scopeValue,
+          expires_in: parsed?.expires_in || null,
+        });
         return resolve({ response: parsed });
       });
     });
 
-    req.on("error", (err) => resolve({ error: err.message }));
+    req.on("error", (err) => {
+      logToken("Erreur reseau auth Uber Direct", {
+        scope: scopeValue,
+        error: err?.message || String(err),
+      });
+      resolve({ error: err.message });
+    });
     req.write(body);
     req.end();
   });
@@ -86,6 +120,12 @@ const getUberDirectAccessTokenService = async (options = {}) => {
   const cacheEntry = tokenCache.get(scope);
 
   if (!forceRefresh && cacheEntry && isTokenValid(cacheEntry.expiresAt)) {
+    logToken("Token Uber Direct valide depuis cache memoire", {
+      scope,
+      source: "memory",
+      expires_at: cacheEntry.expiresAt,
+      expires_in: secondsUntilExpiry(cacheEntry.expiresAt),
+    });
     return {
       token: cacheEntry.token,
       tokenType: "Bearer",
@@ -104,6 +144,12 @@ const getUberDirectAccessTokenService = async (options = {}) => {
         token: existing.access_token,
         expiresAt: existing.expires_at,
       });
+      logToken("Token Uber Direct valide depuis base", {
+        scope,
+        source: "db",
+        expires_at: existing.expires_at,
+        expires_in: secondsUntilExpiry(existing.expires_at),
+      });
       return {
         token: existing.access_token,
         tokenType: existing.token_type,
@@ -117,6 +163,11 @@ const getUberDirectAccessTokenService = async (options = {}) => {
 
   const { response, error, details } = await requestAccessToken(scope);
   if (error) {
+    logToken("Impossible d'obtenir un token Uber Direct", {
+      scope,
+      force_refresh: forceRefresh,
+      error,
+    });
     return { error, details };
   }
 
@@ -136,6 +187,14 @@ const getUberDirectAccessTokenService = async (options = {}) => {
   );
 
   tokenCache.set(scope, { token: saved.access_token, expiresAt: saved.expires_at });
+
+  logToken("Token Uber Direct sauvegarde/rafraichi", {
+    scope,
+    source: "api",
+    force_refresh: forceRefresh,
+    expires_at: saved.expires_at,
+    expires_in: secondsUntilExpiry(saved.expires_at),
+  });
 
   return {
     token: saved.access_token,

@@ -178,9 +178,12 @@ const updateDeliveryProvider = async (req, res) => {
     }
 
     const uberStatus = String(order.uber_status || "").toLowerCase().trim();
-    const isUberDeliveryClosed = ["canceled", "cancelled", "returned"].includes(
-      uberStatus,
-    );
+    const isUberDeliveryClosed = [
+      "canceled",
+      "cancelled",
+      "returned",
+      "failed",
+    ].includes(uberStatus);
 
     if (
       normalizedProvider === "staff" &&
@@ -199,7 +202,9 @@ const updateDeliveryProvider = async (req, res) => {
       id,
       { delivery_provider: normalizedProvider },
       { new: true },
-    ).select("delivery_provider uber_delivery_id uber_status uber_pickup_eta");
+    ).select(
+      "delivery_provider uber_delivery_id uber_status uber_courier_imminent uber_pickup_eta",
+    );
 
     return res.status(200).json({
       success: true,

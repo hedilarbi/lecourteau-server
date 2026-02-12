@@ -12,7 +12,6 @@ const {
   getAddressFromCoords,
 } = require("../services/uberDirectServices/geocodeService");
 const {
-  CANCELED,
   DELIVERED,
   PICKEDUP,
   IN_DELIVERY,
@@ -535,6 +534,21 @@ const extractManifestReferenceFromPayload = (payload = {}) =>
   payload?.data?.manifest?.reference ||
   payload?.event_data?.manifest_reference;
 
+const extractCourierImminentFromPayload = (payload = {}) => {
+  const rawValue =
+    payload?.courier_imminent ??
+    payload?.data?.courier_imminent ??
+    payload?.meta?.courier_imminent;
+  if (rawValue === undefined || rawValue === null) return undefined;
+  if (typeof rawValue === "boolean") return rawValue;
+  if (typeof rawValue === "string") {
+    const normalized = rawValue.toLowerCase().trim();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+};
+
 const buildWebhookLogMeta = (payload = {}) => ({
   event_id: payload?.id || null,
   event_type: payload?.kind || payload?.event_type || payload?.type || null,
@@ -556,11 +570,6 @@ const parseIsoDateOrNull = (value) => {
 
 const normalizeUberStatus = (value) => String(value || "").toLowerCase().trim();
 
-const isUberTerminalStatus = (uberStatus) => {
-  const status = normalizeUberStatus(uberStatus);
-  return ["canceled", "cancelled", "returned"].includes(status);
-};
-
 const extractEventTimestamp = (payload = {}) =>
   parseIsoDateOrNull(
     payload?.created ||
@@ -575,7 +584,13 @@ const isWebhookEventStale = (order, incomingTimestamp) => {
   return incomingTimestamp.getTime() < currentTimestamp.getTime();
 };
 
-const isWebhookEventDuplicate = (order, incomingTimestamp, eventType, uberStatus) => {
+const isWebhookEventDuplicate = (
+  order,
+  incomingTimestamp,
+  eventType,
+  uberStatus,
+  courierImminent,
+) => {
   const currentTimestamp = parseIsoDateOrNull(order?.uber_last_event_at);
   if (!currentTimestamp) return false;
   if (incomingTimestamp.getTime() !== currentTimestamp.getTime()) return false;
@@ -584,8 +599,18 @@ const isWebhookEventDuplicate = (order, incomingTimestamp, eventType, uberStatus
   const nextType = String(eventType || "").trim();
   const currentStatus = normalizeUberStatus(order?.uber_status);
   const nextStatus = normalizeUberStatus(uberStatus);
+  const currentImminent =
+    order?.uber_courier_imminent === undefined
+      ? null
+      : Boolean(order?.uber_courier_imminent);
+  const nextImminent =
+    courierImminent === undefined ? null : Boolean(courierImminent);
 
-  return currentType === nextType && currentStatus === nextStatus;
+  return (
+    currentType === nextType &&
+    currentStatus === nextStatus &&
+    currentImminent === nextImminent
+  );
 };
 
 const extractEtaFieldsFromPayload = (payload = {}) =>
@@ -648,9 +673,6 @@ const mapUberStatusToOrderStatus = (uberStatus) => {
   }
   if (status === "delivered") {
     return DELIVERED;
-  }
-  if (status === "canceled" || status === "cancelled" || status === "returned") {
-    return CANCELED;
   }
 
   return null;
@@ -871,6 +893,8 @@ const createDelivery = async (req, res) => {
         order.uber_delivery_id = deliveryId;
       }
       order.uber_status = extractUberStatusFromPayload(responsePayload) || null;
+      order.uber_courier_imminent =
+        extractCourierImminentFromPayload(responsePayload) ?? null;
       order.uber_tracking_url =
         extractTrackingUrlFromPayload(responsePayload) || null;
       const etaFields = extractEtaFieldsFromPayload(responsePayload);
@@ -982,6 +1006,7 @@ const cancelDelivery = async (req, res) => {
         delivery_provider: null,
         uber_delivery_id: null,
         uber_status: resolvedStatus,
+        uber_courier_imminent: null,
         uber_tracking_url: null,
         uber_pickup_eta: null,
         uber_dropoff_eta: null,
@@ -1078,6 +1103,7 @@ const handleUberDirectWebhook = async (req, res) => {
 
     const deliveryId = extractDeliveryIdFromPayload(payload);
     const uberStatus = extractUberStatusFromPayload(payload);
+    const courierImminent = extractCourierImminentFromPayload(payload);
     const trackingUrl = extractTrackingUrlFromPayload(payload);
     const etaFields = extractEtaFieldsFromPayload(payload);
     const eventType = payload?.event_type || payload?.type || null;
@@ -1086,7 +1112,7 @@ const handleUberDirectWebhook = async (req, res) => {
     let order = null;
     if (deliveryId) {
       order = await Order.findOne({ uber_delivery_id: deliveryId }).select(
-        "_id status uber_last_event_at uber_last_event_type uber_status delivery_provider",
+        "_id status uber_last_event_at uber_last_event_type uber_status uber_courier_imminent delivery_provider uber_delivery_id",
       );
     }
 
@@ -1096,7 +1122,7 @@ const handleUberDirectWebhook = async (req, res) => {
         lookup.push({ _id: manifestReference });
       }
       order = await Order.findOne({ $or: lookup }).select(
-        "_id status uber_last_event_at uber_last_event_type uber_status delivery_provider",
+        "_id status uber_last_event_at uber_last_event_type uber_status uber_courier_imminent delivery_provider uber_delivery_id",
       );
     }
 
@@ -1112,6 +1138,10 @@ const handleUberDirectWebhook = async (req, res) => {
       order_id: order._id,
       current_order_status: order.status,
       current_uber_status: order.uber_status || null,
+      current_courier_imminent:
+        order.uber_courier_imminent === undefined
+          ? null
+          : Boolean(order.uber_courier_imminent),
     });
 
     const resolvedEventTimestamp = extractEventTimestamp(payload);
@@ -1130,7 +1160,13 @@ const handleUberDirectWebhook = async (req, res) => {
     }
 
     if (
-      isWebhookEventDuplicate(order, resolvedEventTimestamp, eventType, uberStatus)
+      isWebhookEventDuplicate(
+        order,
+        resolvedEventTimestamp,
+        eventType,
+        uberStatus,
+        courierImminent,
+      )
     ) {
       logWebhook("Webhook ignore (event duplique)", {
         ...webhookMeta,
@@ -1142,36 +1178,47 @@ const handleUberDirectWebhook = async (req, res) => {
       });
     }
 
-    const mappedStatus = mapUberStatusToOrderStatus(uberStatus);
-    const shouldClearProvider = isUberTerminalStatus(uberStatus);
-    const nextDeliveryProvider =
-      uberStatus === null || uberStatus === undefined
-        ? undefined
-        : shouldClearProvider
-          ? null
-          : "uber_direct";
+    const isDetachedFromUber =
+      !order?.uber_delivery_id && order?.delivery_provider !== "uber_direct";
+    if (isDetachedFromUber) {
+      logWebhook("Webhook ignore (commande non liee a Uber)", {
+        ...webhookMeta,
+        order_id: order._id,
+        delivery_provider: order?.delivery_provider || null,
+      });
+      return res.status(200).json({
+        success: true,
+        message: "Webhook ignored: order is not linked to Uber Direct.",
+      });
+    }
 
+    const mappedStatus = mapUberStatusToOrderStatus(uberStatus);
     const webhookUpdates = compactObject({
-      uber_delivery_id: deliveryId,
       uber_status: uberStatus,
       uber_tracking_url: trackingUrl,
       uber_last_event_type: eventType,
       uber_last_event_at: resolvedEventTimestamp,
       ...etaFields,
     });
-    if (nextDeliveryProvider === null) {
-      webhookUpdates.delivery_provider = null;
-      webhookUpdates.uber_delivery_id = null;
-      webhookUpdates.uber_tracking_url = null;
-    } else if (nextDeliveryProvider) {
-      webhookUpdates.delivery_provider = nextDeliveryProvider;
+    if (
+      deliveryId &&
+      (order?.delivery_provider === "uber_direct" || Boolean(order?.uber_delivery_id))
+    ) {
+      webhookUpdates.uber_delivery_id = deliveryId;
+    }
+    if (courierImminent !== undefined) {
+      webhookUpdates.uber_courier_imminent = courierImminent;
     }
     await Order.findByIdAndUpdate(order._id, webhookUpdates);
     logWebhook("Commande mise a jour depuis webhook", {
       ...webhookMeta,
       order_id: order._id,
       mapped_order_status: mappedStatus,
-      delivery_provider: webhookUpdates.delivery_provider ?? null,
+      delivery_provider: order?.delivery_provider ?? null,
+      courier_imminent:
+        webhookUpdates.uber_courier_imminent === undefined
+          ? null
+          : Boolean(webhookUpdates.uber_courier_imminent),
       updated_fields: Object.keys(webhookUpdates),
     });
 

@@ -83,7 +83,6 @@ const orderSchema = new Schema({
   },
   delivery_provider: {
     type: String,
-    enum: ["staff", "uber_direct"],
   },
   uber_delivery_id: {
     type: String,

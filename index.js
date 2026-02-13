@@ -24,6 +24,7 @@ const auditRoutes = require("./routes/audit");
 const sizesGroupesRoutes = require("./routes/sizeGroups");
 const toppingGroupsRoutes = require("./routes/toppingGroups");
 const uberDirectRoutes = require("./routes/uberDirect");
+const homeSettingsRoutes = require("./routes/homeSettings");
 const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
 require("dotenv/config");
 
@@ -72,6 +73,8 @@ app.use("/api/audits", auditRoutes);
 app.use("/api/sizeGroups", sizesGroupesRoutes);
 app.use("/api/toppingGroups", toppingGroupsRoutes);
 app.use("/api/uber-direct", uberDirectRoutes);
+app.use("/api/homeSettings", homeSettingsRoutes);
+app.use("/api/home-settings", homeSettingsRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,

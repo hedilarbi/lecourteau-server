@@ -568,7 +568,10 @@ const parseIsoDateOrNull = (value) => {
   return parsed;
 };
 
-const normalizeUberStatus = (value) => String(value || "").toLowerCase().trim();
+const normalizeUberStatus = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 
 const extractEventTimestamp = (payload = {}) =>
   parseIsoDateOrNull(
@@ -616,7 +619,9 @@ const isWebhookEventDuplicate = (
 const extractEtaFieldsFromPayload = (payload = {}) =>
   compactObject({
     uber_pickup_eta: parseIsoDateOrNull(
-      payload?.pickup_eta || payload?.data?.pickup_eta || payload?.meta?.pickup_eta,
+      payload?.pickup_eta ||
+        payload?.data?.pickup_eta ||
+        payload?.meta?.pickup_eta,
     ),
     uber_dropoff_eta: parseIsoDateOrNull(
       payload?.dropoff_eta ||
@@ -902,10 +907,17 @@ const createDelivery = async (req, res) => {
       order.uber_last_event_type = "delivery_created";
       order.uber_last_event_at = new Date();
       await order.save();
+    } else {
+      console.error("Error creating Uber Direct delivery:", {
+        status: result.status,
+        error: result.error,
+        details: result.details,
+      });
     }
 
     return sendUberResponse(res, result);
   } catch (err) {
+    console.error("Error creating Uber Direct delivery:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -997,8 +1009,9 @@ const cancelDelivery = async (req, res) => {
           ? result.response
           : {};
       const canceledAt =
-        parseIsoDateOrNull(responsePayload?.updated || responsePayload?.created) ||
-        new Date();
+        parseIsoDateOrNull(
+          responsePayload?.updated || responsePayload?.created,
+        ) || new Date();
       const resolvedStatus =
         extractUberStatusFromPayload(responsePayload) || "canceled";
 
@@ -1202,7 +1215,8 @@ const handleUberDirectWebhook = async (req, res) => {
     });
     if (
       deliveryId &&
-      (order?.delivery_provider === "uber_direct" || Boolean(order?.uber_delivery_id))
+      (order?.delivery_provider === "uber_direct" ||
+        Boolean(order?.uber_delivery_id))
     ) {
       webhookUpdates.uber_delivery_id = deliveryId;
     }
@@ -1253,7 +1267,11 @@ const handleUberDirectWebhook = async (req, res) => {
       message: "Webhook processed successfully.",
     });
   } catch (err) {
-    logWebhookError("Erreur traitement webhook", err, buildWebhookLogMeta(req.body || {}));
+    logWebhookError(
+      "Erreur traitement webhook",
+      err,
+      buildWebhookLogMeta(req.body || {}),
+    );
     return res.status(500).json({
       success: false,
       message: err.message,

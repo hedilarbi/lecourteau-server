@@ -618,6 +618,42 @@ const normalizeUberStatus = (value) =>
     .toLowerCase()
     .trim();
 
+const TRACKING_ALLOWED_DOMAINS = ["uber.com", "ubereats.com"];
+const TRACKING_BLOCKED_HOST_KEYWORDS = [
+  "merchant",
+  "manager",
+  "restaurant",
+  "admin",
+  "dispatch",
+  "dashboard",
+];
+
+const sanitizeCustomerTrackingUrl = (rawUrl) => {
+  if (!rawUrl || typeof rawUrl !== "string") return null;
+
+  try {
+    const parsed = new URL(rawUrl);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    const hostname = String(parsed.hostname || "").toLowerCase();
+
+    if (protocol !== "https:") return null;
+
+    const isAllowedDomain = TRACKING_ALLOWED_DOMAINS.some(
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+    );
+    if (!isAllowedDomain) return null;
+
+    const isBlockedHost = TRACKING_BLOCKED_HOST_KEYWORDS.some((keyword) =>
+      hostname.includes(keyword),
+    );
+    if (isBlockedHost) return null;
+
+    return parsed.toString();
+  } catch (error) {
+    return null;
+  }
+};
+
 const extractEventTimestamp = (payload = {}) =>
   parseIsoDateOrNull(
     payload?.created ||
@@ -836,22 +872,11 @@ const createQuote = async (req, res) => {
 const createDelivery = async (req, res) => {
   try {
     const { orderId, restaurantId } = req.params;
-    console.log("[UberDirect][createDelivery] start", {
-      orderId,
-      restaurantId,
-    });
+
     const { order, error } = await getOrderForUber(orderId);
     if (error) {
       return res.status(400).json({ success: false, message: error });
     }
-    console.log("[UberDirect][createDelivery] order loaded", {
-      orderId: order?._id,
-      orderCode: order?.code || null,
-      orderAddress: order?.address || null,
-      orderDetailedAddress: order?.detailed_address || null,
-      orderCoords: order?.coords || null,
-      customerPhone: order?.user?.phone_number || null,
-    });
 
     const {
       restaurant,
@@ -861,19 +886,6 @@ const createDelivery = async (req, res) => {
     if (restaurantError) {
       return res.status(400).json({ success: false, message: restaurantError });
     }
-    console.log("[UberDirect][createDelivery] restaurant loaded", {
-      restaurantId: restaurant?._id,
-      uberCustomerId: customerId || null,
-      restaurantAddress: {
-        address: restaurant?.address || null,
-        city: restaurant?.city || null,
-        state: restaurant?.state || null,
-        postal_code: restaurant?.postal_code || null,
-        country: restaurant?.country || null,
-      },
-      restaurantCoords: restaurant?.location || null,
-      pickupPhone: restaurant?.phone_number || null,
-    });
 
     if (order.restaurant && String(order.restaurant) !== String(restaurantId)) {
       return res.status(400).json({
@@ -883,26 +895,13 @@ const createDelivery = async (req, res) => {
     }
 
     let pickup_address = buildPickupAddressFromRestaurant(restaurant);
-    console.log("[UberDirect][createDelivery] pickup_address built", {
-      pickup_address,
-      incomplete: isIncompleteAddress(pickup_address),
-    });
+
     if (isIncompleteAddress(pickup_address)) {
-      console.log("[UberDirect][createDelivery] pickup_address incomplete, geocoding", {
-        latitude: restaurant.location?.latitude,
-        longitude: restaurant.location?.longitude,
-      });
       const { response, error: pickupError } = await getAddressFromCoords(
         restaurant.location?.latitude,
         restaurant.location?.longitude,
       );
-      console.log(
-        "[UberDirect][createDelivery] pickup geocode result",
-        {
-          pickupError: pickupError || null,
-          geocodeResponse: response || null,
-        },
-      );
+
       if (!pickupError && response?.streetAddress) {
         pickup_address = buildAddress({
           street: response.streetAddress,
@@ -911,17 +910,10 @@ const createDelivery = async (req, res) => {
           postal_code: response.zipCode,
           country: response.country,
         });
-        console.log("[UberDirect][createDelivery] pickup_address rebuilt from geocode", {
-          pickup_address,
-          incomplete: isIncompleteAddress(pickup_address),
-        });
       }
     }
 
     if (isIncompleteAddress(pickup_address)) {
-      console.log("[UberDirect][createDelivery] pickup_address still incomplete", {
-        pickup_address,
-      });
       return res.status(400).json({
         success: false,
         message: "Adresse de ramassage incomplète pour le restaurant.",
@@ -929,26 +921,13 @@ const createDelivery = async (req, res) => {
     }
 
     let dropoff_address = buildDropoffAddressFromOrder(order);
-    console.log("[UberDirect][createDelivery] dropoff_address built", {
-      dropoff_address,
-      incomplete: isIncompleteAddress(dropoff_address),
-    });
+
     if (isIncompleteAddress(dropoff_address)) {
-      console.log(
-        "[UberDirect][createDelivery] dropoff_address incomplete, geocoding",
-        {
-          latitude: order.coords?.latitude,
-          longitude: order.coords?.longitude,
-        },
-      );
       const { response, error: dropoffError } = await getAddressFromCoords(
         order.coords?.latitude,
         order.coords?.longitude,
       );
-      console.log("[UberDirect][createDelivery] dropoff geocode result", {
-        dropoffError: dropoffError || null,
-        geocodeResponse: response || null,
-      });
+
       if (!dropoffError && response?.streetAddress) {
         dropoff_address = buildAddress({
           street: response.streetAddress,
@@ -957,20 +936,10 @@ const createDelivery = async (req, res) => {
           postal_code: response.zipCode,
           country: response.country,
         });
-        console.log(
-          "[UberDirect][createDelivery] dropoff_address rebuilt from geocode",
-          {
-            dropoff_address,
-            incomplete: isIncompleteAddress(dropoff_address),
-          },
-        );
       }
     }
 
     if (isIncompleteAddress(dropoff_address)) {
-      console.log("[UberDirect][createDelivery] dropoff_address still incomplete", {
-        dropoff_address,
-      });
       return res.status(400).json({
         success: false,
         message: "Adresse de livraison incomplète pour cette commande.",
@@ -991,53 +960,25 @@ const createDelivery = async (req, res) => {
       dropoff_phone_number: normalizePhone(order.user?.phone_number),
       manifest_total_value: manifestTotalValue,
     });
-    const requestQuoteId = normalizeText(req.body?.quote_id || req.body?.quoteId);
+    const requestQuoteId = normalizeText(
+      req.body?.quote_id || req.body?.quoteId,
+    );
     let quoteId = requestQuoteId || null;
-    console.log("[UberDirect][createDelivery] quote context", {
-      requestQuoteId: requestQuoteId || null,
-      manifestTotalValue,
-      quotePayload,
-    });
 
     if (!quoteId) {
       const quoteBody = stringifyAddressFields(quotePayload);
-      console.log("[UberDirect][createDelivery] quote request payload", {
-        customerId,
-        path: `/customers/${customerId}/delivery_quotes`,
-        body: quoteBody,
-      });
+
       const quoteResult = await uberDirectRequest({
         method: "POST",
         path: `/customers/${customerId}/delivery_quotes`,
         body: quoteBody,
       });
-      console.log("[UberDirect][createDelivery] quote response", {
-        status: quoteResult?.status || null,
-        error: quoteResult?.error || null,
-        details: quoteResult?.details || null,
-        response:
-          quoteResult?.response && typeof quoteResult.response === "object"
-            ? quoteResult.response
-            : quoteResult?.response || null,
-      });
-
-      if (quoteResult.error) {
-        console.error("Error creating Uber Direct quote before delivery:", {
-          status: quoteResult.status,
-          error: quoteResult.error,
-          details: quoteResult.details,
-        });
-        return sendUberResponse(res, quoteResult);
-      }
 
       const quoteResponsePayload =
         quoteResult.response && typeof quoteResult.response === "object"
           ? quoteResult.response
           : {};
       quoteId = extractQuoteIdFromPayload(quoteResponsePayload);
-      console.log("[UberDirect][createDelivery] extracted quoteId", {
-        quoteId: quoteId || null,
-      });
 
       if (!quoteId) {
         return res.status(502).json({
@@ -1071,28 +1012,13 @@ const createDelivery = async (req, res) => {
       dropoff_longitude: order.coords?.longitude,
       dropoff_notes: order.instructions,
     });
-    console.log("[UberDirect][createDelivery] delivery base payload", basePayload);
 
     const body = stringifyAddressFields(basePayload);
-    console.log("[UberDirect][createDelivery] delivery request payload", {
-      customerId,
-      path: `/customers/${customerId}/deliveries`,
-      body,
-    });
 
     const result = await uberDirectRequest({
       method: "POST",
       path: `/customers/${customerId}/deliveries`,
       body,
-    });
-    console.log("[UberDirect][createDelivery] delivery response", {
-      status: result?.status || null,
-      error: result?.error || null,
-      details: result?.details || null,
-      response:
-        result?.response && typeof result.response === "object"
-          ? result.response
-          : result?.response || null,
     });
 
     if (!result.error) {
@@ -1109,8 +1035,9 @@ const createDelivery = async (req, res) => {
       order.uber_status = extractUberStatusFromPayload(responsePayload) || null;
       order.uber_courier_imminent =
         extractCourierImminentFromPayload(responsePayload) ?? null;
-      order.uber_tracking_url =
-        extractTrackingUrlFromPayload(responsePayload) || null;
+      order.uber_tracking_url = sanitizeCustomerTrackingUrl(
+        extractTrackingUrlFromPayload(responsePayload),
+      );
       const etaFields = extractEtaFieldsFromPayload(responsePayload);
       Object.assign(order, etaFields);
       order.uber_last_event_type = "delivery_created";
@@ -1417,7 +1344,7 @@ const handleUberDirectWebhook = async (req, res) => {
     const mappedStatus = mapUberStatusToOrderStatus(uberStatus);
     const webhookUpdates = compactObject({
       uber_status: uberStatus,
-      uber_tracking_url: trackingUrl,
+      uber_tracking_url: sanitizeCustomerTrackingUrl(trackingUrl),
       uber_last_event_type: eventType,
       uber_last_event_at: resolvedEventTimestamp,
       ...etaFields,

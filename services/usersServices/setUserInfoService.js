@@ -6,7 +6,7 @@ const setUserInfoService = async (
   email,
   name,
   coords,
-  date_of_birth
+  date_of_birth,
 ) => {
   try {
     let newAddress;
@@ -30,12 +30,11 @@ const setUserInfoService = async (
           addresses: newAddress,
         },
       },
-      { new: true }
+      { new: true },
     );
 
     return { response };
   } catch (err) {
-    console.log("Error in setUserInfoService:", err);
     return { error: err.message };
   }
 };

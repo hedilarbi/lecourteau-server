@@ -18,11 +18,11 @@ const normalizeOptionalObjectId = (value) => {
 const createHomeSettingService = async (
   title,
   subTitle,
-  description,
   image,
   menuItemId,
   offerId,
   codePromoId,
+  codePromoTitle,
 ) => {
   try {
     const existingHomeSetting = await HomeSetting.findOne();
@@ -33,6 +33,12 @@ const createHomeSettingService = async (
     const normalizedMenuItemId = normalizeOptionalObjectId(menuItemId);
     const normalizedOfferId = normalizeOptionalObjectId(offerId);
     const normalizedCodePromoId = normalizeOptionalObjectId(codePromoId);
+    const normalizedCodePromoTitle =
+      typeof codePromoTitle === "string" ? codePromoTitle.trim() : "";
+
+    if (normalizedMenuItemId && normalizedOfferId) {
+      return { error: "Select either a menu item or an offer" };
+    }
 
     if (normalizedMenuItemId && !isValidObjectId(normalizedMenuItemId)) {
       return { error: "Invalid menu item id" };
@@ -46,21 +52,31 @@ const createHomeSettingService = async (
       return { error: "Invalid promo code id" };
     }
 
+    if (normalizedCodePromoId && !normalizedCodePromoTitle) {
+      return { error: "Promo code title is required when promo code is selected" };
+    }
+
     const newHomeSetting = new HomeSetting({
       title,
       subTitle,
-      description,
       image,
       menuItemId: normalizedMenuItemId,
       offerId: normalizedOfferId,
       codePromoId: normalizedCodePromoId,
+      codePromoTitle: normalizedCodePromoTitle,
     });
 
     const savedHomeSetting = await newHomeSetting.save();
     const response = await HomeSetting.findById(savedHomeSetting._id)
       .populate("menuItemId")
       .populate("offerId")
-      .populate("codePromoId");
+      .populate({
+        path: "codePromoId",
+        populate: {
+          path: "freeItem",
+          select: "name",
+        },
+      });
 
     return { response };
   } catch (err) {

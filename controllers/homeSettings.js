@@ -5,13 +5,13 @@ const deleteHomeSettingService = require("../services/homeSettingsServices/delet
 
 const createHomeSetting = async (req, res) => {
   const firebaseUrl = req.file ? req.file.firebaseUrl : null;
-  const { title, subTitle, description, menuItemId, offerId, codePromoId } =
+  const { title, subTitle, menuItemId, offerId, codePromoId, codePromoTitle } =
     req.body;
 
-  if (!title || !subTitle || !description) {
+  if (!title || !subTitle) {
     return res.status(400).json({
       success: false,
-      message: "Title, subTitle and description are required",
+      message: "Title and subTitle are required",
     });
   }
 
@@ -26,11 +26,11 @@ const createHomeSetting = async (req, res) => {
     const { error, response } = await createHomeSettingService(
       title,
       subTitle,
-      description,
       firebaseUrl,
       menuItemId,
       offerId,
       codePromoId,
+      codePromoTitle,
     );
 
     if (error) {
@@ -61,7 +61,7 @@ const getHomeSettings = async (req, res) => {
 const updateHomeSetting = async (req, res) => {
   const { id } = req.params;
   const firebaseUrl = req.file ? req.file.firebaseUrl : null;
-  const { title, subTitle, description, menuItemId, offerId, codePromoId } =
+  const { title, subTitle, menuItemId, offerId, codePromoId, codePromoTitle } =
     req.body;
 
   try {
@@ -69,11 +69,11 @@ const updateHomeSetting = async (req, res) => {
       id,
       title,
       subTitle,
-      description,
       firebaseUrl,
       menuItemId,
       offerId,
       codePromoId,
+      codePromoTitle,
     );
 
     if (error) {

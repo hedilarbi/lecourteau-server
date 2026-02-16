@@ -25,6 +25,7 @@ const sizesGroupesRoutes = require("./routes/sizeGroups");
 const toppingGroupsRoutes = require("./routes/toppingGroups");
 const uberDirectRoutes = require("./routes/uberDirect");
 const homeSettingsRoutes = require("./routes/homeSettings");
+const homeRoutes = require("./routes/home");
 const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
 require("dotenv/config");
 
@@ -75,6 +76,7 @@ app.use("/api/toppingGroups", toppingGroupsRoutes);
 app.use("/api/uber-direct", uberDirectRoutes);
 app.use("/api/homeSettings", homeSettingsRoutes);
 app.use("/api/home-settings", homeSettingsRoutes);
+app.use("/api/home", homeRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,

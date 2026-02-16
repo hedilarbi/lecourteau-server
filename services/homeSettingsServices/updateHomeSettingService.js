@@ -19,11 +19,11 @@ const updateHomeSettingService = async (
   id,
   title,
   subTitle,
-  description,
   firebaseUrl,
   menuItemId,
   offerId,
   codePromoId,
+  codePromoTitle,
 ) => {
   try {
     const updateData = {};
@@ -36,10 +36,6 @@ const updateHomeSettingService = async (
       updateData.subTitle = subTitle;
     }
 
-    if (typeof description !== "undefined") {
-      updateData.description = description;
-    }
-
     if (firebaseUrl) {
       updateData.image = firebaseUrl;
     }
@@ -50,6 +46,9 @@ const updateHomeSettingService = async (
         return { error: "Invalid menu item id" };
       }
       updateData.menuItemId = normalizedMenuItemId;
+      if (normalizedMenuItemId) {
+        updateData.offerId = null;
+      }
     }
 
     const normalizedOfferId = normalizeOptionalObjectId(offerId);
@@ -58,6 +57,9 @@ const updateHomeSettingService = async (
         return { error: "Invalid offer id" };
       }
       updateData.offerId = normalizedOfferId;
+      if (normalizedOfferId) {
+        updateData.menuItemId = null;
+      }
     }
 
     const normalizedCodePromoId = normalizeOptionalObjectId(codePromoId);
@@ -68,13 +70,40 @@ const updateHomeSettingService = async (
       updateData.codePromoId = normalizedCodePromoId;
     }
 
+    if (typeof codePromoTitle !== "undefined") {
+      updateData.codePromoTitle =
+        typeof codePromoTitle === "string" ? codePromoTitle.trim() : "";
+    }
+
+    if (
+      normalizedMenuItemId &&
+      typeof normalizedOfferId !== "undefined" &&
+      normalizedOfferId
+    ) {
+      return { error: "Select either a menu item or an offer" };
+    }
+
+    if (
+      normalizedCodePromoId &&
+      typeof updateData.codePromoTitle !== "undefined" &&
+      !updateData.codePromoTitle
+    ) {
+      return { error: "Promo code title is required when promo code is selected" };
+    }
+
     const response = await HomeSetting.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
     })
       .populate("menuItemId")
       .populate("offerId")
-      .populate("codePromoId");
+      .populate({
+        path: "codePromoId",
+        populate: {
+          path: "freeItem",
+          select: "name",
+        },
+      });
 
     if (!response) {
       return { error: "Home setting not found" };

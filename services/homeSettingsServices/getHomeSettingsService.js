@@ -6,7 +6,13 @@ const getHomeSettingsService = async () => {
       .sort({ createdAt: -1 })
       .populate("menuItemId")
       .populate("offerId")
-      .populate("codePromoId");
+      .populate({
+        path: "codePromoId",
+        populate: {
+          path: "freeItem",
+          select: "name",
+        },
+      });
 
     if (!response) {
       return { error: "Home setting not found" };

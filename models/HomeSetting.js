@@ -12,11 +12,6 @@ const homeSettingSchema = new Schema(
       required: true,
       trim: true,
     },
-    description: {
-      type: String,
-      required: true,
-      trim: true,
-    },
     image: {
       type: String,
       required: true,
@@ -36,6 +31,11 @@ const homeSettingSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "PromoCode",
       default: null,
+    },
+    codePromoTitle: {
+      type: String,
+      trim: true,
+      default: "",
     },
   },
   {

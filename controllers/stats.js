@@ -125,27 +125,46 @@ const getInititalStats = async (req, res) => {
 const getRestaurantStats = async (req, res) => {
   try {
     const { id } = req.params;
+    const orderProjection =
+      "code type total_price createdAt status confirmed scheduled user";
 
-    const [onGoingOrders, nonConfirmedOrders] = await Promise.all([
-      mongoose.models.Order.find({
-        restaurant: id,
-        status: ON_GOING,
-        confirmed: true,
-      })
-        .populate({ path: "user", select: "name" })
-        .sort({ createdAt: -1 })
-        .lean(),
-      mongoose.models.Order.find({
-        restaurant: id,
-        confirmed: false,
-        status: { $in: [ON_GOING, SCHEDULED] },
-      })
-        .sort({ createdAt: -1 })
-        .lean(),
-    ]);
+    const [onGoingOrders, nonConfirmedOrders, scheduledOrders] =
+      await Promise.all([
+        mongoose.models.Order.find({
+          restaurant: id,
+          status: ON_GOING,
+          confirmed: true,
+          "scheduled.isScheduled": { $ne: true },
+        })
+          .select(orderProjection)
+          .populate({ path: "user", select: "name" })
+          .sort({ createdAt: -1 })
+          .lean(),
+        mongoose.models.Order.find({
+          restaurant: id,
+          confirmed: false,
+          status: { $in: [ON_GOING, SCHEDULED] },
+        })
+          .select(orderProjection)
+          .populate({ path: "user", select: "name" })
+          .sort({ createdAt: -1 })
+          .lean(),
+        mongoose.models.Order.find({
+          restaurant: id,
+          confirmed: true,
+          "scheduled.isScheduled": true,
+          "scheduled.scheduledFor": { $ne: null },
+          status: { $in: [SCHEDULED, ON_GOING] },
+        })
+          .select(orderProjection)
+          .populate({ path: "user", select: "name" })
+          .sort({ "scheduled.scheduledFor": 1, createdAt: 1 })
+          .lean(),
+      ]);
     res.status(200).json({
       onGoingOrders,
       nonConfirmedOrders,
+      scheduledOrders,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

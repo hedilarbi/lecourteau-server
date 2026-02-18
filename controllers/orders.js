@@ -177,7 +177,9 @@ const updateDeliveryProvider = async (req, res) => {
         .json({ success: false, message: "Commande introuvable." });
     }
 
-    const uberStatus = String(order.uber_status || "").toLowerCase().trim();
+    const uberStatus = String(order.uber_status || "")
+      .toLowerCase()
+      .trim();
     const isUberDeliveryClosed = [
       "canceled",
       "cancelled",

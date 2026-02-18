@@ -6,24 +6,35 @@ const optimizeImage = (req, res, next) => {
   }
 
   sharp(req.file.buffer)
-    .resize(700, 670, {
-      fit: "cover",
-      position: "center",
+    .metadata()
+    .then((metadata) => {
+      const hasAlpha = Boolean(metadata.hasAlpha);
+      let pipeline = sharp(req.file.buffer).resize(700, 670, {
+        fit: "cover",
+        position: "center",
+      });
+
+      if (hasAlpha) {
+        pipeline = pipeline.png({
+          compressionLevel: 9,
+          quality: 80,
+          palette: true,
+        });
+      } else {
+        pipeline = pipeline.jpeg({ quality: 75, chromaSubsampling: "4:4:4" });
+      }
+
+      return pipeline.toBuffer().then((data) => ({ data, hasAlpha }));
     })
-    .toFormat("jpeg") // Convert to JPEG
-    .jpeg({ quality: 75, chromaSubsampling: "4:4:4" })
-    .toBuffer()
-    .then((data) => {
-      // Update the file properties to reflect JPEG conversion
+    .then(({ data, hasAlpha }) => {
       req.file.buffer = data;
       req.file.size = data.length;
-      req.file.mimetype = "image/jpeg";
+      req.file.mimetype = hasAlpha ? "image/png" : "image/jpeg";
 
-      // Update the filename extension to .jpg (if originalname exists)
       if (req.file.originalname) {
         req.file.originalname = req.file.originalname.replace(
-          /\.[^/.]+$/, // Match the existing extension
-          ".jpg" // Replace with .jpg
+          /\.[^/.]+$/,
+          hasAlpha ? ".png" : ".jpg"
         );
       }
 
@@ -42,14 +53,30 @@ const optimizeImages = async (req, res, next) => {
   const images = req.files;
   const processImage = async (image, index) => {
     try {
-      const data = await sharp(image.buffer)
-        .resize(500, 400)
-        .toFormat("jpeg")
-        .jpeg({ quality: 75, chromaSubsampling: "4:4:4" })
-        .toBuffer();
+      const metadata = await sharp(image.buffer).metadata();
+      const hasAlpha = Boolean(metadata.hasAlpha);
+      let pipeline = sharp(image.buffer).resize(500, 400);
+
+      if (hasAlpha) {
+        pipeline = pipeline.png({
+          compressionLevel: 9,
+          quality: 80,
+          palette: true,
+        });
+      } else {
+        pipeline = pipeline.jpeg({ quality: 75, chromaSubsampling: "4:4:4" });
+      }
+
+      const data = await pipeline.toBuffer();
       req.files[index].buffer = data;
       req.files[index].size = data.length;
-      req.files[index].mimetype = "image/jpeg";
+      req.files[index].mimetype = hasAlpha ? "image/png" : "image/jpeg";
+      if (req.files[index].originalname) {
+        req.files[index].originalname = req.files[index].originalname.replace(
+          /\.[^/.]+$/,
+          hasAlpha ? ".png" : ".jpg"
+        );
+      }
     } catch (err) {
       next(err);
     }

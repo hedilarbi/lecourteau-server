@@ -191,6 +191,27 @@ const verifyPromoCode = async (req, res) => {
         error: "Utilisateur non trouvé.",
       });
     }
+
+    const subscriptionStatus = String(user.subscriptionStatus || "").toLowerCase();
+    const subscriptionStatusActive =
+      subscriptionStatus === "active" || subscriptionStatus === "trialing";
+    const subscriptionPeriodEnd = user.subscriptionCurrentPeriodEnd
+      ? new Date(user.subscriptionCurrentPeriodEnd)
+      : null;
+    const subscriptionNotExpired =
+      !subscriptionPeriodEnd || subscriptionPeriodEnd.getTime() > Date.now();
+    if (
+      user.subscriptionIsActive &&
+      subscriptionStatusActive &&
+      subscriptionNotExpired
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Un abonnement actif est déjà appliqué à votre compte. Les codes promo ne sont pas cumulables.",
+      });
+    }
+
     const usedPromo = user.usedPromoCodes.find(
       (used) => used.promoCode?.toString() === promoCode._id.toString()
     );

@@ -1,0 +1,480 @@
+require("dotenv/config");
+
+const Stripe = require("stripe");
+const Setting = require("../../models/Setting");
+const Subscription = require("../../models/Subscription");
+const User = require("../../models/User");
+
+const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
+  apiVersion: "2023-08-16",
+});
+
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
+const OPEN_SUBSCRIPTION_STATUSES = new Set([
+  "active",
+  "trialing",
+  "incomplete",
+  "past_due",
+  "unpaid",
+]);
+
+const normalizeCurrency = (currency) =>
+  String(currency || "cad")
+    .trim()
+    .toLowerCase() || "cad";
+
+const toSafeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const roundMoney = (value, fallback = 0) => {
+  const normalized = toSafeNumber(value, fallback);
+  return Math.round(normalized * 100) / 100;
+};
+
+const getSubscriptionRecurringConfig = () => {
+  const rawInterval = String(
+    process.env.SUBSCRIPTION_STRIPE_INTERVAL || "month",
+  )
+    .trim()
+    .toLowerCase();
+  const interval = rawInterval === "day" ? "day" : "month";
+
+  const rawIntervalCount = Number(process.env.SUBSCRIPTION_STRIPE_INTERVAL_COUNT);
+  const intervalCount = Number.isFinite(rawIntervalCount) && rawIntervalCount > 0
+    ? Math.floor(rawIntervalCount)
+    : 1;
+
+  return { interval, intervalCount };
+};
+
+const toDateFromStripeTimestamp = (timestamp) => {
+  if (!timestamp || !Number.isFinite(Number(timestamp))) return null;
+  return new Date(Number(timestamp) * 1000);
+};
+
+const getCycleKey = (date = new Date()) => {
+  const target = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(target.getTime())) {
+    const now = new Date();
+    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(
+      2,
+      "0",
+    )}`;
+  }
+  return `${target.getUTCFullYear()}-${String(target.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+const isActiveStatus = (status) =>
+  ACTIVE_SUBSCRIPTION_STATUSES.has(String(status || "").toLowerCase());
+
+const isOpenStatus = (status) =>
+  OPEN_SUBSCRIPTION_STATUSES.has(String(status || "").toLowerCase());
+
+const isSubscriptionCurrentlyActive = (user) => {
+  if (!isActiveStatus(user?.subscriptionStatus)) return false;
+  if (!user?.subscriptionCurrentPeriodEnd) return true;
+
+  const periodEnd = new Date(user.subscriptionCurrentPeriodEnd);
+  if (Number.isNaN(periodEnd.getTime())) return true;
+  return periodEnd.getTime() > Date.now();
+};
+
+const ensureUserSavingsDefaults = (user) => {
+  const currentSavings = toSafeNumber(user.subscriptionSavingsTotal, 0);
+  user.subscriptionSavingsTotal = currentSavings;
+};
+
+const ensureUserFreeItemCycle = (user, date = new Date()) => {
+  const cycleKey = getCycleKey(date);
+  if (user.subscriptionFreeItemCycleKey !== cycleKey) {
+    user.subscriptionFreeItemCycleKey = cycleKey;
+    user.subscriptionFreeItemUsedCount = 0;
+  } else if (!Number.isFinite(Number(user.subscriptionFreeItemUsedCount))) {
+    user.subscriptionFreeItemUsedCount = 0;
+  }
+};
+
+const getOrCreateSettingDocument = async () => {
+  let setting = await Setting.findOne().sort({ _id: 1 });
+  if (!setting) {
+    setting = new Setting({});
+  }
+
+  if (!setting.subscription) {
+    setting.subscription = {};
+  }
+
+  if (!Number.isFinite(Number(setting.subscription.monthlyPrice))) {
+    setting.subscription.monthlyPrice = 11.99;
+  }
+  setting.subscription.currency = normalizeCurrency(
+    setting.subscription.currency || "cad",
+  );
+  setting.subscription.stripeProductId =
+    setting.subscription.stripeProductId || "";
+  setting.subscription.stripePriceId = setting.subscription.stripePriceId || "";
+
+  await setting.save();
+  return setting;
+};
+
+const ensureStripeCustomerForUser = async (user) => {
+  if (!user) return null;
+
+  if (user.stripe_id) {
+    try {
+      const existingCustomer = await stripe.customers.retrieve(user.stripe_id);
+      if (!existingCustomer?.deleted) {
+        return existingCustomer;
+      }
+    } catch (error) {
+      // Ignore and create/resolve below
+    }
+  }
+
+  let customer = null;
+  if (user.email) {
+    const listed = await stripe.customers.list({
+      email: user.email,
+      limit: 1,
+    });
+    if (listed?.data?.length) {
+      customer = listed.data[0];
+    }
+  }
+
+  if (!customer) {
+    customer = await stripe.customers.create({
+      email: user.email || undefined,
+      name: user.name || undefined,
+      metadata: { userId: String(user._id) },
+    });
+  }
+
+  user.stripe_id = customer.id;
+  await user.save();
+
+  return customer;
+};
+
+const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
+  const setting = await getOrCreateSettingDocument();
+  const monthlyPrice = roundMoney(
+    monthlyPriceInput,
+    setting.subscription.monthlyPrice || 11.99,
+  );
+  const currency = normalizeCurrency(setting.subscription.currency || "cad");
+  const recurringConfig = getSubscriptionRecurringConfig();
+
+  let stripeProductId = setting.subscription.stripeProductId || "";
+  let stripePriceId = setting.subscription.stripePriceId || "";
+
+  if (!stripeProductId) {
+    const product = await stripe.products.create({
+      name: "Le Courteau Plus",
+      description:
+        "Abonnement mensuel: 20% de reduction, 0 frais livraison, 1 article gratuit/mois.",
+      metadata: { plan: "le_courteau_plus" },
+    });
+    stripeProductId = product.id;
+  }
+
+  let shouldCreateNewPrice = !stripePriceId;
+  if (stripePriceId) {
+    try {
+      const existingPrice = await stripe.prices.retrieve(stripePriceId);
+      const existingAmount = toSafeNumber(existingPrice?.unit_amount, 0) / 100;
+      const amountHasChanged =
+        Math.round(existingAmount * 100) !== Math.round(monthlyPrice * 100);
+      const currencyChanged =
+        normalizeCurrency(existingPrice?.currency || "cad") !== currency;
+      const priceInactive = existingPrice?.active === false;
+      const recurringInterval = String(
+        existingPrice?.recurring?.interval || "",
+      ).toLowerCase();
+      const recurringIntervalCount = toSafeNumber(
+        existingPrice?.recurring?.interval_count,
+        1,
+      );
+      const recurringChanged =
+        recurringInterval !== recurringConfig.interval ||
+        recurringIntervalCount !== recurringConfig.intervalCount;
+
+      shouldCreateNewPrice =
+        amountHasChanged || currencyChanged || priceInactive || recurringChanged;
+    } catch (error) {
+      shouldCreateNewPrice = true;
+    }
+  }
+
+  if (shouldCreateNewPrice) {
+    const createdPrice = await stripe.prices.create({
+      currency,
+      product: stripeProductId,
+      unit_amount: Math.round(monthlyPrice * 100),
+      recurring: {
+        interval: recurringConfig.interval,
+        interval_count: recurringConfig.intervalCount,
+      },
+      nickname: `Le Courteau Plus ${monthlyPrice.toFixed(2)} ${currency.toUpperCase()}`,
+      metadata: { plan: "le_courteau_plus" },
+    });
+    stripePriceId = createdPrice.id;
+  }
+
+  setting.subscription.monthlyPrice = monthlyPrice;
+  setting.subscription.currency = currency;
+  setting.subscription.stripeProductId = stripeProductId;
+  setting.subscription.stripePriceId = stripePriceId;
+  await setting.save();
+
+  return {
+    setting,
+    monthlyPrice,
+    currency,
+    stripeProductId,
+    stripePriceId,
+  };
+};
+
+const syncUserWithStripeSubscription = async (
+  user,
+  stripeSubscription,
+  options = {},
+) => {
+  if (!user || !stripeSubscription) return null;
+
+  const status = String(stripeSubscription.status || "inactive").toLowerCase();
+  const cancelAtPeriodEnd = Boolean(stripeSubscription.cancel_at_period_end);
+  const currentPeriodStart = toDateFromStripeTimestamp(
+    stripeSubscription.current_period_start,
+  );
+  const currentPeriodEnd = toDateFromStripeTimestamp(
+    stripeSubscription.current_period_end,
+  );
+  const stripePriceId = stripeSubscription.items?.data?.[0]?.price?.id || "";
+  const monthlyPriceFromStripe = toSafeNumber(
+    stripeSubscription.items?.data?.[0]?.price?.unit_amount,
+    0,
+  );
+  const monthlyPrice = roundMoney(
+    monthlyPriceFromStripe > 0
+      ? monthlyPriceFromStripe / 100
+      : options.monthlyPrice || user.subscriptionMonthlyPrice || 11.99,
+    11.99,
+  );
+
+  ensureUserSavingsDefaults(user);
+  ensureUserFreeItemCycle(user);
+
+  user.subscriptionStatus = status;
+  user.subscriptionIsActive = isActiveStatus(status);
+  user.subscriptionAutoRenew = !cancelAtPeriodEnd;
+  user.subscriptionStripeSubscriptionId = stripeSubscription.id;
+  user.subscriptionCurrentPeriodStart = currentPeriodStart;
+  user.subscriptionCurrentPeriodEnd = currentPeriodEnd;
+  user.subscriptionMonthlyPrice = monthlyPrice;
+
+  await user.save();
+
+  const persisted = await Subscription.findOneAndUpdate(
+    { stripeSubscriptionId: stripeSubscription.id },
+    {
+      user: user._id,
+      stripeCustomerId:
+        stripeSubscription.customer || user.stripe_id || options.customerId || "",
+      stripeSubscriptionId: stripeSubscription.id,
+      stripePriceId,
+      status,
+      cancelAtPeriodEnd,
+      canceledAt: cancelAtPeriodEnd ? new Date() : null,
+      currentPeriodStart,
+      currentPeriodEnd,
+      monthlyPrice,
+      currency: normalizeCurrency(
+        stripeSubscription.items?.data?.[0]?.price?.currency ||
+          options.currency ||
+          "cad",
+      ),
+      freeItemCycleKey: user.subscriptionFreeItemCycleKey || getCycleKey(),
+      freeItemUsedCount: toSafeNumber(user.subscriptionFreeItemUsedCount, 0),
+      savingsTotal: toSafeNumber(user.subscriptionSavingsTotal, 0),
+      lastStripePayload: {
+        id: stripeSubscription.id,
+        status,
+        cancel_at_period_end: cancelAtPeriodEnd,
+        current_period_start: stripeSubscription.current_period_start,
+        current_period_end: stripeSubscription.current_period_end,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+
+  return persisted;
+};
+
+const setUserSubscriptionInactive = async (user, status = "canceled") => {
+  if (!user) return;
+  ensureUserSavingsDefaults(user);
+  ensureUserFreeItemCycle(user);
+
+  user.subscriptionIsActive = false;
+  user.subscriptionStatus = String(status || "inactive");
+  user.subscriptionAutoRenew = false;
+  user.subscriptionCurrentPeriodStart = null;
+  user.subscriptionCurrentPeriodEnd = null;
+  await user.save();
+};
+
+const buildUserSubscriptionSummary = (user, config = {}) => {
+  const currentCycleKey = getCycleKey();
+  const usedInCurrentCycle =
+    user?.subscriptionFreeItemCycleKey === currentCycleKey
+      ? toSafeNumber(user?.subscriptionFreeItemUsedCount, 0)
+      : 0;
+  const freeItemRemaining = Math.max(0, 1 - usedInCurrentCycle);
+
+  const periodEnd = user?.subscriptionCurrentPeriodEnd
+    ? new Date(user.subscriptionCurrentPeriodEnd)
+    : null;
+  const isExpired =
+    periodEnd instanceof Date &&
+    !Number.isNaN(periodEnd.getTime()) &&
+    periodEnd.getTime() <= Date.now();
+
+  return {
+    isActive: isSubscriptionCurrentlyActive(user) && !isExpired,
+    status: user?.subscriptionStatus || "inactive",
+    autoRenew: Boolean(user?.subscriptionAutoRenew),
+    stripeSubscriptionId: user?.subscriptionStripeSubscriptionId || null,
+    currentPeriodStart: user?.subscriptionCurrentPeriodStart || null,
+    currentPeriodEnd: user?.subscriptionCurrentPeriodEnd || null,
+    monthlyPrice: roundMoney(
+      user?.subscriptionMonthlyPrice || config.monthlyPrice || 11.99,
+      11.99,
+    ),
+    currency: normalizeCurrency(config.currency || "cad"),
+    savingsTotal: roundMoney(user?.subscriptionSavingsTotal, 0),
+    freeItemCycleKey: currentCycleKey,
+    freeItemUsedCount: usedInCurrentCycle,
+    freeItemRemaining,
+    benefits: {
+      percentDiscount: 20,
+      freeDelivery: true,
+      freeItemPerMonth: 1,
+    },
+  };
+};
+
+const refreshUserSubscriptionFromStripe = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) return null;
+
+  if (!user.subscriptionStripeSubscriptionId) {
+    ensureUserSavingsDefaults(user);
+    ensureUserFreeItemCycle(user);
+    await user.save();
+    return user;
+  }
+
+  try {
+    const stripeSubscription = await stripe.subscriptions.retrieve(
+      user.subscriptionStripeSubscriptionId,
+      { expand: ["items.data.price"] },
+    );
+
+    if (!isOpenStatus(stripeSubscription?.status)) {
+      await setUserSubscriptionInactive(user, stripeSubscription?.status);
+      return user;
+    }
+
+    await syncUserWithStripeSubscription(user, stripeSubscription);
+    return user;
+  } catch (error) {
+    return user;
+  }
+};
+
+const applyConfirmedOrderSubscriptionBenefits = async (order) => {
+  if (!order?.subscriptionBenefits?.isApplied) return null;
+
+  const userId = order?.user?._id || order?.user;
+  if (!userId) return null;
+
+  const user = await User.findById(userId);
+  if (!user) return null;
+
+  ensureUserSavingsDefaults(user);
+  ensureUserFreeItemCycle(user);
+
+  const discountAmount = toSafeNumber(order?.subscriptionBenefits?.discountAmount, 0);
+  const freeDeliveryAmount = toSafeNumber(
+    order?.subscriptionBenefits?.freeDeliveryAmount,
+    0,
+  );
+  const freeItemAmount = toSafeNumber(order?.subscriptionBenefits?.freeItemAmount, 0);
+
+  const totalSavings = roundMoney(
+    discountAmount + freeDeliveryAmount + freeItemAmount,
+    0,
+  );
+
+  if (totalSavings > 0) {
+    user.subscriptionSavingsTotal = roundMoney(
+      toSafeNumber(user.subscriptionSavingsTotal, 0) + totalSavings,
+      0,
+    );
+  }
+
+  if (order?.subscriptionBenefits?.freeItemApplied) {
+    const cycleKey = String(
+      order?.subscriptionBenefits?.cycleKey || getCycleKey(new Date()),
+    );
+    if (user.subscriptionFreeItemCycleKey !== cycleKey) {
+      user.subscriptionFreeItemCycleKey = cycleKey;
+      user.subscriptionFreeItemUsedCount = 0;
+    }
+    user.subscriptionFreeItemUsedCount = Math.max(
+      1,
+      toSafeNumber(user.subscriptionFreeItemUsedCount, 0),
+    );
+  }
+
+  await user.save();
+
+  if (user.subscriptionStripeSubscriptionId) {
+    await Subscription.findOneAndUpdate(
+      {
+        stripeSubscriptionId: user.subscriptionStripeSubscriptionId,
+      },
+      {
+        savingsTotal: toSafeNumber(user.subscriptionSavingsTotal, 0),
+        freeItemCycleKey: user.subscriptionFreeItemCycleKey || getCycleKey(),
+        freeItemUsedCount: toSafeNumber(user.subscriptionFreeItemUsedCount, 0),
+      },
+      { new: true },
+    );
+  }
+
+  return user;
+};
+
+module.exports = {
+  stripe,
+  isActiveStatus,
+  isOpenStatus,
+  getCycleKey,
+  isSubscriptionCurrentlyActive,
+  buildUserSubscriptionSummary,
+  ensureStripeCustomerForUser,
+  ensureSubscriptionStripePrice,
+  syncUserWithStripeSubscription,
+  setUserSubscriptionInactive,
+  refreshUserSubscriptionFromStripe,
+  getOrCreateSettingDocument,
+  ensureUserFreeItemCycle,
+  ensureUserSavingsDefaults,
+  applyConfirmedOrderSubscriptionBenefits,
+};

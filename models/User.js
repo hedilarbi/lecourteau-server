@@ -48,6 +48,42 @@ const userSchema = new Schema({
     default: false,
   },
   stripe_id: String,
+  subscriptionIsActive: {
+    type: Boolean,
+    default: false,
+  },
+  subscriptionStatus: {
+    type: String,
+    default: "inactive",
+  },
+  subscriptionAutoRenew: {
+    type: Boolean,
+    default: false,
+  },
+  subscriptionStripeSubscriptionId: {
+    type: String,
+    default: null,
+  },
+  subscriptionCurrentPeriodStart: {
+    type: Date,
+    default: null,
+  },
+  subscriptionCurrentPeriodEnd: {
+    type: Date,
+    default: null,
+  },
+  subscriptionMonthlyPrice: {
+    type: Number,
+    default: 11.99,
+  },
+  subscriptionFreeItemCycleKey: {
+    type: String,
+    default: "",
+  },
+  subscriptionFreeItemUsedCount: {
+    type: Number,
+    default: 0,
+  },
   isBanned: {
     type: Boolean,
     default: false,
@@ -63,6 +99,10 @@ const userSchema = new Schema({
       },
     },
   ],
+  subscriptionSavingsTotal: {
+    type: Number,
+    default: 0,
+  },
 });
 
 module.exports = model("User", userSchema);

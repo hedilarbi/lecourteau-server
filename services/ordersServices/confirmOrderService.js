@@ -12,6 +12,9 @@ const {
 } = require("../../utils/mailTemplateGenerators");
 const { CANCELED } = require("../../utils/constants");
 const nodemailer = require("nodemailer");
+const {
+  applyConfirmedOrderSubscriptionBenefits,
+} = require("../subscriptionServices/subscriptionHelpers");
 
 const logWithTimestamp = (msg, extra = {}) => {
   const timeStamp = new Date().toISOString();
@@ -269,7 +272,8 @@ async function finalizeLoyaltyAndPromo(order) {
   const pointsEarned = calculatePoints(order);
   const totalPoints = Math.floor(pointsEarned * 10 - pointsToremove);
   user.fidelity_points += totalPoints;
-  if (!user.firstOrderDiscountApplied) user.firstOrderDiscountApplied = true;
+  if (!user.firstOrderDiscountApplied && !order?.subscriptionBenefits?.isApplied)
+    user.firstOrderDiscountApplied = true;
 
   if (order.promoCode) {
     const used = user.usedPromoCodes.find(
@@ -287,4 +291,5 @@ async function finalizeLoyaltyAndPromo(order) {
   }
 
   await user.save();
+  await applyConfirmedOrderSubscriptionBenefits(order);
 }

@@ -22,6 +22,24 @@ const settingSchema = new Schema({
       street: String,
     },
   ],
+  subscription: {
+    monthlyPrice: {
+      type: Number,
+      default: 11.99,
+    },
+    currency: {
+      type: String,
+      default: "cad",
+    },
+    stripeProductId: {
+      type: String,
+      default: "",
+    },
+    stripePriceId: {
+      type: String,
+      default: "",
+    },
+  },
 });
 
 module.exports = model("Setting", settingSchema);

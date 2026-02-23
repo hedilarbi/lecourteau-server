@@ -20,6 +20,7 @@ const orderSchema = new Schema({
       ],
       size: String,
       price: Number,
+      basePrice: Number,
       comment: String,
     },
   ],
@@ -130,6 +131,57 @@ const orderSchema = new Schema({
   promoCode: {
     type: Schema.Types.ObjectId,
     ref: "PromoCode",
+  },
+  subscriptionBenefits: {
+    isApplied: {
+      type: Boolean,
+      default: false,
+    },
+    discountPercent: {
+      type: Number,
+      default: 0,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+    },
+    freeDeliveryApplied: {
+      type: Boolean,
+      default: false,
+    },
+    freeDeliveryAmount: {
+      type: Number,
+      default: 0,
+    },
+    freeItemApplied: {
+      type: Boolean,
+      default: false,
+    },
+    freeItemAmount: {
+      type: Number,
+      default: 0,
+    },
+    freeItemBasePrice: {
+      type: Number,
+      default: 0,
+    },
+    freeItemMenuItemId: {
+      type: Schema.Types.ObjectId,
+      ref: "MenuItem",
+      default: null,
+    },
+    freeItemLabel: {
+      type: String,
+      default: "",
+    },
+    cycleKey: {
+      type: String,
+      default: "",
+    },
+    monthlyPriceSnapshot: {
+      type: Number,
+      default: 0,
+    },
   },
   scheduled: {
     isScheduled: {

@@ -32,9 +32,33 @@ const getUserService = async (id) => {
     normalizedUser.subscriptionAutoRenew = Boolean(
       normalizedUser.subscriptionAutoRenew,
     );
-    normalizedUser.subscriptionIsActive = Boolean(
-      normalizedUser.subscriptionIsActive,
+    const normalizedSubscriptionStatus = String(
+      normalizedUser.subscriptionStatus || "",
+    )
+      .toLowerCase()
+      .trim();
+    const statusIsActive =
+      normalizedSubscriptionStatus === "active" ||
+      normalizedSubscriptionStatus === "trialing";
+    const hasStripeSubscriptionId = Boolean(
+      normalizedUser.subscriptionStripeSubscriptionId,
     );
+    const subscriptionPeriodEnd = normalizedUser.subscriptionCurrentPeriodEnd
+      ? new Date(normalizedUser.subscriptionCurrentPeriodEnd)
+      : null;
+    const hasValidPeriodEnd =
+      subscriptionPeriodEnd instanceof Date &&
+      !Number.isNaN(subscriptionPeriodEnd.getTime());
+    const subscriptionNotExpired =
+      !hasValidPeriodEnd || subscriptionPeriodEnd.getTime() > Date.now();
+    const activeFromFuturePeriod =
+      hasStripeSubscriptionId &&
+      hasValidPeriodEnd &&
+      subscriptionPeriodEnd.getTime() > Date.now();
+    normalizedUser.subscriptionIsActive =
+      (Boolean(normalizedUser.subscriptionIsActive) && subscriptionNotExpired) ||
+      (statusIsActive && subscriptionNotExpired) ||
+      activeFromFuturePeriod;
     normalizedUser.subscriptionMonthlyPrice = Number.isFinite(monthlyPrice)
       ? monthlyPrice
       : 11.99;

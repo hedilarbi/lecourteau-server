@@ -17,6 +17,10 @@ const OPEN_SUBSCRIPTION_STATUSES = new Set([
   "past_due",
   "unpaid",
 ]);
+const SUBSCRIPTION_PLAN_NAME = "CLUB COURTEAU";
+const SUBSCRIPTION_PLAN_DESCRIPTION =
+  "Abonnement CLUB COURTEAU: 20% de reduction, 0 frais livraison, 1 article gratuit/mois.";
+const SUBSCRIPTION_PLAN_METADATA = "club_courteau";
 
 const normalizeCurrency = (currency) =>
   String(currency || "cad")
@@ -167,16 +171,43 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
   );
   const currency = normalizeCurrency(setting.subscription.currency || "cad");
   const recurringConfig = getSubscriptionRecurringConfig();
+  const desiredPriceNickname = `${SUBSCRIPTION_PLAN_NAME} ${monthlyPrice.toFixed(2)} ${currency.toUpperCase()}`;
 
   let stripeProductId = setting.subscription.stripeProductId || "";
   let stripePriceId = setting.subscription.stripePriceId || "";
 
+  if (stripeProductId) {
+    try {
+      const existingProduct = await stripe.products.retrieve(stripeProductId);
+      const existingMetadata = existingProduct?.metadata || {};
+      const metadataPlan = String(existingMetadata?.plan || "").trim();
+      const productNameChanged =
+        String(existingProduct?.name || "") !== SUBSCRIPTION_PLAN_NAME;
+      const productDescriptionChanged =
+        String(existingProduct?.description || "") !==
+        SUBSCRIPTION_PLAN_DESCRIPTION;
+      const productMetadataChanged = metadataPlan !== SUBSCRIPTION_PLAN_METADATA;
+
+      if (productNameChanged || productDescriptionChanged || productMetadataChanged) {
+        await stripe.products.update(stripeProductId, {
+          name: SUBSCRIPTION_PLAN_NAME,
+          description: SUBSCRIPTION_PLAN_DESCRIPTION,
+          metadata: {
+            ...existingMetadata,
+            plan: SUBSCRIPTION_PLAN_METADATA,
+          },
+        });
+      }
+    } catch (error) {
+      stripeProductId = "";
+    }
+  }
+
   if (!stripeProductId) {
     const product = await stripe.products.create({
-      name: "Le Courteau Plus",
-      description:
-        "Abonnement mensuel: 20% de reduction, 0 frais livraison, 1 article gratuit/mois.",
-      metadata: { plan: "le_courteau_plus" },
+      name: SUBSCRIPTION_PLAN_NAME,
+      description: SUBSCRIPTION_PLAN_DESCRIPTION,
+      metadata: { plan: SUBSCRIPTION_PLAN_METADATA },
     });
     stripeProductId = product.id;
   }
@@ -204,6 +235,24 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
 
       shouldCreateNewPrice =
         amountHasChanged || currencyChanged || priceInactive || recurringChanged;
+
+      if (!shouldCreateNewPrice) {
+        const existingMetadata = existingPrice?.metadata || {};
+        const metadataPlan = String(existingMetadata?.plan || "").trim();
+        const nicknameChanged =
+          String(existingPrice?.nickname || "") !== desiredPriceNickname;
+        const metadataChanged = metadataPlan !== SUBSCRIPTION_PLAN_METADATA;
+
+        if (nicknameChanged || metadataChanged) {
+          await stripe.prices.update(stripePriceId, {
+            nickname: desiredPriceNickname,
+            metadata: {
+              ...existingMetadata,
+              plan: SUBSCRIPTION_PLAN_METADATA,
+            },
+          });
+        }
+      }
     } catch (error) {
       shouldCreateNewPrice = true;
     }
@@ -218,8 +267,8 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
         interval: recurringConfig.interval,
         interval_count: recurringConfig.intervalCount,
       },
-      nickname: `Le Courteau Plus ${monthlyPrice.toFixed(2)} ${currency.toUpperCase()}`,
-      metadata: { plan: "le_courteau_plus" },
+      nickname: desiredPriceNickname,
+      metadata: { plan: SUBSCRIPTION_PLAN_METADATA },
     });
     stripePriceId = createdPrice.id;
   }
@@ -399,6 +448,7 @@ const refreshUserSubscriptionFromStripe = async (userId) => {
 
 const applyConfirmedOrderSubscriptionBenefits = async (order) => {
   if (!order?.subscriptionBenefits?.isApplied) return null;
+  if (!order?.confirmed && !order?.payment_status) return null;
 
   const userId = order?.user?._id || order?.user;
   if (!userId) return null;

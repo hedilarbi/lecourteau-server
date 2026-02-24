@@ -19,11 +19,21 @@ const toSafeNumber = (value, fallback = 0) => {
 const isUserSubscriptionActive = (user) => {
   const status = String(user?.subscriptionStatus || "").toLowerCase();
   const statusActive = status === "active" || status === "trialing";
-  if (!statusActive || user?.subscriptionIsActive === false) return false;
-  if (!user?.subscriptionCurrentPeriodEnd) return true;
-  const periodEnd = new Date(user.subscriptionCurrentPeriodEnd);
-  if (Number.isNaN(periodEnd.getTime())) return true;
-  return periodEnd.getTime() > Date.now();
+  const hasStripeSubscriptionId = Boolean(user?.subscriptionStripeSubscriptionId);
+  const periodEnd = user?.subscriptionCurrentPeriodEnd
+    ? new Date(user.subscriptionCurrentPeriodEnd)
+    : null;
+  const hasValidPeriodEnd =
+    periodEnd instanceof Date && !Number.isNaN(periodEnd.getTime());
+  const periodNotExpired = !hasValidPeriodEnd || periodEnd.getTime() > Date.now();
+  const activeFromFuturePeriod =
+    hasStripeSubscriptionId && hasValidPeriodEnd && periodEnd.getTime() > Date.now();
+
+  return (
+    (statusActive && periodNotExpired) ||
+    (Boolean(user?.subscriptionIsActive) && periodNotExpired) ||
+    activeFromFuturePeriod
+  );
 };
 
 const createOrderService = async (order) => {

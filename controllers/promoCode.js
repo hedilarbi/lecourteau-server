@@ -198,13 +198,22 @@ const verifyPromoCode = async (req, res) => {
     const subscriptionPeriodEnd = user.subscriptionCurrentPeriodEnd
       ? new Date(user.subscriptionCurrentPeriodEnd)
       : null;
+    const hasValidPeriodEnd =
+      subscriptionPeriodEnd instanceof Date &&
+      !Number.isNaN(subscriptionPeriodEnd.getTime());
     const subscriptionNotExpired =
-      !subscriptionPeriodEnd || subscriptionPeriodEnd.getTime() > Date.now();
-    if (
-      user.subscriptionIsActive &&
-      subscriptionStatusActive &&
-      subscriptionNotExpired
-    ) {
+      !hasValidPeriodEnd || subscriptionPeriodEnd.getTime() > Date.now();
+    const hasStripeSubscriptionId = Boolean(user.subscriptionStripeSubscriptionId);
+    const activeFromFuturePeriod =
+      hasStripeSubscriptionId &&
+      hasValidPeriodEnd &&
+      subscriptionPeriodEnd.getTime() > Date.now();
+    const hasActiveSubscription =
+      (subscriptionStatusActive && subscriptionNotExpired) ||
+      (Boolean(user.subscriptionIsActive) &&
+        subscriptionNotExpired) ||
+      activeFromFuturePeriod;
+    if (hasActiveSubscription) {
       return res.status(400).json({
         success: false,
         error:

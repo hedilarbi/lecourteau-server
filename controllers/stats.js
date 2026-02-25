@@ -194,6 +194,7 @@ const getAnalyticsStats = async (req, res) => {
       restaurantId,
       timezone: DEFAULT_TIMEZONE,
       topProductsLimit: 10,
+      includeFrequency: false,
     });
     const usersCount = await mongoose.models.User.countDocuments();
 

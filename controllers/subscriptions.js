@@ -5,6 +5,7 @@ const SubscriptionHediPayout = require("../models/SubscriptionHediPayout");
 const Staff = require("../models/staff");
 const {
   stripe,
+  isActiveStatus,
   isOpenStatus,
   getOrCreateSettingDocument,
   ensureSubscriptionStripePrice,
@@ -56,6 +57,15 @@ const resolveStripeSubscriptionId = (value) => {
 };
 
 const resolveStripeCustomerId = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && typeof value.id === "string") {
+    return value.id;
+  }
+  return "";
+};
+
+const resolveStripeInvoiceId = (value) => {
   if (!value) return "";
   if (typeof value === "string") return value;
   if (typeof value === "object" && typeof value.id === "string") {
@@ -403,6 +413,68 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
   return createdPayment;
 };
 
+const syncMissingSubscriptionPaymentsForUsers = async (users = []) => {
+  const targets = (users || [])
+    .filter((user) => {
+      const subscriptionId = String(
+        user?.subscriptionStripeSubscriptionId || "",
+      ).trim();
+      if (!subscriptionId) return false;
+
+      const paidTotal = roundMoney(
+        toSafeNumber(user?.subscriptionAmountPaidTotal, 0),
+        0,
+      );
+      const paymentsCount = Math.max(
+        0,
+        Math.floor(toSafeNumber(user?.subscriptionPaymentsCount, 0)),
+      );
+      return paidTotal <= 0 && paymentsCount <= 0;
+    });
+
+  for (const user of targets) {
+    try {
+      let startingAfter = null;
+      let hasMore = true;
+      let guard = 0;
+
+      while (hasMore && guard < 10) {
+        const invoicesPage = await stripe.invoices.list({
+          subscription: user.subscriptionStripeSubscriptionId,
+          limit: 100,
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+        });
+
+        const invoices = Array.isArray(invoicesPage?.data)
+          ? invoicesPage.data
+          : [];
+
+        for (const invoice of invoices) {
+          const amountPaid = roundMoney(
+            toSafeNumber(invoice?.amount_paid, 0) / 100,
+            0,
+          );
+          if (invoice?.status === "paid" || amountPaid > 0) {
+            await recordSubscriptionPaymentFromInvoice(invoice);
+          }
+        }
+
+        hasMore = Boolean(invoicesPage?.has_more);
+        const lastInvoiceId = invoices.length
+          ? String(invoices[invoices.length - 1]?.id || "").trim()
+          : "";
+        if (!hasMore || !lastInvoiceId) {
+          break;
+        }
+        startingAfter = lastInvoiceId;
+        guard += 1;
+      }
+    } catch (error) {
+      // No-op: best-effort backfill for admin stats only.
+    }
+  }
+};
+
 const getHediBalanceSummary = async () => {
   const [creditAgg] = await SubscriptionPayment.aggregate([
     {
@@ -497,7 +569,8 @@ const handleStripeWebhook = async (req, res) => {
         await syncSubscriptionFromWebhook(stripeSubscription?.id);
         break;
       }
-      case "invoice.paid": {
+      case "invoice.paid":
+      case "invoice.payment_succeeded": {
         const invoice = event.data?.object;
         await recordSubscriptionPaymentFromInvoice(invoice);
         const invoiceSubscriptionId = resolveStripeSubscriptionId(
@@ -876,10 +949,72 @@ const confirmSubscriptionPayment = async (req, res) => {
       });
     }
 
-    const stripeSubscription = await stripe.subscriptions.retrieve(
+    let stripeSubscription = await stripe.subscriptions.retrieve(
       resolvedSubscriptionId,
       { expand: ["items.data.price", "latest_invoice.payment_intent"] },
     );
+
+    if (!paymentIntentId) {
+      const latestPaymentIntent = stripeSubscription?.latest_invoice?.payment_intent;
+      if (latestPaymentIntent?.id && latestPaymentIntent?.status === "requires_confirmation") {
+        await stripe.paymentIntents.confirm(latestPaymentIntent.id);
+        stripeSubscription = await stripe.subscriptions.retrieve(
+          resolvedSubscriptionId,
+          { expand: ["items.data.price", "latest_invoice.payment_intent"] },
+        );
+      }
+    }
+
+    try {
+      const latestInvoiceId = resolveStripeInvoiceId(
+        stripeSubscription?.latest_invoice,
+      );
+      if (latestInvoiceId) {
+        const latestInvoice = await stripe.invoices.retrieve(latestInvoiceId, {
+          expand: ["payment_intent"],
+        });
+        const amountPaid = roundMoney(
+          toSafeNumber(latestInvoice?.amount_paid, 0) / 100,
+          0,
+        );
+        if (latestInvoice?.status === "paid" || amountPaid > 0) {
+          await recordSubscriptionPaymentFromInvoice(latestInvoice);
+        }
+      }
+    } catch (error) {
+      // No-op: webhook remains the primary source, this is a safety fallback.
+    }
+
+    const stripeStatus = String(stripeSubscription?.status || "").toLowerCase();
+    const latestPaymentIntent = stripeSubscription?.latest_invoice?.payment_intent;
+    if (!isActiveStatus(stripeStatus)) {
+      if (
+        latestPaymentIntent?.status === "requires_action" &&
+        latestPaymentIntent?.client_secret
+      ) {
+        return res.status(409).json({
+          success: false,
+          message: "Authentification 3DS requise.",
+          data: {
+            clientSecret: latestPaymentIntent.client_secret,
+            paymentIntentId: latestPaymentIntent.id,
+            subscriptionId: stripeSubscription?.id || resolvedSubscriptionId,
+            status: stripeStatus || "incomplete",
+          },
+        });
+      }
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "Le paiement de l'abonnement n'est pas finalisé. Veuillez réessayer.",
+        data: {
+          status: stripeStatus || "incomplete",
+          paymentIntentStatus: latestPaymentIntent?.status || null,
+          subscriptionId: stripeSubscription?.id || resolvedSubscriptionId,
+        },
+      });
+    }
 
     await syncUserWithStripeSubscription(user, stripeSubscription);
     const refreshedUser = await User.findById(user._id);
@@ -1064,9 +1199,7 @@ const getSubscriptionAdminStats = async (req, res) => {
 
     const setting = await getOrCreateSettingDocument();
     const config = formatSubscriptionConfig(setting);
-    const hediSummary = await getHediBalanceSummary();
-
-    const subscribedUsers = await User.find({
+    const subscribedUsersQuery = {
       $or: [
         { subscriptionIsActive: true },
         { subscriptionStatus: { $in: Array.from(OPEN_STATUSES) } },
@@ -1079,7 +1212,18 @@ const getSubscriptionAdminStats = async (req, res) => {
         { subscriptionPaymentsCount: { $gt: 0 } },
         { subscriptionAmountPaidTotal: { $gt: 0 } },
       ],
-    })
+    };
+
+    const usersNeedingBackfill = await User.find(subscribedUsersQuery)
+      .select(
+        "subscriptionStripeSubscriptionId subscriptionAmountPaidTotal subscriptionPaymentsCount",
+      )
+      .lean();
+    await syncMissingSubscriptionPaymentsForUsers(usersNeedingBackfill);
+
+    const hediSummary = await getHediBalanceSummary();
+
+    const subscribedUsers = await User.find(subscribedUsersQuery)
       .select(
         "name email phone_number subscriptionStatus subscriptionIsActive subscriptionAutoRenew subscriptionCurrentPeriodStart subscriptionCurrentPeriodEnd subscriptionMonthlyPrice subscriptionSavingsTotal subscriptionAmountPaidTotal subscriptionPaymentsCount createdAt",
       )
@@ -1100,7 +1244,7 @@ const getSubscriptionAdminStats = async (req, res) => {
     );
 
     const activeSubscribersCount = subscribedUsers.reduce((count, user) => {
-      if (isUserSubscriptionActive(user) || Boolean(user?.subscriptionIsActive)) {
+      if (isUserSubscriptionActive(user)) {
         return count + 1;
       }
       return count;
@@ -1136,7 +1280,7 @@ const getSubscriptionAdminStats = async (req, res) => {
         email: user.email || "",
         phoneNumber: user.phone_number || "",
         status: user.subscriptionStatus || "inactive",
-        isActive: isUserSubscriptionActive(user) || Boolean(user.subscriptionIsActive),
+        isActive: isUserSubscriptionActive(user),
         isOpen: isUserSubscriptionOpen(user),
         autoRenew: Boolean(user.subscriptionAutoRenew),
         currentPeriodStart: user.subscriptionCurrentPeriodStart || null,

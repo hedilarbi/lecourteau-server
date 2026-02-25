@@ -132,9 +132,27 @@ const getRangeDays = (startDate, endDate) => {
 };
 
 const buildOrdersMatch = ({ startDate, endDate, restaurantId, userId }) => {
+  const normalizedStatusExpr = {
+    $toLower: {
+      $trim: {
+        input: { $ifNull: ["$status", ""] },
+      },
+    },
+  };
+  const canceledStatuses = [
+    "annule",
+    "annulé",
+    "annulee",
+    "annulée",
+    "cancelled",
+    "canceled",
+  ];
+
   const match = {
     confirmed: true,
-    status: { $nin: ["Annule", "Annulé", "Cancelled", "Canceled"] },
+    $expr: {
+      $not: [{ $in: [normalizedStatusExpr, canceledStatuses] }],
+    },
   };
 
   if (startDate instanceof Date && endDate instanceof Date) {
@@ -205,6 +223,7 @@ const buildOrdersAnalytics = async ({
   userId = "",
   timezone = DEFAULT_TIMEZONE,
   topProductsLimit = 10,
+  includeFrequency = true,
 }) => {
   const Order = mongoose.models.Order;
   const match = buildOrdersMatch({ startDate, endDate, restaurantId, userId });
@@ -218,7 +237,7 @@ const buildOrdersAnalytics = async ({
   };
   const isPickupExpr = {
     $or: [
-      { $regexMatch: { input: orderTypeExpr, regex: "pickup" } },
+      { $regexMatch: { input: orderTypeExpr, regex: "pick\\s*-?\\s*up" } },
       { $regexMatch: { input: orderTypeExpr, regex: "ramassage" } },
       { $regexMatch: { input: orderTypeExpr, regex: "takeout" } },
       { $regexMatch: { input: orderTypeExpr, regex: "take-away" } },
@@ -447,17 +466,23 @@ const buildOrdersAnalytics = async ({
   const otherTypeOrders = Math.max(0, totalOrders - deliveryOrders - pickupOrders);
   const averageBasket = totalOrders > 0 ? roundMoney(totalRevenue / totalOrders, 0) : 0;
 
-  const summaryStart = startDate || summary.firstOrderAt || null;
-  const summaryEnd = endDate || summary.lastOrderAt || null;
-  const rangeDays = getRangeDays(summaryStart, summaryEnd) || (totalOrders > 0 ? 1 : 0);
-  const frequencyPerWeek =
-    rangeDays > 0 ? roundMoney((totalOrders / rangeDays) * 7, 0) : 0;
-  const frequencyPerMonth =
-    rangeDays > 0 ? roundMoney((totalOrders / rangeDays) * 30, 0) : 0;
-  const averageDaysBetweenOrders =
-    totalOrders > 1 && rangeDays > 0
-      ? roundMoney(rangeDays / (totalOrders - 1), 0)
-      : 0;
+  let frequencyPerWeek = null;
+  let frequencyPerMonth = null;
+  let averageDaysBetweenOrders = null;
+  if (includeFrequency) {
+    const summaryStart = startDate || summary.firstOrderAt || null;
+    const summaryEnd = endDate || summary.lastOrderAt || null;
+    const rangeDays =
+      getRangeDays(summaryStart, summaryEnd) || (totalOrders > 0 ? 1 : 0);
+    frequencyPerWeek =
+      rangeDays > 0 ? roundMoney((totalOrders / rangeDays) * 7, 0) : 0;
+    frequencyPerMonth =
+      rangeDays > 0 ? roundMoney((totalOrders / rangeDays) * 30, 0) : 0;
+    averageDaysBetweenOrders =
+      totalOrders > 1 && rangeDays > 0
+        ? roundMoney(rangeDays / (totalOrders - 1), 0)
+        : 0;
+  }
 
   const revenueByDaySeries =
     startDate && endDate

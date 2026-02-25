@@ -44,9 +44,6 @@ const getUserByTokenService = async (token) => {
     const statusIsActive =
       normalizedSubscriptionStatus === "active" ||
       normalizedSubscriptionStatus === "trialing";
-    const hasStripeSubscriptionId = Boolean(
-      normalizedUser.subscriptionStripeSubscriptionId,
-    );
     const subscriptionPeriodEnd = normalizedUser.subscriptionCurrentPeriodEnd
       ? new Date(normalizedUser.subscriptionCurrentPeriodEnd)
       : null;
@@ -55,14 +52,8 @@ const getUserByTokenService = async (token) => {
       !Number.isNaN(subscriptionPeriodEnd.getTime());
     const subscriptionNotExpired =
       !hasValidPeriodEnd || subscriptionPeriodEnd.getTime() > Date.now();
-    const activeFromFuturePeriod =
-      hasStripeSubscriptionId &&
-      hasValidPeriodEnd &&
-      subscriptionPeriodEnd.getTime() > Date.now();
     normalizedUser.subscriptionIsActive =
-      (Boolean(normalizedUser.subscriptionIsActive) && subscriptionNotExpired) ||
-      (statusIsActive && subscriptionNotExpired) ||
-      activeFromFuturePeriod;
+      statusIsActive && subscriptionNotExpired;
     normalizedUser.subscriptionMonthlyPrice = Number.isFinite(monthlyPrice)
       ? monthlyPrice
       : 11.99;

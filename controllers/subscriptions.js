@@ -1,5 +1,8 @@
 const User = require("../models/User");
 const Subscription = require("../models/Subscription");
+const SubscriptionPayment = require("../models/SubscriptionPayment");
+const SubscriptionHediPayout = require("../models/SubscriptionHediPayout");
+const Staff = require("../models/Staff");
 const {
   stripe,
   isOpenStatus,
@@ -11,6 +14,16 @@ const {
   refreshUserSubscriptionFromStripe,
   setUserSubscriptionInactive,
 } = require("../services/subscriptionServices/subscriptionHelpers");
+
+const HEDI_SHARE_PERCENT = 10;
+const ACTIVE_STATUSES = new Set(["active", "trialing"]);
+const OPEN_STATUSES = new Set([
+  "active",
+  "trialing",
+  "incomplete",
+  "past_due",
+  "unpaid",
+]);
 
 const toDateFromStripeTimestamp = (timestamp) => {
   if (!timestamp || !Number.isFinite(Number(timestamp))) return null;
@@ -49,6 +62,96 @@ const resolveStripeCustomerId = (value) => {
     return value.id;
   }
   return "";
+};
+
+const toSafeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const roundMoney = (value, fallback = 0) => {
+  const normalized = toSafeNumber(value, fallback);
+  return Math.round(normalized * 100) / 100;
+};
+
+const normalizeCurrency = (currency) =>
+  String(currency || "cad")
+    .trim()
+    .toLowerCase() || "cad";
+
+const resolveInvoicePaidDate = (invoice) => {
+  const paidAtTs =
+    invoice?.status_transitions?.paid_at || invoice?.created || null;
+  return toDateFromStripeTimestamp(paidAtTs) || new Date();
+};
+
+const resolvePaymentTypeFromInvoice = (invoice) => {
+  const billingReason = String(invoice?.billing_reason || "")
+    .trim()
+    .toLowerCase();
+  if (billingReason === "subscription_create") return "activation";
+  if (billingReason === "subscription_cycle") return "renewal";
+  return "subscription";
+};
+
+const isUserSubscriptionOpen = (user) => {
+  const status = String(user?.subscriptionStatus || "")
+    .trim()
+    .toLowerCase();
+  if (!OPEN_STATUSES.has(status)) return false;
+
+  const periodEnd = user?.subscriptionCurrentPeriodEnd
+    ? new Date(user.subscriptionCurrentPeriodEnd)
+    : null;
+  if (!(periodEnd instanceof Date) || Number.isNaN(periodEnd.getTime())) {
+    return true;
+  }
+  return periodEnd.getTime() > Date.now();
+};
+
+const isUserSubscriptionActive = (user) => {
+  const status = String(user?.subscriptionStatus || "")
+    .trim()
+    .toLowerCase();
+  if (!ACTIVE_STATUSES.has(status)) return false;
+
+  const periodEnd = user?.subscriptionCurrentPeriodEnd
+    ? new Date(user.subscriptionCurrentPeriodEnd)
+    : null;
+  if (!(periodEnd instanceof Date) || Number.isNaN(periodEnd.getTime())) {
+    return true;
+  }
+  return periodEnd.getTime() > Date.now();
+};
+
+const ensureAdminStaff = async (req, res) => {
+  const staffId = req?.staff?.id;
+  if (!staffId) {
+    res.status(401).json({
+      success: false,
+      message: "Staff non authentifié.",
+    });
+    return null;
+  }
+
+  const staff = await Staff.findById(staffId).select("role");
+  if (!staff) {
+    res.status(403).json({
+      success: false,
+      message: "Staff introuvable.",
+    });
+    return null;
+  }
+
+  if (String(staff.role || "").toLowerCase() !== "admin") {
+    res.status(403).json({
+      success: false,
+      message: "Accès réservé aux administrateurs.",
+    });
+    return null;
+  }
+
+  return staff;
 };
 
 const paymentMethodsAreSameCard = (candidate, reference) => {
@@ -182,6 +285,174 @@ const syncSubscriptionFromWebhook = async (subscriptionId) => {
   );
 };
 
+const resolveUserFromInvoice = async (invoice, subscriptionId) => {
+  const customerId = resolveStripeCustomerId(invoice?.customer);
+  if (customerId) {
+    const userByCustomer = await User.findOne({ stripe_id: customerId });
+    if (userByCustomer) {
+      return userByCustomer;
+    }
+  }
+
+  const subscriptionRecord = await Subscription.findOne({
+    stripeSubscriptionId: subscriptionId,
+  }).select("user stripeCustomerId");
+  if (subscriptionRecord?.user) {
+    const userFromRecord = await User.findById(subscriptionRecord.user);
+    if (userFromRecord) {
+      return userFromRecord;
+    }
+  }
+
+  if (subscriptionRecord?.stripeCustomerId) {
+    const userByRecordCustomer = await User.findOne({
+      stripe_id: subscriptionRecord.stripeCustomerId,
+    });
+    if (userByRecordCustomer) {
+      return userByRecordCustomer;
+    }
+  }
+
+  try {
+    const stripeSubscription = await stripe.subscriptions.retrieve(
+      subscriptionId,
+      { expand: ["items.data.price"] },
+    );
+    const userFromStripe = await findUserByStripeSubscription(stripeSubscription);
+    if (userFromStripe) {
+      await syncUserWithStripeSubscription(userFromStripe, stripeSubscription, {
+        customerId:
+          resolveStripeCustomerId(stripeSubscription?.customer) ||
+          customerId ||
+          userFromStripe?.stripe_id ||
+          "",
+      });
+      return userFromStripe;
+    }
+  } catch (error) {
+    return null;
+  }
+
+  return null;
+};
+
+const recordSubscriptionPaymentFromInvoice = async (invoice) => {
+  const invoiceId = String(invoice?.id || "").trim();
+  if (!invoiceId) return null;
+
+  const existingPayment = await SubscriptionPayment.findOne({
+    stripeInvoiceId: invoiceId,
+  }).lean();
+  if (existingPayment) {
+    return existingPayment;
+  }
+
+  const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
+  if (!subscriptionId) return null;
+
+  const rawAmountPaid = toSafeNumber(invoice?.amount_paid, 0);
+  const amountPaid = roundMoney(rawAmountPaid / 100, 0);
+  if (amountPaid <= 0) return null;
+
+  const user = await resolveUserFromInvoice(invoice, subscriptionId);
+  if (!user) return null;
+
+  const currency = normalizeCurrency(invoice?.currency || "cad");
+  const paymentType = resolvePaymentTypeFromInvoice(invoice);
+  const billingReason = String(invoice?.billing_reason || "subscription")
+    .trim()
+    .toLowerCase();
+  const paidAt = resolveInvoicePaidDate(invoice);
+  const hediShareAmount = roundMoney(
+    (amountPaid * HEDI_SHARE_PERCENT) / 100,
+    0,
+  );
+
+  let createdPayment;
+  try {
+    createdPayment = await SubscriptionPayment.create({
+      user: user._id,
+      stripeCustomerId:
+        resolveStripeCustomerId(invoice?.customer) || user?.stripe_id || "",
+      stripeSubscriptionId: subscriptionId,
+      stripeInvoiceId: invoiceId,
+      stripePaymentIntentId: String(invoice?.payment_intent || "").trim(),
+      amount: amountPaid,
+      currency,
+      billingReason,
+      paymentType,
+      paidAt,
+      hediSharePercent: HEDI_SHARE_PERCENT,
+      hediShareAmount,
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return SubscriptionPayment.findOne({ stripeInvoiceId: invoiceId }).lean();
+    }
+    throw error;
+  }
+
+  user.subscriptionAmountPaidTotal = roundMoney(
+    toSafeNumber(user.subscriptionAmountPaidTotal, 0) + amountPaid,
+    0,
+  );
+  user.subscriptionPaymentsCount =
+    Math.max(0, Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0))) + 1;
+  await user.save();
+
+  return createdPayment;
+};
+
+const getHediBalanceSummary = async () => {
+  const [creditAgg] = await SubscriptionPayment.aggregate([
+    {
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: "$amount" },
+        totalPaymentsCount: { $sum: 1 },
+        totalRenewalsCount: {
+          $sum: {
+            $cond: [{ $eq: ["$paymentType", "renewal"] }, 1, 0],
+          },
+        },
+        totalHediCredits: { $sum: "$hediShareAmount" },
+      },
+    },
+  ]);
+
+  const [payoutAgg] = await SubscriptionHediPayout.aggregate([
+    {
+      $group: {
+        _id: null,
+        totalPayouts: { $sum: "$amount" },
+      },
+    },
+  ]);
+
+  const totalRevenue = roundMoney(creditAgg?.totalRevenue, 0);
+  const totalPaymentsCount = Math.max(
+    0,
+    Math.floor(toSafeNumber(creditAgg?.totalPaymentsCount, 0)),
+  );
+  const totalRenewalsCount = Math.max(
+    0,
+    Math.floor(toSafeNumber(creditAgg?.totalRenewalsCount, 0)),
+  );
+  const totalHediCredits = roundMoney(creditAgg?.totalHediCredits, 0);
+  const totalPayouts = roundMoney(payoutAgg?.totalPayouts, 0);
+  const balance = roundMoney(totalHediCredits - totalPayouts, 0);
+
+  return {
+    totalRevenue,
+    totalPaymentsCount,
+    totalRenewalsCount,
+    totalHediCredits,
+    totalPayouts,
+    balance,
+    sharePercent: HEDI_SHARE_PERCENT,
+  };
+};
+
 const handleStripeWebhook = async (req, res) => {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
@@ -226,7 +497,17 @@ const handleStripeWebhook = async (req, res) => {
         await syncSubscriptionFromWebhook(stripeSubscription?.id);
         break;
       }
-      case "invoice.paid":
+      case "invoice.paid": {
+        const invoice = event.data?.object;
+        await recordSubscriptionPaymentFromInvoice(invoice);
+        const invoiceSubscriptionId = resolveStripeSubscriptionId(
+          invoice?.subscription,
+        );
+        if (invoiceSubscriptionId) {
+          await syncSubscriptionFromWebhook(invoiceSubscriptionId);
+        }
+        break;
+      }
       case "invoice.payment_failed": {
         const invoice = event.data?.object;
         const invoiceSubscriptionId = resolveStripeSubscriptionId(
@@ -284,6 +565,9 @@ const getSubscriptionConfig = async (req, res) => {
 
 const updateSubscriptionConfig = async (req, res) => {
   try {
+    const staff = await ensureAdminStaff(req, res);
+    if (!staff) return;
+
     const nextPrice = Number(req.body?.monthlyPrice);
     if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
       return res.status(400).json({
@@ -773,6 +1057,239 @@ const refreshUserSubscription = async (req, res) => {
   }
 };
 
+const getSubscriptionAdminStats = async (req, res) => {
+  try {
+    const staff = await ensureAdminStaff(req, res);
+    if (!staff) return;
+
+    const setting = await getOrCreateSettingDocument();
+    const config = formatSubscriptionConfig(setting);
+    const hediSummary = await getHediBalanceSummary();
+
+    const subscribedUsers = await User.find({
+      $or: [
+        { subscriptionIsActive: true },
+        { subscriptionStatus: { $in: Array.from(OPEN_STATUSES) } },
+        {
+          subscriptionStripeSubscriptionId: {
+            $exists: true,
+            $nin: [null, ""],
+          },
+        },
+        { subscriptionPaymentsCount: { $gt: 0 } },
+        { subscriptionAmountPaidTotal: { $gt: 0 } },
+      ],
+    })
+      .select(
+        "name email phone_number subscriptionStatus subscriptionIsActive subscriptionAutoRenew subscriptionCurrentPeriodStart subscriptionCurrentPeriodEnd subscriptionMonthlyPrice subscriptionSavingsTotal subscriptionAmountPaidTotal subscriptionPaymentsCount createdAt",
+      )
+      .sort({ subscriptionAmountPaidTotal: -1, createdAt: -1 })
+      .lean();
+
+    const paymentStatsByUser = await SubscriptionPayment.aggregate([
+      {
+        $group: {
+          _id: "$user",
+          totalPaid: { $sum: "$amount" },
+          paymentsCount: { $sum: 1 },
+        },
+      },
+    ]);
+    const paymentStatsMap = new Map(
+      paymentStatsByUser.map((entry) => [String(entry._id), entry]),
+    );
+
+    const activeSubscribersCount = subscribedUsers.reduce((count, user) => {
+      if (isUserSubscriptionActive(user) || Boolean(user?.subscriptionIsActive)) {
+        return count + 1;
+      }
+      return count;
+    }, 0);
+
+    const openSubscribersCount = subscribedUsers.reduce((count, user) => {
+      if (isUserSubscriptionOpen(user)) {
+        return count + 1;
+      }
+      return count;
+    }, 0);
+
+    const normalizedUsers = subscribedUsers.map((user) => {
+      const paymentStats = paymentStatsMap.get(String(user._id));
+      const totalPaid = roundMoney(
+        paymentStats?.totalPaid ?? user.subscriptionAmountPaidTotal,
+        0,
+      );
+      const paymentCount = Math.max(
+        0,
+        Math.floor(
+          toSafeNumber(
+            paymentStats?.paymentsCount ?? user.subscriptionPaymentsCount,
+            0,
+          ),
+        ),
+      );
+      const renewalsCount = Math.max(0, paymentCount - 1);
+
+      return {
+        _id: user._id,
+        name: user.name || "Sans nom",
+        email: user.email || "",
+        phoneNumber: user.phone_number || "",
+        status: user.subscriptionStatus || "inactive",
+        isActive: isUserSubscriptionActive(user) || Boolean(user.subscriptionIsActive),
+        isOpen: isUserSubscriptionOpen(user),
+        autoRenew: Boolean(user.subscriptionAutoRenew),
+        currentPeriodStart: user.subscriptionCurrentPeriodStart || null,
+        currentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
+        monthlyPrice: roundMoney(user.subscriptionMonthlyPrice, config.monthlyPrice),
+        savingsTotal: roundMoney(user.subscriptionSavingsTotal, 0),
+        amountPaidTotal: totalPaid,
+        paymentsCount: paymentCount,
+        renewalsCount,
+        createdAt: user.createdAt || null,
+      };
+    });
+
+    const payouts = await SubscriptionHediPayout.find()
+      .sort({ paidAt: -1, createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    const recentPayments = await SubscriptionPayment.find()
+      .sort({ paidAt: -1, createdAt: -1 })
+      .limit(50)
+      .select(
+        "user amount currency paymentType billingReason paidAt stripeInvoiceId hediShareAmount",
+      )
+      .populate("user", "name email phone_number")
+      .lean();
+
+    const avgRevenuePerSubscriber =
+      normalizedUsers.length > 0
+        ? roundMoney(hediSummary.totalRevenue / normalizedUsers.length, 0)
+        : 0;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        config,
+        overview: {
+          subscribersCount: normalizedUsers.length,
+          activeSubscribersCount,
+          openSubscribersCount,
+          totalRevenue: hediSummary.totalRevenue,
+          totalPaymentsCount: hediSummary.totalPaymentsCount,
+          totalRenewalsCount: hediSummary.totalRenewalsCount,
+          averageRevenuePerSubscriber: avgRevenuePerSubscriber,
+        },
+        hedi: {
+          sharePercent: hediSummary.sharePercent,
+          totalCredits: hediSummary.totalHediCredits,
+          totalPayouts: hediSummary.totalPayouts,
+          balance: hediSummary.balance,
+          payouts: payouts.map((entry) => ({
+            _id: entry._id,
+            amount: roundMoney(entry.amount, 0),
+            paidAt: entry.paidAt || entry.createdAt,
+            note: entry.note || "",
+            createdAt: entry.createdAt || null,
+          })),
+        },
+        users: normalizedUsers,
+        recentPayments: recentPayments.map((payment) => ({
+          _id: payment._id,
+          userId: payment?.user?._id || null,
+          userName: payment?.user?.name || "Utilisateur",
+          userEmail: payment?.user?.email || "",
+          amount: roundMoney(payment?.amount, 0),
+          currency: normalizeCurrency(payment?.currency || "cad"),
+          paymentType: payment?.paymentType || "subscription",
+          billingReason: payment?.billingReason || "subscription",
+          paidAt: payment?.paidAt || payment?.createdAt || null,
+          stripeInvoiceId: payment?.stripeInvoiceId || "",
+          hediShareAmount: roundMoney(payment?.hediShareAmount, 0),
+        })),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Erreur lors du chargement des statistiques d'abonnement.",
+    });
+  }
+};
+
+const createHediPayout = async (req, res) => {
+  try {
+    const staff = await ensureAdminStaff(req, res);
+    if (!staff) return;
+
+    const amount = roundMoney(req.body?.amount, 0);
+    const note = String(req.body?.note || "")
+      .trim()
+      .slice(0, 240);
+    const paidAtInput = req.body?.paidAt;
+    const paidAt = paidAtInput ? new Date(paidAtInput) : new Date();
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Le montant du paiement est invalide.",
+      });
+    }
+
+    if (!(paidAt instanceof Date) || Number.isNaN(paidAt.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "La date du paiement est invalide.",
+      });
+    }
+
+    const hediSummary = await getHediBalanceSummary();
+    if (amount > hediSummary.balance) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Montant supérieur au solde de Hedi disponible. Ajustez le montant.",
+      });
+    }
+
+    const payout = await SubscriptionHediPayout.create({
+      amount,
+      paidAt,
+      note,
+      createdByStaffId: staff._id,
+    });
+
+    const updatedSummary = await getHediBalanceSummary();
+    return res.status(200).json({
+      success: true,
+      data: {
+        payout: {
+          _id: payout._id,
+          amount: roundMoney(payout.amount, 0),
+          paidAt: payout.paidAt,
+          note: payout.note || "",
+          createdAt: payout.createdAt || null,
+        },
+        hedi: {
+          sharePercent: updatedSummary.sharePercent,
+          totalCredits: updatedSummary.totalHediCredits,
+          totalPayouts: updatedSummary.totalPayouts,
+          balance: updatedSummary.balance,
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Erreur lors de l'enregistrement du paiement.",
+    });
+  }
+};
+
 module.exports = {
   handleStripeWebhook,
   getSubscriptionConfig,
@@ -783,4 +1300,6 @@ module.exports = {
   setSubscriptionAutoRenew,
   cancelSubscription,
   refreshUserSubscription,
+  getSubscriptionAdminStats,
+  createHediPayout,
 };

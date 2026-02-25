@@ -103,6 +103,14 @@ const userSchema = new Schema({
     type: Number,
     default: 0,
   },
+  subscriptionAmountPaidTotal: {
+    type: Number,
+    default: 0,
+  },
+  subscriptionPaymentsCount: {
+    type: Number,
+    default: 0,
+  },
 });
 
 module.exports = model("User", userSchema);

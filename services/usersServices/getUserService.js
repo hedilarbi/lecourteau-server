@@ -18,6 +18,8 @@ const getUserService = async (id) => {
     ).padStart(2, "0")}`;
 
     const savingsTotal = Number(normalizedUser.subscriptionSavingsTotal);
+    const amountPaidTotal = Number(normalizedUser.subscriptionAmountPaidTotal);
+    const paymentsCount = Number(normalizedUser.subscriptionPaymentsCount);
     const freeItemUsedCount =
       normalizedUser.subscriptionFreeItemCycleKey === currentCycleKey
         ? Number(normalizedUser.subscriptionFreeItemUsedCount)
@@ -26,6 +28,12 @@ const getUserService = async (id) => {
 
     normalizedUser.subscriptionSavingsTotal = Number.isFinite(savingsTotal)
       ? savingsTotal
+      : 0;
+    normalizedUser.subscriptionAmountPaidTotal = Number.isFinite(amountPaidTotal)
+      ? amountPaidTotal
+      : 0;
+    normalizedUser.subscriptionPaymentsCount = Number.isFinite(paymentsCount)
+      ? paymentsCount
       : 0;
     normalizedUser.subscriptionStatus =
       normalizedUser.subscriptionStatus || "inactive";

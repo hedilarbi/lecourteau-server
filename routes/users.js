@@ -4,6 +4,7 @@ const {
   updateUser,
   deleteUser,
   getUser,
+  getUserStats,
   getUsers,
   addToFavorites,
 
@@ -39,6 +40,7 @@ router.get("/orders/:id", getOrdersList);
 router.put("/update/:id", updateUser);
 router.put("/set/:id", setUserInfo);
 router.delete("/delete/:id", deleteUser);
+router.get("/stats/:id", getUserStats);
 router.get("/:id", getUser);
 
 module.exports = router;

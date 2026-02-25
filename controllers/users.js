@@ -40,6 +40,12 @@ const {
   addToFavoritesService,
 } = require("../services/usersServices/addToFavoritesService");
 const User = require("../models/User");
+const {
+  resolveDateRange,
+  buildOrdersAnalytics,
+  toObjectId,
+  DEFAULT_TIMEZONE,
+} = require("../services/statsServices/analyticsHelpers");
 
 const createUser = async (req, res) => {
   const { phone_number } = req.body;
@@ -133,6 +139,61 @@ const getUser = async (req, res) => {
     res.status(200).json(response);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const getUserStats = async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!toObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Identifiant utilisateur invalide.",
+      });
+    }
+
+    const user = await User.findById(id).select("_id name email phone_number");
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Utilisateur introuvable.",
+      });
+    }
+
+    let defaultPreset = "all";
+    if (req.query?.from || req.query?.to) defaultPreset = "custom";
+    if (req.query?.date) defaultPreset = "day";
+    if (req.query?.preset) defaultPreset = String(req.query.preset);
+    const { preset, startDate, endDate } = resolveDateRange(
+      req.query,
+      defaultPreset,
+    );
+
+    const analytics = await buildOrdersAnalytics({
+      startDate,
+      endDate,
+      userId: id,
+      timezone: DEFAULT_TIMEZONE,
+      topProductsLimit: 8,
+    });
+
+    return res.status(200).json({
+      success: true,
+      user,
+      filter: {
+        preset,
+        startDate: startDate || null,
+        endDate: endDate || null,
+      },
+      summary: analytics.summary,
+      charts: analytics.charts,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message || "Erreur lors du chargement des statistiques utilisateur.",
+    });
   }
 };
 
@@ -335,6 +396,7 @@ module.exports = {
   updateUser,
   deleteUser,
   getUser,
+  getUserStats,
   getUsers,
   addToFavorites,
   getOrdersList,

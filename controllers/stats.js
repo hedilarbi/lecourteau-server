@@ -1,6 +1,12 @@
 const { default: mongoose } = require("mongoose");
 const { ON_GOING, SCHEDULED } = require("../utils/constants");
 const { Expo } = require("expo-server-sdk");
+const {
+  resolveDateRange,
+  buildOrdersAnalytics,
+  toObjectId,
+  DEFAULT_TIMEZONE,
+} = require("../services/statsServices/analyticsHelpers");
 const getInititalStats = async (req, res) => {
   try {
     const { date, from, to, restaurantId } = req.query;
@@ -171,6 +177,47 @@ const getRestaurantStats = async (req, res) => {
   }
 };
 
+const getAnalyticsStats = async (req, res) => {
+  try {
+    const restaurantId = String(req.query?.restaurantId || "").trim();
+    if (restaurantId && !toObjectId(restaurantId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Identifiant restaurant invalide.",
+      });
+    }
+
+    const { preset, startDate, endDate } = resolveDateRange(req.query, "day");
+    const analytics = await buildOrdersAnalytics({
+      startDate,
+      endDate,
+      restaurantId,
+      timezone: DEFAULT_TIMEZONE,
+      topProductsLimit: 10,
+    });
+    const usersCount = await mongoose.models.User.countDocuments();
+
+    return res.status(200).json({
+      success: true,
+      usersCount,
+      filter: {
+        preset,
+        restaurantId: restaurantId || "",
+        startDate: startDate || null,
+        endDate: endDate || null,
+      },
+      summary: analytics.summary,
+      charts: analytics.charts,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message || "Erreur lors du chargement des statistiques avancees.",
+    });
+  }
+};
+
 const testNotif = async (req, res) => {
   try {
     const expo = new Expo({
@@ -228,4 +275,9 @@ const testNotif = async (req, res) => {
   }
 };
 
-module.exports = { getInititalStats, getRestaurantStats, testNotif };
+module.exports = {
+  getInititalStats,
+  getRestaurantStats,
+  getAnalyticsStats,
+  testNotif,
+};

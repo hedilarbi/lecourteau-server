@@ -88,6 +88,11 @@ const isSubscriptionCurrentlyActive = (user) => {
 const ensureUserSavingsDefaults = (user) => {
   const currentSavings = toSafeNumber(user.subscriptionSavingsTotal, 0);
   user.subscriptionSavingsTotal = currentSavings;
+  user.subscriptionAmountPaidTotal = toSafeNumber(
+    user.subscriptionAmountPaidTotal,
+    0,
+  );
+  user.subscriptionPaymentsCount = toSafeNumber(user.subscriptionPaymentsCount, 0);
 };
 
 const ensureUserFreeItemCycle = (user, date = new Date()) => {

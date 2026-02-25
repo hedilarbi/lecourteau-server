@@ -2,7 +2,7 @@ const User = require("../models/User");
 const Subscription = require("../models/Subscription");
 const SubscriptionPayment = require("../models/SubscriptionPayment");
 const SubscriptionHediPayout = require("../models/SubscriptionHediPayout");
-const Staff = require("../models/Staff");
+const Staff = require("../models/staff");
 const {
   stripe,
   isOpenStatus,

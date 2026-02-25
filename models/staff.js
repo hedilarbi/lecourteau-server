@@ -1,4 +1,5 @@
-const { Schema, model } = require("mongoose");
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
 
 const staffSchema = new Schema({
   username: String,
@@ -24,4 +25,4 @@ const staffSchema = new Schema({
   },
 });
 
-module.exports = model("Staff", staffSchema);
+module.exports = mongoose.models.Staff || mongoose.model("Staff", staffSchema);

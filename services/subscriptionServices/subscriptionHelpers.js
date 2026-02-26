@@ -70,6 +70,18 @@ const getCycleKey = (date = new Date()) => {
   return `${target.getUTCFullYear()}-${String(target.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 
+const getSubscriptionFreeItemCycleKey = (user, fallbackDate = new Date()) => {
+  const periodStart = user?.subscriptionCurrentPeriodStart
+    ? new Date(user.subscriptionCurrentPeriodStart)
+    : null;
+
+  if (periodStart instanceof Date && !Number.isNaN(periodStart.getTime())) {
+    return `period-${periodStart.toISOString()}`;
+  }
+
+  return getCycleKey(fallbackDate);
+};
+
 const isActiveStatus = (status) =>
   ACTIVE_SUBSCRIPTION_STATUSES.has(String(status || "").toLowerCase());
 
@@ -96,10 +108,23 @@ const ensureUserSavingsDefaults = (user) => {
 };
 
 const ensureUserFreeItemCycle = (user, date = new Date()) => {
-  const cycleKey = getCycleKey(date);
+  const cycleKey = getSubscriptionFreeItemCycleKey(user, date);
+  const previousCycleKey = String(user?.subscriptionFreeItemCycleKey || "").trim();
+
   if (user.subscriptionFreeItemCycleKey !== cycleKey) {
+    const legacyCycleKey = getCycleKey(
+      user?.subscriptionCurrentPeriodStart || date,
+    );
+    const legacyUsedCount = Number(user?.subscriptionFreeItemUsedCount);
+    const shouldCarryLegacyUsage =
+      previousCycleKey &&
+      previousCycleKey === legacyCycleKey &&
+      Number.isFinite(legacyUsedCount);
+
     user.subscriptionFreeItemCycleKey = cycleKey;
-    user.subscriptionFreeItemUsedCount = 0;
+    user.subscriptionFreeItemUsedCount = shouldCarryLegacyUsage
+      ? Math.max(0, Math.floor(legacyUsedCount))
+      : 0;
   } else if (!Number.isFinite(Number(user.subscriptionFreeItemUsedCount))) {
     user.subscriptionFreeItemUsedCount = 0;
   }
@@ -321,8 +346,6 @@ const syncUserWithStripeSubscription = async (
   );
 
   ensureUserSavingsDefaults(user);
-  ensureUserFreeItemCycle(user);
-
   user.subscriptionStatus = status;
   user.subscriptionIsActive = isActiveStatus(status);
   user.subscriptionAutoRenew = !cancelAtPeriodEnd;
@@ -330,6 +353,7 @@ const syncUserWithStripeSubscription = async (
   user.subscriptionCurrentPeriodStart = currentPeriodStart;
   user.subscriptionCurrentPeriodEnd = currentPeriodEnd;
   user.subscriptionMonthlyPrice = monthlyPrice;
+  ensureUserFreeItemCycle(user, currentPeriodStart || new Date());
 
   await user.save();
 
@@ -352,7 +376,9 @@ const syncUserWithStripeSubscription = async (
           options.currency ||
           "cad",
       ),
-      freeItemCycleKey: user.subscriptionFreeItemCycleKey || getCycleKey(),
+      freeItemCycleKey:
+        user.subscriptionFreeItemCycleKey ||
+        getSubscriptionFreeItemCycleKey(user, currentPeriodStart || new Date()),
       freeItemUsedCount: toSafeNumber(user.subscriptionFreeItemUsedCount, 0),
       savingsTotal: toSafeNumber(user.subscriptionSavingsTotal, 0),
       lastStripePayload: {
@@ -383,7 +409,7 @@ const setUserSubscriptionInactive = async (user, status = "canceled") => {
 };
 
 const buildUserSubscriptionSummary = (user, config = {}) => {
-  const currentCycleKey = getCycleKey();
+  const currentCycleKey = getSubscriptionFreeItemCycleKey(user, new Date());
   const usedInCurrentCycle =
     user?.subscriptionFreeItemCycleKey === currentCycleKey
       ? toSafeNumber(user?.subscriptionFreeItemUsedCount, 0)
@@ -485,7 +511,8 @@ const applyConfirmedOrderSubscriptionBenefits = async (order) => {
 
   if (order?.subscriptionBenefits?.freeItemApplied) {
     const cycleKey = String(
-      order?.subscriptionBenefits?.cycleKey || getCycleKey(new Date()),
+      order?.subscriptionBenefits?.cycleKey ||
+        getSubscriptionFreeItemCycleKey(user, new Date()),
     );
     if (user.subscriptionFreeItemCycleKey !== cycleKey) {
       user.subscriptionFreeItemCycleKey = cycleKey;
@@ -506,7 +533,9 @@ const applyConfirmedOrderSubscriptionBenefits = async (order) => {
       },
       {
         savingsTotal: toSafeNumber(user.subscriptionSavingsTotal, 0),
-        freeItemCycleKey: user.subscriptionFreeItemCycleKey || getCycleKey(),
+        freeItemCycleKey:
+          user.subscriptionFreeItemCycleKey ||
+          getSubscriptionFreeItemCycleKey(user, new Date()),
         freeItemUsedCount: toSafeNumber(user.subscriptionFreeItemUsedCount, 0),
       },
       { new: true },
@@ -521,6 +550,7 @@ module.exports = {
   isActiveStatus,
   isOpenStatus,
   getCycleKey,
+  getSubscriptionFreeItemCycleKey,
   isSubscriptionCurrentlyActive,
   buildUserSubscriptionSummary,
   ensureStripeCustomerForUser,

@@ -5,6 +5,7 @@ const {
   getOffer,
   deleteOffer,
   updateOffer,
+  triOffers,
   createSlugs,
   getOfferBySlug,
 } = require("../controllers/offers");
@@ -17,6 +18,7 @@ const { optimizeImage } = require("../middlewares/imageOptimizor");
 const router = express.Router();
 
 router.get("/", getOffers);
+router.put("/tri", triOffers);
 router.get("/slug", createSlugs);
 router.post(
   "/create",

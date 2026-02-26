@@ -6,6 +6,7 @@ const {
   deleteOrder,
   updateStatus,
   updateDeliveryProvider,
+  updateOrderRestaurant,
   updatePrice,
   reviewOrder,
   orderDelivered,
@@ -32,6 +33,7 @@ router.delete("/delete/:id", deleteOrder);
 router.put("/review/:id", reviewOrder);
 router.put("/update/status/:id", authStaff, updateStatus);
 router.put("/update/delivery_provider/:id", authStaff, updateDeliveryProvider);
+router.put("/update/restaurant/:id", authStaff, updateOrderRestaurant);
 router.put("/update/delivered/:orderId", orderDelivered);
 router.put("/update/price/:id", updatePrice);
 router.put("/update/payment_status/:id", updateOrderPaymentStatus);

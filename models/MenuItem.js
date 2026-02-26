@@ -22,10 +22,12 @@ const menuItemSchema = new Schema({
       ref: "Topping",
     },
   ],
-  customization_group: {
-    type: Schema.Types.ObjectId,
-    ref: "ToppingGroup",
-  },
+  customization_group: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: "ToppingGroup",
+    },
+  ],
 
   is_available: {
     type: Schema.Types.Boolean,

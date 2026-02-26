@@ -2,12 +2,21 @@ const Category = require("../models/Category");
 const Offer = require("../models/Offer");
 const Vedette = require("../models/Vedette");
 const HomeSetting = require("../models/HomeSetting");
+const normalizeOffersOrderService = require("../services/offersServices/normalizeOffersOrderService");
 
 const getHomeContent = async (req, res) => {
   try {
+    const { error: normalizeError } = await normalizeOffersOrderService();
+    if (normalizeError) {
+      return res.status(500).json({
+        success: false,
+        message: normalizeError,
+      });
+    }
+
     const [categories, offers, vedettes, homeSettings] = await Promise.all([
       Category.find().sort({ order: 1 }),
-      Offer.find().sort({ createdAt: -1 }).populate("items.item"),
+      Offer.find().sort({ order: 1, createdAt: 1 }).populate("items.item"),
       Vedette.find().sort({ order: 1 }).populate("menuItem"),
       HomeSetting.findOne()
         .sort({ createdAt: -1 })

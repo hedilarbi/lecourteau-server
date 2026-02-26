@@ -3,6 +3,7 @@ const getOffersService = require("../services/offersServices/getOffersService");
 const getOfferService = require("../services/offersServices/getOfferService");
 const deleteOfferService = require("../services/offersServices/deleteOfferService");
 const updateOfferService = require("../services/offersServices/updateOfferService");
+const triOffersService = require("../services/offersServices/triOffersService");
 const Offer = require("../models/Offer");
 const logWithTimestamp = (message) => {
   const timeStamp = new Date().toISOString();
@@ -134,6 +135,24 @@ const updateOffer = async (req, res) => {
   }
 };
 
+const triOffers = async (req, res) => {
+  const { list } = req.body;
+
+  try {
+    const { error } = await triOffersService(list);
+    if (error) {
+      return res.status(400).json({ success: false, message: error });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Offer order updated successfully",
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const createSlugs = async (req, res) => {
   try {
     const offers = await Offer.find();
@@ -185,6 +204,7 @@ module.exports = {
   getOffer,
   deleteOffer,
   updateOffer,
+  triOffers,
   createSlugs,
   getOfferBySlug,
 };

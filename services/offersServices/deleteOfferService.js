@@ -1,6 +1,7 @@
 const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../../firebase");
 const Offer = require("../../models/Offer");
+const normalizeOffersOrderService = require("./normalizeOffersOrderService");
 
 const deleteOfferService = async (id) => {
   try {
@@ -31,6 +32,11 @@ const deleteOfferService = async (id) => {
           await restaurant.save();
         })
       );
+    }
+
+    const { error: normalizeError } = await normalizeOffersOrderService();
+    if (normalizeError) {
+      return { error: normalizeError };
     }
 
     return { response: "Offer deleted" };

@@ -1,6 +1,7 @@
 const User = require("../../models/User");
 const {
   refreshUserSubscriptionFromStripe,
+  getSubscriptionFreeItemCycleKey,
 } = require("../subscriptionServices/subscriptionHelpers");
 
 const getUserService = async (id) => {
@@ -12,10 +13,10 @@ const getUserService = async (id) => {
     }
 
     const normalizedUser = response.toObject();
-    const now = new Date();
-    const currentCycleKey = `${now.getUTCFullYear()}-${String(
-      now.getUTCMonth() + 1,
-    ).padStart(2, "0")}`;
+    const currentCycleKey = getSubscriptionFreeItemCycleKey(
+      normalizedUser,
+      new Date(),
+    );
 
     const savingsTotal = Number(normalizedUser.subscriptionSavingsTotal);
     const amountPaidTotal = Number(normalizedUser.subscriptionAmountPaidTotal);

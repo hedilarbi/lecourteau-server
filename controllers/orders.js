@@ -15,6 +15,7 @@ const User = require("../models/User");
 const { default: mongoose } = require("mongoose");
 const { ON_GOING } = require("../utils/constants");
 const Audit = require("../models/Audit");
+const { Expo } = require("expo-server-sdk");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -212,6 +213,103 @@ const updateDeliveryProvider = async (req, res) => {
       success: true,
       message: "Fournisseur de livraison mis à jour avec succès.",
       data: updatedOrder,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+const updateOrderRestaurant = async (req, res) => {
+  const { id } = req.params;
+  const { restaurantId } = req.body;
+  const staff = req.staff;
+
+  try {
+    const staffId = staff?.id;
+    if (!staffId) {
+      return res.status(401).json({
+        success: false,
+        message: "Utilisateur non autorisé.",
+      });
+    }
+
+    if (!restaurantId || !mongoose.Types.ObjectId.isValid(restaurantId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Identifiant de succursale invalide.",
+      });
+    }
+
+    const RestaurantModel = mongoose.models.Restaurant;
+    const StaffModel = mongoose.models.Staff;
+    if (!RestaurantModel || !StaffModel) {
+      return res.status(500).json({
+        success: false,
+        message: "Modèles de succursale indisponibles.",
+      });
+    }
+
+    const [order, targetRestaurant] = await Promise.all([
+      Order.findById(id).select("code restaurant"),
+      RestaurantModel.findById(restaurantId).select("name"),
+    ]);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Commande introuvable.",
+      });
+    }
+
+    if (!targetRestaurant) {
+      return res.status(404).json({
+        success: false,
+        message: "Succursale introuvable.",
+      });
+    }
+
+    order.restaurant = targetRestaurant._id;
+    await order.save();
+
+    const targetStaffs = await StaffModel.find({
+      restaurant: targetRestaurant._id,
+      expo_token: { $exists: true, $nin: ["", null] },
+    }).select("expo_token");
+
+    const expo = new Expo({ useFcmV1: true });
+    const pushMessages = targetStaffs
+      .map((staffMember) => String(staffMember?.expo_token || "").trim())
+      .filter((tokenValue) => Expo.isExpoPushToken(tokenValue))
+      .map((tokenValue) => ({
+        to: tokenValue,
+        sound: "default",
+        title: "Commande transférée",
+        body: `Commande ${order.code || ""} transférée vers votre succursale.`,
+        data: { order_id: order._id },
+        priority: "high",
+      }));
+
+    if (pushMessages.length > 0) {
+      const chunks = expo.chunkPushNotifications(pushMessages);
+      for (const chunk of chunks) {
+        try {
+          await expo.sendPushNotificationsAsync(chunk);
+        } catch (error) {
+          // Best-effort notification
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Succursale de la commande mise à jour avec succès.",
+      data: {
+        orderId: order._id,
+        restaurant: {
+          _id: targetRestaurant._id,
+          name: targetRestaurant.name,
+        },
+      },
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -591,6 +689,7 @@ module.exports = {
   deleteOrder,
   updateStatus,
   updateDeliveryProvider,
+  updateOrderRestaurant,
   updatePrice,
   reviewOrder,
   orderDelivered,

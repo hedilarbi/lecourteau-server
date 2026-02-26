@@ -12,6 +12,84 @@ const updateMenuItemAvailabilityService = require("../services/menuItemsServices
 const getNewItemsService = require("../services/menuItemsServices/getNewItemsService");
 const triMenutItemsService = require("../services/menuItemsServices/triMenuItemsService");
 
+const parseCustomizationGroups = (value) => {
+  if (typeof value === "undefined") return undefined;
+  if (value === null || value === "") return [];
+
+  let parsedValue = value;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === "null" || trimmed === "undefined") {
+      return [];
+    }
+    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        parsedValue = JSON.parse(trimmed);
+      } catch (error) {
+        parsedValue = trimmed;
+      }
+    } else {
+      parsedValue = trimmed;
+    }
+  }
+
+  const values = Array.isArray(parsedValue) ? parsedValue : [parsedValue];
+
+  const normalized = values
+    .map((entry) => {
+      if (!entry) return null;
+      if (typeof entry === "object" && entry._id) {
+        return String(entry._id).trim();
+      }
+      if (typeof entry === "string") {
+        const trimmed = entry.trim();
+        if (
+          !trimmed ||
+          trimmed === "null" ||
+          trimmed === "undefined"
+        ) {
+          return null;
+        }
+        return trimmed;
+      }
+      return String(entry).trim();
+    })
+    .filter(Boolean);
+
+  return [...new Set(normalized)];
+};
+
+const parseCustomizations = (value) => {
+  if (typeof value === "undefined" || value === null || value === "") {
+    return [];
+  }
+
+  let parsedValue = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === "null" || trimmed === "undefined") {
+      return [];
+    }
+    try {
+      parsedValue = JSON.parse(trimmed);
+    } catch (error) {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(parsedValue)) return [];
+
+  return parsedValue
+    .map((custo) => {
+      if (!custo) return null;
+      if (typeof custo === "object" && custo._id) return { _id: custo._id };
+      if (typeof custo === "string") return { _id: custo };
+      return null;
+    })
+    .filter(Boolean);
+};
+
 const createMenuItem = async (req, res) => {
   let firebaseUrl = req.file ? req.file.firebaseUrl : null; // Set firebaseUrl if a file is uploaded
 
@@ -27,6 +105,7 @@ const createMenuItem = async (req, res) => {
   try {
     const pricesArray = JSON.parse(prices); // Parse the prices from the request body
     // Parse customization options
+    const customizationGroups = parseCustomizationGroups(customizationGroup);
 
     // Filter and format prices
     const newPrices = pricesArray
@@ -43,7 +122,7 @@ const createMenuItem = async (req, res) => {
       description,
 
       category,
-      customizationGroup
+      customizationGroups
     );
 
     if (error) {
@@ -100,9 +179,8 @@ const updateMenuItem = async (req, res) => {
       .map((item) => ({ size: item.size, price: parseFloat(item.price) }));
 
     // Parse customization array
-    const customizationArray = JSON.parse(customization).map((custo) => ({
-      _id: custo._id,
-    }));
+    const customizationArray = parseCustomizations(customization);
+    const customizationGroups = parseCustomizationGroups(customizationGroup);
 
     const { error, response } = await updateMenuItemService(
       id,
@@ -112,7 +190,7 @@ const updateMenuItem = async (req, res) => {
       description,
       category,
       customizationArray,
-      customizationGroup
+      customizationGroups
     );
 
     if (error) {

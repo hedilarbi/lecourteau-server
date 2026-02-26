@@ -1,14 +1,31 @@
 const { isValidObjectId } = require("mongoose");
 const MenuItem = require("../../models/MenuItem");
 
-const normalizeOptionalObjectId = (value) => {
+const normalizeCustomizationGroupIds = (value) => {
   if (typeof value === "undefined") return undefined;
-  if (value === null) return null;
-  if (typeof value === "object" && value._id) return value._id;
-  if (typeof value !== "string") return value;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === "null" || trimmed === "undefined") return null;
-  return trimmed;
+  if (value === null || value === "") return [];
+
+  const rawList = Array.isArray(value) ? value : [value];
+  const normalized = rawList
+    .map((entry) => {
+      if (!entry) return null;
+      if (typeof entry === "object" && entry._id) return String(entry._id).trim();
+      if (typeof entry === "string") {
+        const trimmed = entry.trim();
+        if (
+          !trimmed ||
+          trimmed === "null" ||
+          trimmed === "undefined"
+        ) {
+          return null;
+        }
+        return trimmed;
+      }
+      return String(entry).trim();
+    })
+    .filter(Boolean);
+
+  return [...new Set(normalized)];
 };
 
 const updateMenuItemService = async (
@@ -30,25 +47,30 @@ const updateMenuItemService = async (
       customization,
     };
 
-    if (firebaseUrl) {
+  if (firebaseUrl) {
       updateData.image = firebaseUrl;
     }
 
-    const normalizedCustomizationGroup =
-      normalizeOptionalObjectId(customizationGroup);
-    if (typeof normalizedCustomizationGroup !== "undefined") {
-      if (
-        normalizedCustomizationGroup !== null &&
-        !isValidObjectId(normalizedCustomizationGroup)
-      ) {
+    const normalizedCustomizationGroups =
+      normalizeCustomizationGroupIds(customizationGroup);
+    if (typeof normalizedCustomizationGroups !== "undefined") {
+      const hasInvalidCustomizationGroup = normalizedCustomizationGroups.some(
+        (groupId) => !isValidObjectId(groupId),
+      );
+      if (hasInvalidCustomizationGroup) {
         return { error: "Invalid customization group id" };
       }
-      updateData.customization_group = normalizedCustomizationGroup;
+      updateData.customization_group = normalizedCustomizationGroups;
     }
 
     const response = await MenuItem.findByIdAndUpdate(id, updateData, {
       new: true,
-    }).populate("customization category");
+    })
+      .populate("customization category")
+      .populate({
+        path: "customization_group",
+        populate: { path: "toppings" },
+      });
 
     return { response };
   } catch (err) {

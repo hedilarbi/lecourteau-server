@@ -2,6 +2,7 @@ const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const {
   refreshUserSubscriptionFromStripe,
+  getSubscriptionFreeItemCycleKey,
 } = require("../subscriptionServices/subscriptionHelpers");
 
 const getUserByTokenService = async (token) => {
@@ -16,10 +17,10 @@ const getUserByTokenService = async (token) => {
       return { error: "User not found" };
     }
     const normalizedUser = user.toObject();
-    const now = new Date();
-    const currentCycleKey = `${now.getUTCFullYear()}-${String(
-      now.getUTCMonth() + 1,
-    ).padStart(2, "0")}`;
+    const currentCycleKey = getSubscriptionFreeItemCycleKey(
+      normalizedUser,
+      new Date(),
+    );
 
     const savingsTotal = Number(normalizedUser.subscriptionSavingsTotal);
     const freeItemUsedCount =

@@ -4,6 +4,10 @@ const offerSchema = new Schema({
   name: String,
   image: String,
   slug: String,
+  order: {
+    type: Number,
+    default: 1,
+  },
   items: [
     {
       item: {

@@ -27,7 +27,9 @@ const createMenuItemService = async (
       category,
       slug,
       order: menuItemsCount, // Set the order based on the count
-      customization_group: customizationGroup || null,
+      customization_group: Array.isArray(customizationGroup)
+        ? customizationGroup
+        : [],
     });
 
     const savedMenuItem = await newMenuItem.save(); // Save the new menu item

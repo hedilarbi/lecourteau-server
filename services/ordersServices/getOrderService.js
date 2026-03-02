@@ -5,12 +5,24 @@ const getOrderService = async (id) => {
     const response = await Order.findById(id)
       .populate({
         path: "orderItems",
-        populate: "customizations item",
+        populate: [
+          {
+            path: "item",
+            select: "name",
+          },
+          {
+            path: "customizations",
+            select: "name",
+          },
+        ],
       })
       .populate({
         path: "offers",
         populate: [
-          { path: "offer" },
+          {
+            path: "offer",
+            select: "name",
+          },
           {
             path: "items.item",
             select: "name",

@@ -180,6 +180,7 @@ const getRestaurantStats = async (req, res) => {
 const getAnalyticsStats = async (req, res) => {
   try {
     const restaurantId = String(req.query?.restaurantId || "").trim();
+    const orderType = String(req.query?.orderType || "all").trim();
     if (restaurantId && !toObjectId(restaurantId)) {
       return res.status(400).json({
         success: false,
@@ -192,6 +193,7 @@ const getAnalyticsStats = async (req, res) => {
       startDate,
       endDate,
       restaurantId,
+      orderType,
       timezone: DEFAULT_TIMEZONE,
       topProductsLimit: 10,
       includeFrequency: false,
@@ -204,6 +206,7 @@ const getAnalyticsStats = async (req, res) => {
       filter: {
         preset,
         restaurantId: restaurantId || "",
+        orderType,
         startDate: startDate || null,
         endDate: endDate || null,
       },

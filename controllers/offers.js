@@ -4,6 +4,7 @@ const getOfferService = require("../services/offersServices/getOfferService");
 const deleteOfferService = require("../services/offersServices/deleteOfferService");
 const updateOfferService = require("../services/offersServices/updateOfferService");
 const triOffersService = require("../services/offersServices/triOffersService");
+const initializeOffersOrderService = require("../services/offersServices/initializeOffersOrderService");
 const Offer = require("../models/Offer");
 const logWithTimestamp = (message) => {
   const timeStamp = new Date().toISOString();
@@ -153,6 +154,23 @@ const triOffers = async (req, res) => {
   }
 };
 
+const initializeOffersOrder = async (req, res) => {
+  try {
+    const { response, error } = await initializeOffersOrderService();
+    if (error) {
+      return res.status(500).json({ success: false, message: error });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Offers order initialized successfully",
+      data: response,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const createSlugs = async (req, res) => {
   try {
     const offers = await Offer.find();
@@ -205,6 +223,7 @@ module.exports = {
   deleteOffer,
   updateOffer,
   triOffers,
+  initializeOffersOrder,
   createSlugs,
   getOfferBySlug,
 };

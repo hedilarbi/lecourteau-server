@@ -119,4 +119,148 @@ function formatDateToFrench() {
   return `${day} ${month} ${year}`;
 }
 
-module.exports = { generateOrderConfirmationEmail };
+const formatMoneyForMail = (amount, currency = "CAD") => {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) return `0.00 ${String(currency || "CAD").toUpperCase()}`;
+
+  try {
+    return new Intl.NumberFormat("fr-CA", {
+      style: "currency",
+      currency: String(currency || "CAD").toUpperCase(),
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(numericAmount);
+  } catch (error) {
+    return `${numericAmount.toFixed(2)} ${String(currency || "CAD").toUpperCase()}`;
+  }
+};
+
+const formatDateForMail = (value) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleDateString("fr-CA", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+};
+
+const wrapSimpleMail = (title, subtitle, bodyHtml) => `
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#111827;">
+  <div style="max-width:640px;margin:0 auto;padding:24px;">
+    <div style="background:#111827;color:#ffffff;padding:20px 24px;border-radius:14px 14px 0 0;">
+      <h1 style="margin:0;font-size:22px;line-height:28px;">${title}</h1>
+      <p style="margin:8px 0 0;font-size:14px;opacity:0.9;">${subtitle}</p>
+    </div>
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 14px 14px;">
+      ${bodyHtml}
+      <p style="margin:20px 0 0;font-size:12px;color:#6b7280;">
+        Équipe CLUB COURTEAU
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+const generateSubscriptionActivationEmail = ({
+  userName,
+  monthlyPrice,
+  currency,
+  currentPeriodEnd,
+}) => {
+  const safeName = userName || "Client";
+  const priceLabel = formatMoneyForMail(monthlyPrice, currency);
+  const periodEndLabel = formatDateForMail(currentPeriodEnd);
+
+  return wrapSimpleMail(
+    "Bienvenue au CLUB COURTEAU",
+    "Votre abonnement est maintenant actif.",
+    `
+      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 12px;font-size:15px;">
+        Félicitations, votre abonnement <strong>CLUB COURTEAU</strong> est activé.
+      </p>
+      <p style="margin:0 0 8px;font-size:14px;">
+        Prix mensuel: <strong>${priceLabel}</strong>
+      </p>
+      <p style="margin:0;font-size:14px;">
+        Prochaine échéance: <strong>${periodEndLabel}</strong>
+      </p>
+    `,
+  );
+};
+
+const generateSubscriptionRenewalSuccessEmail = ({
+  userName,
+  amountPaid,
+  currency,
+  currentPeriodEnd,
+}) => {
+  const safeName = userName || "Client";
+  const amountLabel = formatMoneyForMail(amountPaid, currency);
+  const periodEndLabel = formatDateForMail(currentPeriodEnd);
+
+  return wrapSimpleMail(
+    "Renouvellement confirmé",
+    "Votre abonnement CLUB COURTEAU a été renouvelé.",
+    `
+      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 12px;font-size:15px;">
+        Votre paiement de renouvellement a été accepté.
+      </p>
+      <p style="margin:0 0 8px;font-size:14px;">
+        Montant payé: <strong>${amountLabel}</strong>
+      </p>
+      <p style="margin:0;font-size:14px;">
+        Nouvelle échéance: <strong>${periodEndLabel}</strong>
+      </p>
+    `,
+  );
+};
+
+const generateSubscriptionRenewalFailedEmail = ({
+  userName,
+  amountDue,
+  currency,
+  nextAttemptDate,
+}) => {
+  const safeName = userName || "Client";
+  const amountLabel = formatMoneyForMail(amountDue, currency);
+  const nextAttemptLabel = formatDateForMail(nextAttemptDate);
+
+  return wrapSimpleMail(
+    "Paiement de renouvellement échoué",
+    "Votre abonnement reste en attente de paiement.",
+    `
+      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 12px;font-size:15px;">
+        Le paiement de renouvellement de votre abonnement <strong>CLUB COURTEAU</strong> a échoué.
+      </p>
+      <p style="margin:0 0 8px;font-size:14px;">
+        Montant dû: <strong>${amountLabel}</strong>
+      </p>
+      <p style="margin:0 0 8px;font-size:14px;">
+        Prochaine tentative Stripe: <strong>${nextAttemptLabel}</strong>
+      </p>
+      <p style="margin:0;font-size:14px;">
+        Vous pouvez mettre à jour votre carte dans l'application, section <strong>Mon abonnement</strong>.
+      </p>
+    `,
+  );
+};
+
+module.exports = {
+  generateOrderConfirmationEmail,
+  generateSubscriptionActivationEmail,
+  generateSubscriptionRenewalSuccessEmail,
+  generateSubscriptionRenewalFailedEmail,
+};

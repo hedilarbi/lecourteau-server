@@ -6,6 +6,7 @@ const {
   deleteOffer,
   updateOffer,
   triOffers,
+  initializeOffersOrder,
   createSlugs,
   getOfferBySlug,
 } = require("../controllers/offers");
@@ -19,6 +20,7 @@ const router = express.Router();
 
 router.get("/", getOffers);
 router.put("/tri", triOffers);
+router.post("/initialize-order", initializeOffersOrder);
 router.get("/slug", createSlugs);
 router.post(
   "/create",

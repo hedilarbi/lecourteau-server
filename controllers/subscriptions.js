@@ -15,6 +15,11 @@ const {
   refreshUserSubscriptionFromStripe,
   setUserSubscriptionInactive,
 } = require("../services/subscriptionServices/subscriptionHelpers");
+const {
+  sendSubscriptionActivationEmail,
+  sendSubscriptionRenewalSuccessEmail,
+  sendSubscriptionRenewalFailedEmail,
+} = require("../services/subscriptionServices/subscriptionMailService");
 
 const HEDI_SHARE_PERCENT = 10;
 const ACTIVE_STATUSES = new Set(["active", "trialing"]);
@@ -25,6 +30,23 @@ const OPEN_STATUSES = new Set([
   "past_due",
   "unpaid",
 ]);
+
+const SUBSCRIPTION_3DS_PAYMENT_SETTINGS = {
+  payment_method_types: ["card"],
+  payment_method_options: {
+    card: {
+      request_three_d_secure: "any",
+    },
+  },
+};
+
+const logWithTimestamp = (message, extra = {}) => {
+  const timeStamp = new Date().toISOString();
+  console.error(
+    `${timeStamp} - ${message}`,
+    Object.keys(extra).length ? extra : "",
+  );
+};
 
 const toDateFromStripeTimestamp = (timestamp) => {
   if (!timestamp || !Number.isFinite(Number(timestamp))) return null;
@@ -354,7 +376,11 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
     stripeInvoiceId: invoiceId,
   }).lean();
   if (existingPayment) {
-    return existingPayment;
+    return {
+      payment: existingPayment,
+      isNew: false,
+      userId: existingPayment?.user || null,
+    };
   }
 
   const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
@@ -397,7 +423,14 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
     });
   } catch (error) {
     if (error?.code === 11000) {
-      return SubscriptionPayment.findOne({ stripeInvoiceId: invoiceId }).lean();
+      const duplicatedPayment = await SubscriptionPayment.findOne({
+        stripeInvoiceId: invoiceId,
+      }).lean();
+      return {
+        payment: duplicatedPayment,
+        isNew: false,
+        userId: duplicatedPayment?.user || null,
+      };
     }
     throw error;
   }
@@ -410,84 +443,108 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
     Math.max(0, Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0))) + 1;
   await user.save();
 
-  return createdPayment;
+  return {
+    payment: createdPayment?.toObject ? createdPayment.toObject() : createdPayment,
+    isNew: true,
+    userId: user?._id || null,
+  };
 };
 
-const syncMissingSubscriptionPaymentsForUsers = async (users = []) => {
-  const targets = (users || [])
-    .filter((user) => {
-      const subscriptionId = String(
-        user?.subscriptionStripeSubscriptionId || "",
-      ).trim();
-      if (!subscriptionId) return false;
+const runBackgroundJobs = (jobs = []) => {
+  if (!Array.isArray(jobs) || jobs.length === 0) return;
 
-      const paidTotal = roundMoney(
-        toSafeNumber(user?.subscriptionAmountPaidTotal, 0),
-        0,
-      );
-      const paymentsCount = Math.max(
-        0,
-        Math.floor(toSafeNumber(user?.subscriptionPaymentsCount, 0)),
-      );
-      return paidTotal <= 0 && paymentsCount <= 0;
-    });
-
-  for (const user of targets) {
-    try {
-      let startingAfter = null;
-      let hasMore = true;
-      let guard = 0;
-
-      while (hasMore && guard < 10) {
-        const invoicesPage = await stripe.invoices.list({
-          subscription: user.subscriptionStripeSubscriptionId,
-          limit: 100,
-          ...(startingAfter ? { starting_after: startingAfter } : {}),
+  process.nextTick(async () => {
+    for (const job of jobs) {
+      try {
+        await job();
+      } catch (error) {
+        logWithTimestamp("Subscription background job failed", {
+          error: error.message,
         });
-
-        const invoices = Array.isArray(invoicesPage?.data)
-          ? invoicesPage.data
-          : [];
-
-        for (const invoice of invoices) {
-          const amountPaid = roundMoney(
-            toSafeNumber(invoice?.amount_paid, 0) / 100,
-            0,
-          );
-          if (invoice?.status === "paid" || amountPaid > 0) {
-            await recordSubscriptionPaymentFromInvoice(invoice);
-          }
-        }
-
-        hasMore = Boolean(invoicesPage?.has_more);
-        const lastInvoiceId = invoices.length
-          ? String(invoices[invoices.length - 1]?.id || "").trim()
-          : "";
-        if (!hasMore || !lastInvoiceId) {
-          break;
-        }
-        startingAfter = lastInvoiceId;
-        guard += 1;
       }
-    } catch (error) {
-      // No-op: best-effort backfill for admin stats only.
     }
+  });
+};
+
+const createPaymentSuccessEmailJob = (paymentRecord) => async () => {
+  if (!paymentRecord?.user) return;
+
+  const user = await User.findById(paymentRecord.user).select(
+    "name email subscriptionCurrentPeriodEnd",
+  );
+  if (!user?.email) return;
+
+  const paymentType = String(paymentRecord.paymentType || "")
+    .trim()
+    .toLowerCase();
+  const amount = roundMoney(paymentRecord.amount, 0);
+  const currency = normalizeCurrency(paymentRecord.currency || "cad");
+
+  if (paymentType === "activation") {
+    await sendSubscriptionActivationEmail({
+      userEmail: user.email,
+      userName: user.name || "Client",
+      monthlyPrice: amount,
+      currency,
+      currentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
+    });
+    return;
+  }
+
+  if (paymentType === "renewal") {
+    await sendSubscriptionRenewalSuccessEmail({
+      userEmail: user.email,
+      userName: user.name || "Client",
+      amountPaid: amount,
+      currency,
+      currentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
+    });
   }
 };
 
+const createRenewalFailureEmailJob = (invoice) => async () => {
+  const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
+  if (!subscriptionId) return;
+
+  const user = await resolveUserFromInvoice(invoice, subscriptionId);
+  if (!user?.email) return;
+
+  const amountDue = roundMoney(toSafeNumber(invoice?.amount_due, 0) / 100, 0);
+  const nextAttemptDate = toDateFromStripeTimestamp(invoice?.next_payment_attempt);
+
+  await sendSubscriptionRenewalFailedEmail({
+    userEmail: user.email,
+    userName: user.name || "Client",
+    amountDue,
+    currency: normalizeCurrency(invoice?.currency || "cad"),
+    nextAttemptDate,
+  });
+};
+
 const getHediBalanceSummary = async () => {
-  const [creditAgg] = await SubscriptionPayment.aggregate([
+  const [usersAgg] = await User.aggregate([
     {
       $group: {
         _id: null,
-        totalRevenue: { $sum: "$amount" },
-        totalPaymentsCount: { $sum: 1 },
-        totalRenewalsCount: {
+        totalRevenue: {
           $sum: {
-            $cond: [{ $eq: ["$paymentType", "renewal"] }, 1, 0],
+            $ifNull: ["$subscriptionAmountPaidTotal", 0],
           },
         },
-        totalHediCredits: { $sum: "$hediShareAmount" },
+        totalPaymentsCount: {
+          $sum: {
+            $ifNull: ["$subscriptionPaymentsCount", 0],
+          },
+        },
+        totalRenewalsCount: {
+          $sum: {
+            $cond: [
+              { $gt: [{ $ifNull: ["$subscriptionPaymentsCount", 0] }, 1] },
+              { $subtract: [{ $ifNull: ["$subscriptionPaymentsCount", 0] }, 1] },
+              0,
+            ],
+          },
+        },
       },
     },
   ]);
@@ -501,16 +558,19 @@ const getHediBalanceSummary = async () => {
     },
   ]);
 
-  const totalRevenue = roundMoney(creditAgg?.totalRevenue, 0);
+  const totalRevenue = roundMoney(usersAgg?.totalRevenue, 0);
   const totalPaymentsCount = Math.max(
     0,
-    Math.floor(toSafeNumber(creditAgg?.totalPaymentsCount, 0)),
+    Math.floor(toSafeNumber(usersAgg?.totalPaymentsCount, 0)),
   );
   const totalRenewalsCount = Math.max(
     0,
-    Math.floor(toSafeNumber(creditAgg?.totalRenewalsCount, 0)),
+    Math.floor(toSafeNumber(usersAgg?.totalRenewalsCount, 0)),
   );
-  const totalHediCredits = roundMoney(creditAgg?.totalHediCredits, 0);
+  const totalHediCredits = roundMoney(
+    (totalRevenue * HEDI_SHARE_PERCENT) / 100,
+    0,
+  );
   const totalPayouts = roundMoney(payoutAgg?.totalPayouts, 0);
   const balance = roundMoney(totalHediCredits - totalPayouts, 0);
 
@@ -561,6 +621,8 @@ const handleStripeWebhook = async (req, res) => {
   }
 
   try {
+    const backgroundJobs = [];
+
     switch (event.type) {
       case "customer.subscription.created":
       case "customer.subscription.updated":
@@ -572,22 +634,29 @@ const handleStripeWebhook = async (req, res) => {
       case "invoice.paid":
       case "invoice.payment_succeeded": {
         const invoice = event.data?.object;
-        await recordSubscriptionPaymentFromInvoice(invoice);
+        const paymentResult = await recordSubscriptionPaymentFromInvoice(invoice);
         const invoiceSubscriptionId = resolveStripeSubscriptionId(
           invoice?.subscription,
         );
         if (invoiceSubscriptionId) {
           await syncSubscriptionFromWebhook(invoiceSubscriptionId);
         }
+        if (paymentResult?.isNew && paymentResult?.payment) {
+          backgroundJobs.push(createPaymentSuccessEmailJob(paymentResult.payment));
+        }
         break;
       }
       case "invoice.payment_failed": {
         const invoice = event.data?.object;
+        const paymentType = resolvePaymentTypeFromInvoice(invoice);
         const invoiceSubscriptionId = resolveStripeSubscriptionId(
           invoice?.subscription,
         );
         if (invoiceSubscriptionId) {
           await syncSubscriptionFromWebhook(invoiceSubscriptionId);
+        }
+        if (paymentType === "renewal") {
+          backgroundJobs.push(createRenewalFailureEmailJob(invoice));
         }
         break;
       }
@@ -595,7 +664,9 @@ const handleStripeWebhook = async (req, res) => {
         break;
     }
 
-    return res.status(200).json({ received: true });
+    res.status(200).json({ received: true });
+    runBackgroundJobs(backgroundJobs);
+    return;
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -795,26 +866,15 @@ const createSubscription = async (req, res) => {
         );
         if (isOpenStatus(existing?.status)) {
           const desiredCancelAtPeriodEnd = !autoRenew;
-          let synchronizedSubscription = existing;
-
-          if (existing.cancel_at_period_end !== desiredCancelAtPeriodEnd) {
-            synchronizedSubscription = await stripe.subscriptions.update(
-              existing.id,
-              {
-                cancel_at_period_end: desiredCancelAtPeriodEnd,
-                default_payment_method: resolvedPaymentMethodId,
-                expand: ["items.data.price", "latest_invoice.payment_intent"],
-              },
-            );
-          } else if (existing.default_payment_method !== resolvedPaymentMethodId) {
-            synchronizedSubscription = await stripe.subscriptions.update(
-              existing.id,
-              {
-                default_payment_method: resolvedPaymentMethodId,
-                expand: ["items.data.price", "latest_invoice.payment_intent"],
-              },
-            );
-          }
+          const synchronizedSubscription = await stripe.subscriptions.update(
+            existing.id,
+            {
+              cancel_at_period_end: desiredCancelAtPeriodEnd,
+              default_payment_method: resolvedPaymentMethodId,
+              payment_settings: SUBSCRIPTION_3DS_PAYMENT_SETTINGS,
+              expand: ["items.data.price", "latest_invoice.payment_intent"],
+            },
+          );
 
           await syncUserWithStripeSubscription(user, synchronizedSubscription, {
             monthlyPrice,
@@ -836,6 +896,9 @@ const createSubscription = async (req, res) => {
                 paymentIntentId:
                   synchronizedSubscription.latest_invoice?.payment_intent?.id ||
                   null,
+                paymentIntentStatus:
+                  synchronizedSubscription.latest_invoice?.payment_intent
+                    ?.status || null,
                 clientSecret:
                   synchronizedSubscription.latest_invoice?.payment_intent
                     ?.client_secret || null,
@@ -859,6 +922,7 @@ const createSubscription = async (req, res) => {
       default_payment_method: resolvedPaymentMethodId,
       payment_behavior: "default_incomplete",
       collection_method: "charge_automatically",
+      payment_settings: SUBSCRIPTION_3DS_PAYMENT_SETTINGS,
       cancel_at_period_end: !autoRenew,
       metadata: {
         userId: String(user._id),
@@ -886,6 +950,7 @@ const createSubscription = async (req, res) => {
           subscriptionId: createdSubscription.id,
           status: createdSubscription.status,
           paymentIntentId: paymentIntent?.id || null,
+          paymentIntentStatus: paymentIntent?.status || null,
           clientSecret: paymentIntent?.client_secret || null,
           requiresAction: paymentIntent?.status === "requires_action",
         },
@@ -935,6 +1000,23 @@ const confirmSubscriptionPayment = async (req, res) => {
           data: {
             clientSecret: paymentIntent.client_secret,
             paymentIntentId: paymentIntent.id,
+            paymentIntentStatus: paymentIntent.status,
+            subscriptionId:
+              subscriptionId || user.subscriptionStripeSubscriptionId || null,
+          },
+        });
+      }
+
+      if (paymentIntent?.status === "requires_payment_method") {
+        return res.status(409).json({
+          success: false,
+          message:
+            "Le paiement a échoué. Veuillez utiliser une autre carte ou réessayer.",
+          data: {
+            paymentIntentId: paymentIntent.id,
+            paymentIntentStatus: paymentIntent.status,
+            subscriptionId:
+              subscriptionId || user.subscriptionStripeSubscriptionId || null,
           },
         });
       }
@@ -965,6 +1047,7 @@ const confirmSubscriptionPayment = async (req, res) => {
       }
     }
 
+    let fallbackPaymentResult = null;
     try {
       const latestInvoiceId = resolveStripeInvoiceId(
         stripeSubscription?.latest_invoice,
@@ -978,7 +1061,9 @@ const confirmSubscriptionPayment = async (req, res) => {
           0,
         );
         if (latestInvoice?.status === "paid" || amountPaid > 0) {
-          await recordSubscriptionPaymentFromInvoice(latestInvoice);
+          fallbackPaymentResult = await recordSubscriptionPaymentFromInvoice(
+            latestInvoice,
+          );
         }
       }
     } catch (error) {
@@ -998,6 +1083,7 @@ const confirmSubscriptionPayment = async (req, res) => {
           data: {
             clientSecret: latestPaymentIntent.client_secret,
             paymentIntentId: latestPaymentIntent.id,
+            paymentIntentStatus: latestPaymentIntent.status,
             subscriptionId: stripeSubscription?.id || resolvedSubscriptionId,
             status: stripeStatus || "incomplete",
           },
@@ -1021,7 +1107,7 @@ const confirmSubscriptionPayment = async (req, res) => {
     const setting = await getOrCreateSettingDocument();
     const config = formatSubscriptionConfig(setting);
 
-    return res.status(200).json({
+    const responsePayload = {
       success: true,
       data: {
         subscription: buildUserSubscriptionSummary(refreshedUser, config),
@@ -1030,6 +1116,8 @@ const confirmSubscriptionPayment = async (req, res) => {
           status: stripeSubscription.status,
           paymentIntentId:
             stripeSubscription.latest_invoice?.payment_intent?.id || null,
+          paymentIntentStatus:
+            stripeSubscription.latest_invoice?.payment_intent?.status || null,
           clientSecret:
             stripeSubscription.latest_invoice?.payment_intent?.client_secret ||
             null,
@@ -1038,7 +1126,18 @@ const confirmSubscriptionPayment = async (req, res) => {
             "requires_action",
         },
       },
-    });
+    };
+
+    const backgroundJobs = [];
+    if (fallbackPaymentResult?.isNew && fallbackPaymentResult?.payment) {
+      backgroundJobs.push(
+        createPaymentSuccessEmailJob(fallbackPaymentResult.payment),
+      );
+    }
+
+    res.status(200).json(responsePayload);
+    runBackgroundJobs(backgroundJobs);
+    return;
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -1214,13 +1313,6 @@ const getSubscriptionAdminStats = async (req, res) => {
       ],
     };
 
-    const usersNeedingBackfill = await User.find(subscribedUsersQuery)
-      .select(
-        "subscriptionStripeSubscriptionId subscriptionAmountPaidTotal subscriptionPaymentsCount",
-      )
-      .lean();
-    await syncMissingSubscriptionPaymentsForUsers(usersNeedingBackfill);
-
     const hediSummary = await getHediBalanceSummary();
 
     const subscribedUsers = await User.find(subscribedUsersQuery)
@@ -1229,19 +1321,6 @@ const getSubscriptionAdminStats = async (req, res) => {
       )
       .sort({ subscriptionAmountPaidTotal: -1, createdAt: -1 })
       .lean();
-
-    const paymentStatsByUser = await SubscriptionPayment.aggregate([
-      {
-        $group: {
-          _id: "$user",
-          totalPaid: { $sum: "$amount" },
-          paymentsCount: { $sum: 1 },
-        },
-      },
-    ]);
-    const paymentStatsMap = new Map(
-      paymentStatsByUser.map((entry) => [String(entry._id), entry]),
-    );
 
     const activeSubscribersCount = subscribedUsers.reduce((count, user) => {
       if (isUserSubscriptionActive(user)) {
@@ -1258,19 +1337,10 @@ const getSubscriptionAdminStats = async (req, res) => {
     }, 0);
 
     const normalizedUsers = subscribedUsers.map((user) => {
-      const paymentStats = paymentStatsMap.get(String(user._id));
-      const totalPaid = roundMoney(
-        paymentStats?.totalPaid ?? user.subscriptionAmountPaidTotal,
-        0,
-      );
+      const totalPaid = roundMoney(user.subscriptionAmountPaidTotal, 0);
       const paymentCount = Math.max(
         0,
-        Math.floor(
-          toSafeNumber(
-            paymentStats?.paymentsCount ?? user.subscriptionPaymentsCount,
-            0,
-          ),
-        ),
+        Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0)),
       );
       const renewalsCount = Math.max(0, paymentCount - 1);
 

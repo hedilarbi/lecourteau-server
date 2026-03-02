@@ -54,6 +54,37 @@ const toObjectId = (value) => {
   return new mongoose.Types.ObjectId(value);
 };
 
+const getOrderTypeExpressions = () => {
+  const orderTypeExpr = {
+    $toLower: {
+      $trim: {
+        input: { $ifNull: ["$type", ""] },
+      },
+    },
+  };
+
+  const isDeliveryExpr = {
+    $or: [
+      { $regexMatch: { input: orderTypeExpr, regex: "delivery" } },
+      { $regexMatch: { input: orderTypeExpr, regex: "livraison" } },
+    ],
+  };
+
+  const isPickupExpr = {
+    $or: [
+      { $regexMatch: { input: orderTypeExpr, regex: "pick\\s*-?\\s*up" } },
+      { $regexMatch: { input: orderTypeExpr, regex: "ramassage" } },
+      { $regexMatch: { input: orderTypeExpr, regex: "takeout" } },
+      { $regexMatch: { input: orderTypeExpr, regex: "take-away" } },
+    ],
+  };
+
+  return {
+    isDeliveryExpr,
+    isPickupExpr,
+  };
+};
+
 const resolveDateRange = (query = {}, defaultPreset = "day") => {
   const preset = String(query?.preset || defaultPreset || "day")
     .trim()
@@ -131,7 +162,13 @@ const getRangeDays = (startDate, endDate) => {
   return Math.max(1, Math.ceil((diff + 1) / DAY_MS));
 };
 
-const buildOrdersMatch = ({ startDate, endDate, restaurantId, userId }) => {
+const buildOrdersMatch = ({
+  startDate,
+  endDate,
+  restaurantId,
+  userId,
+  orderType = "all",
+}) => {
   const normalizedStatusExpr = {
     $toLower: {
       $trim: {
@@ -148,11 +185,35 @@ const buildOrdersMatch = ({ startDate, endDate, restaurantId, userId }) => {
     "canceled",
   ];
 
-  const match = {
-    confirmed: true,
-    $expr: {
+  const { isDeliveryExpr, isPickupExpr } = getOrderTypeExpressions();
+  const normalizedOrderType = String(orderType || "all")
+    .trim()
+    .toLowerCase();
+  const shouldFilterDelivery = ["delivery", "livraison"].includes(
+    normalizedOrderType,
+  );
+  const shouldFilterPickup = ["pickup", "pick up", "pick-up", "ramassage"].includes(
+    normalizedOrderType,
+  );
+
+  const exprConditions = [
+    {
       $not: [{ $in: [normalizedStatusExpr, canceledStatuses] }],
     },
+  ];
+
+  if (shouldFilterDelivery) {
+    exprConditions.push(isDeliveryExpr);
+  } else if (shouldFilterPickup) {
+    exprConditions.push(isPickupExpr);
+  }
+
+  const match = {
+    confirmed: true,
+    $expr:
+      exprConditions.length === 1
+        ? exprConditions[0]
+        : { $and: exprConditions },
   };
 
   if (startDate instanceof Date && endDate instanceof Date) {
@@ -221,28 +282,20 @@ const buildOrdersAnalytics = async ({
   endDate = null,
   restaurantId = "",
   userId = "",
+  orderType = "all",
   timezone = DEFAULT_TIMEZONE,
   topProductsLimit = 10,
   includeFrequency = true,
 }) => {
   const Order = mongoose.models.Order;
-  const match = buildOrdersMatch({ startDate, endDate, restaurantId, userId });
-
-  const orderTypeExpr = { $toLower: { $ifNull: ["$type", ""] } };
-  const isDeliveryExpr = {
-    $or: [
-      { $regexMatch: { input: orderTypeExpr, regex: "delivery" } },
-      { $regexMatch: { input: orderTypeExpr, regex: "livraison" } },
-    ],
-  };
-  const isPickupExpr = {
-    $or: [
-      { $regexMatch: { input: orderTypeExpr, regex: "pick\\s*-?\\s*up" } },
-      { $regexMatch: { input: orderTypeExpr, regex: "ramassage" } },
-      { $regexMatch: { input: orderTypeExpr, regex: "takeout" } },
-      { $regexMatch: { input: orderTypeExpr, regex: "take-away" } },
-    ],
-  };
+  const match = buildOrdersMatch({
+    startDate,
+    endDate,
+    restaurantId,
+    userId,
+    orderType,
+  });
+  const { isDeliveryExpr, isPickupExpr } = getOrderTypeExpressions();
 
   const [
     summaryAgg,
@@ -506,7 +559,7 @@ const buildOrdersAnalytics = async ({
     const existing = ordersByHourMap.get(hour);
     return {
       hour,
-      label: `${String(hour).padStart(2, "0")}h`,
+      label: `${String(hour).padStart(2, "0")}:00`,
       orders: existing?.orders || 0,
       revenue: existing?.revenue || 0,
     };

@@ -183,6 +183,37 @@ const orderSchema = new Schema({
       default: 0,
     },
   },
+  birthdayBenefits: {
+    isApplied: {
+      type: Boolean,
+      default: false,
+    },
+    freeItemApplied: {
+      type: Boolean,
+      default: false,
+    },
+    freeItemAmount: {
+      type: Number,
+      default: 0,
+    },
+    freeItemBasePrice: {
+      type: Number,
+      default: 0,
+    },
+    freeItemMenuItemId: {
+      type: Schema.Types.ObjectId,
+      ref: "MenuItem",
+      default: null,
+    },
+    freeItemLabel: {
+      type: String,
+      default: "",
+    },
+    cycleYear: {
+      type: Number,
+      default: 0,
+    },
+  },
   scheduled: {
     isScheduled: {
       type: Boolean,

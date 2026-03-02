@@ -15,6 +15,9 @@ const nodemailer = require("nodemailer");
 const {
   applyConfirmedOrderSubscriptionBenefits,
 } = require("../subscriptionServices/subscriptionHelpers");
+const {
+  applyConfirmedOrderBirthdayBenefits,
+} = require("../birthdayServices/birthdayBenefitsService");
 
 const logWithTimestamp = (msg, extra = {}) => {
   const timeStamp = new Date().toISOString();
@@ -292,4 +295,5 @@ async function finalizeLoyaltyAndPromo(order) {
 
   await user.save();
   await applyConfirmedOrderSubscriptionBenefits(order);
+  await applyConfirmedOrderBirthdayBenefits(order);
 }

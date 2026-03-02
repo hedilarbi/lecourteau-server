@@ -84,6 +84,18 @@ const userSchema = new Schema({
     type: Number,
     default: 0,
   },
+  birthdayFreeItemCycleYear: {
+    type: Number,
+    default: 0,
+  },
+  birthdayFreeItemUsedCount: {
+    type: Number,
+    default: 0,
+  },
+  birthdayLastNotificationYear: {
+    type: Number,
+    default: 0,
+  },
   isBanned: {
     type: Boolean,
     default: false,

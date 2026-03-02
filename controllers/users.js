@@ -68,11 +68,16 @@ const createUser = async (req, res) => {
 };
 
 const updateUser = async (req, res) => {
-  const { email, name } = req.body;
+  const { email, name, date_of_birth } = req.body;
   const { id } = req.params;
 
   try {
-    const { response, error } = await updateUserService(id, email, name);
+    const { response, error } = await updateUserService(
+      id,
+      email,
+      name,
+      date_of_birth,
+    );
     if (error) {
       return res.status(400).json(error);
     }

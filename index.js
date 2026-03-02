@@ -30,6 +30,9 @@ const homeSettingsRoutes = require("./routes/homeSettings");
 const homeRoutes = require("./routes/home");
 const subscriptionsRoutes = require("./routes/subscriptions");
 const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
+const {
+  startBirthdayNotificationsJob,
+} = require("./jobs/birthdayNotifications.job");
 
 const { createServer } = require("http");
 
@@ -88,6 +91,7 @@ mongoose.connect(
 );
 
 startScheduledOrdersJob();
+startBirthdayNotificationsJob();
 
 httpServer.listen(process.env.PORT, () => {
   console.log("listening on port 5000");

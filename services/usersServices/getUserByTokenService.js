@@ -4,6 +4,9 @@ const {
   refreshUserSubscriptionFromStripe,
   getSubscriptionFreeItemCycleKey,
 } = require("../subscriptionServices/subscriptionHelpers");
+const {
+  getBirthdayBenefitSummary,
+} = require("../birthdayServices/birthdayBenefitsService");
 
 const getUserByTokenService = async (token) => {
   try {
@@ -64,6 +67,11 @@ const getUserByTokenService = async (token) => {
     )
       ? freeItemUsedCount
       : 0;
+    const birthdayBenefits = getBirthdayBenefitSummary(normalizedUser, new Date());
+    normalizedUser.birthdayFreeItemCycleYear = birthdayBenefits.cycleYear;
+    normalizedUser.birthdayFreeItemUsedCount = birthdayBenefits.freeItemUsedCount;
+    normalizedUser.birthdayBenefits = birthdayBenefits;
+    normalizedUser.isDateOfBirthMissing = !birthdayBenefits.hasDateOfBirth;
 
     return { user: normalizedUser, error: null };
   } catch (err) {

@@ -4,6 +4,9 @@ const { ON_GOING, SCHEDULED } = require("../../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const generateRandomCode = require("../../utils/generateOrderCode");
 const { default: Stripe } = require("stripe");
+const {
+  getBirthdayBenefitSummary,
+} = require("../birthdayServices/birthdayBenefitsService");
 
 require("dotenv/config");
 
@@ -106,6 +109,44 @@ const createOrderService = async (order) => {
           monthlyPriceSnapshot: 0,
         };
 
+    const birthdaySummary = getBirthdayBenefitSummary(user, new Date());
+    const requestedBirthdayBenefits = order?.order?.birthdayBenefits || {};
+    const shouldApplyBirthdayBenefits =
+      birthdaySummary.canClaimFreeItem &&
+      Boolean(requestedBirthdayBenefits?.isApplied);
+
+    const birthdayBenefits = shouldApplyBirthdayBenefits
+      ? {
+          isApplied: true,
+          freeItemApplied: Boolean(requestedBirthdayBenefits.freeItemApplied),
+          freeItemAmount: toSafeNumber(
+            requestedBirthdayBenefits.freeItemAmount,
+            0,
+          ),
+          freeItemBasePrice: toSafeNumber(
+            requestedBirthdayBenefits.freeItemBasePrice,
+            0,
+          ),
+          freeItemMenuItemId:
+            requestedBirthdayBenefits.freeItemMenuItemId || null,
+          freeItemLabel: String(requestedBirthdayBenefits.freeItemLabel || ""),
+          cycleYear: Math.floor(
+            toSafeNumber(
+              requestedBirthdayBenefits.cycleYear,
+              birthdaySummary.cycleYear,
+            ),
+          ),
+        }
+      : {
+          isApplied: false,
+          freeItemApplied: false,
+          freeItemAmount: 0,
+          freeItemBasePrice: 0,
+          freeItemMenuItemId: null,
+          freeItemLabel: "",
+          cycleYear: birthdaySummary.cycleYear,
+        };
+
     let promoCodeId = order.order.promoCode ? order.order.promoCode.promoCodeId : null;
     if (subscriptionActive) {
       promoCodeId = null;
@@ -155,6 +196,7 @@ const createOrderService = async (order) => {
       payment_method: order.order.paymentMethod,
       promoCode: promoCodeId,
       subscriptionBenefits,
+      birthdayBenefits,
       scheduled: {
         isScheduled: order.order.scheduled?.isScheduled || false,
         scheduledFor: order.order.scheduled?.scheduledFor || null,

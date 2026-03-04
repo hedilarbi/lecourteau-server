@@ -7,6 +7,11 @@ const { default: Stripe } = require("stripe");
 const {
   getBirthdayBenefitSummary,
 } = require("../birthdayServices/birthdayBenefitsService");
+const {
+  getOrCreateSettingDocument,
+  getSubscriptionFreeItemCycleKey,
+  SUBSCRIPTION_DISCOUNT_PERCENT,
+} = require("../subscriptionServices/subscriptionHelpers");
 
 require("dotenv/config");
 
@@ -19,6 +24,13 @@ const toSafeNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const roundMoney = (value, fallback = 0) => {
+  const normalized = toSafeNumber(value, fallback);
+  return Math.round(normalized * 100) / 100;
+};
+
+const normalizeId = (value) => String(value || "").trim();
+
 const isUserSubscriptionActive = (user) => {
   const status = String(user?.subscriptionStatus || "").toLowerCase();
   const statusActive = status === "active" || status === "trialing";
@@ -29,42 +41,109 @@ const isUserSubscriptionActive = (user) => {
     periodEnd instanceof Date && !Number.isNaN(periodEnd.getTime());
   const periodNotExpired = !hasValidPeriodEnd || periodEnd.getTime() > Date.now();
 
-  return (
-    statusActive && periodNotExpired
-  );
+  return statusActive && periodNotExpired;
 };
 
-const createOrderService = async (order) => {
+const createOrderService = async (order, options = {}) => {
   try {
-    const rewardsList = order.order.rewards.map((item) => item.id);
+    const orderPayload = order?.order || {};
+    const allowZeroTotalSubscriptionOrder = Boolean(
+      options?.allowZeroTotalSubscriptionOrder,
+    );
+    const rewardsList = Array.isArray(orderPayload.rewards)
+      ? orderPayload.rewards
+          .map((item) => item?.id)
+          .filter((rewardId) => Boolean(rewardId))
+      : [];
     const code = generateRandomCode(8).toUpperCase();
 
-    if (order.order.paymentMethod !== "card") {
-      return { error: "Payment method not supported" };
-    }
-    if (order.order.paymentMethod === "card" && order.order.paymentIntentId) {
-      await stripe.paymentIntents.retrieve(order.order.paymentIntentId);
-    }
-
     const user = await mongoose.models.User.findById(
-      order.order.user_id,
+      orderPayload.user_id,
     ).populate("orders");
     if (!user) {
       return { error: "User not found" };
     }
 
+    const setting = await getOrCreateSettingDocument();
+    const configuredFreeItemId = normalizeId(
+      setting?.subscription?.freeItemMenuItemId,
+    );
+    const configuredFreeItemName = String(
+      setting?.subscription?.freeItemMenuItemName || "",
+    ).trim();
+
+    const totalPrice = roundMoney(orderPayload.total, 0);
+    const isZeroTotalOrder = totalPrice <= 0;
+
+    if (allowZeroTotalSubscriptionOrder && !isZeroTotalOrder) {
+      return {
+        error:
+          "Cette route est réservée aux commandes abonnement avec total à 0.",
+      };
+    }
+
+    if (!allowZeroTotalSubscriptionOrder && isZeroTotalOrder) {
+      return {
+        error:
+          "Les commandes avec total 0 doivent utiliser la route dédiée abonnement.",
+      };
+    }
+
+    if (allowZeroTotalSubscriptionOrder && orderPayload.paymentIntentId) {
+      return {
+        error: "Aucun paiement Stripe ne doit être envoyé pour une commande à 0.",
+      };
+    }
+
+    if (!allowZeroTotalSubscriptionOrder) {
+      if (orderPayload.paymentMethod !== "card") {
+        return { error: "Payment method not supported" };
+      }
+
+      if (!orderPayload.paymentIntentId) {
+        return {
+          error:
+            "Un paiement Stripe est requis pour les commandes avec total supérieur à 0.",
+        };
+      }
+
+      await stripe.paymentIntents.retrieve(orderPayload.paymentIntentId);
+    }
+
     const subscriptionActive = isUserSubscriptionActive(user);
-    const requestedSubscriptionBenefits = order?.order?.subscriptionBenefits || {};
+    const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
       subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
+    const currentSubscriptionCycleKey = getSubscriptionFreeItemCycleKey(
+      user,
+      new Date(),
+    );
+    const usedFreeItemCountThisCycle =
+      String(user?.subscriptionFreeItemCycleKey || "").trim() ===
+      currentSubscriptionCycleKey
+        ? Math.max(0, Math.floor(toSafeNumber(user?.subscriptionFreeItemUsedCount, 0)))
+        : 0;
+    const freeItemRemaining = Math.max(0, 1 - usedFreeItemCountThisCycle);
+    const requestedFreeItemId = normalizeId(
+      requestedSubscriptionBenefits?.freeItemMenuItemId,
+    );
+    const requestedFreeItemApplied = Boolean(
+      requestedSubscriptionBenefits?.freeItemApplied,
+    );
+    const configuredFreeItemSelected =
+      Boolean(configuredFreeItemId) &&
+      Boolean(requestedFreeItemId) &&
+      configuredFreeItemId === requestedFreeItemId;
+    const canApplyConfiguredFreeItem =
+      shouldApplySubscriptionBenefits &&
+      requestedFreeItemApplied &&
+      configuredFreeItemSelected &&
+      freeItemRemaining > 0;
 
     const subscriptionBenefits = shouldApplySubscriptionBenefits
       ? {
           isApplied: true,
-          discountPercent: toSafeNumber(
-            requestedSubscriptionBenefits.discountPercent,
-            20,
-          ),
+          discountPercent: SUBSCRIPTION_DISCOUNT_PERCENT,
           discountAmount: toSafeNumber(
             requestedSubscriptionBenefits.discountAmount,
             0,
@@ -76,19 +155,21 @@ const createOrderService = async (order) => {
             requestedSubscriptionBenefits.freeDeliveryAmount,
             0,
           ),
-          freeItemApplied: Boolean(requestedSubscriptionBenefits.freeItemApplied),
-          freeItemAmount: toSafeNumber(
-            requestedSubscriptionBenefits.freeItemAmount,
-            0,
-          ),
-          freeItemBasePrice: toSafeNumber(
-            requestedSubscriptionBenefits.freeItemBasePrice,
-            0,
-          ),
-          freeItemMenuItemId:
-            requestedSubscriptionBenefits.freeItemMenuItemId || null,
-          freeItemLabel: String(requestedSubscriptionBenefits.freeItemLabel || ""),
-          cycleKey: String(requestedSubscriptionBenefits.cycleKey || ""),
+          freeItemApplied: canApplyConfiguredFreeItem,
+          freeItemAmount: canApplyConfiguredFreeItem
+            ? toSafeNumber(requestedSubscriptionBenefits.freeItemAmount, 0)
+            : 0,
+          freeItemBasePrice: canApplyConfiguredFreeItem
+            ? toSafeNumber(requestedSubscriptionBenefits.freeItemBasePrice, 0)
+            : 0,
+          freeItemMenuItemId: canApplyConfiguredFreeItem
+            ? configuredFreeItemId
+            : null,
+          freeItemLabel: canApplyConfiguredFreeItem
+            ? configuredFreeItemName ||
+              String(requestedSubscriptionBenefits.freeItemLabel || "")
+            : "",
+          cycleKey: canApplyConfiguredFreeItem ? currentSubscriptionCycleKey : "",
           monthlyPriceSnapshot: toSafeNumber(
             requestedSubscriptionBenefits.monthlyPriceSnapshot,
             user.subscriptionMonthlyPrice || 11.99,
@@ -110,7 +191,7 @@ const createOrderService = async (order) => {
         };
 
     const birthdaySummary = getBirthdayBenefitSummary(user, new Date());
-    const requestedBirthdayBenefits = order?.order?.birthdayBenefits || {};
+    const requestedBirthdayBenefits = orderPayload.birthdayBenefits || {};
     const shouldApplyBirthdayBenefits =
       birthdaySummary.canClaimFreeItem &&
       Boolean(requestedBirthdayBenefits?.isApplied);
@@ -145,25 +226,60 @@ const createOrderService = async (order) => {
           freeItemMenuItemId: null,
           freeItemLabel: "",
           cycleYear: birthdaySummary.cycleYear,
-        };
+      };
 
-    let promoCodeId = order.order.promoCode ? order.order.promoCode.promoCodeId : null;
+    let promoCodeId = orderPayload.promoCode
+      ? orderPayload.promoCode.promoCodeId
+      : null;
     if (subscriptionActive) {
       promoCodeId = null;
     }
 
-    const requestedDiscount = toSafeNumber(order.order.discount, 0);
+    const requestedDiscount = toSafeNumber(orderPayload.discount, 0);
     const normalizedDiscount = subscriptionBenefits.isApplied
-      ? toSafeNumber(subscriptionBenefits.discountPercent, 20)
+      ? SUBSCRIPTION_DISCOUNT_PERCENT
       : subscriptionActive
         ? 0
         : requestedDiscount;
 
-    const requestedDeliveryFee = toSafeNumber(order.order.deliveryFee, 0);
+    const requestedDeliveryFee = toSafeNumber(orderPayload.deliveryFee, 0);
     const normalizedDeliveryFee =
       subscriptionBenefits.isApplied && subscriptionBenefits.freeDeliveryApplied
         ? 0
         : requestedDeliveryFee;
+
+    if (allowZeroTotalSubscriptionOrder) {
+      if (!subscriptionActive) {
+        return {
+          error: "Un abonnement actif est requis pour une commande à total 0.",
+        };
+      }
+
+      if (!canApplyConfiguredFreeItem) {
+        return {
+          error:
+            "L'article gratuit mensuel configuré est requis pour une commande à total 0.",
+        };
+      }
+
+      const orderItems = Array.isArray(orderPayload.orderItems)
+        ? orderPayload.orderItems
+        : [];
+      const offers = Array.isArray(orderPayload.offers) ? orderPayload.offers : [];
+      const rewards = Array.isArray(orderPayload.rewards)
+        ? orderPayload.rewards
+        : [];
+      const hasSingleConfiguredFreeItem =
+        orderItems.length === 1 &&
+        normalizeId(orderItems[0]?.item) === configuredFreeItemId;
+
+      if (!hasSingleConfiguredFreeItem || offers.length > 0 || rewards.length > 0) {
+        return {
+          error:
+            "La commande à total 0 doit contenir uniquement l'article gratuit configuré.",
+        };
+      }
+    }
 
     let coords = order.coords || {};
     if (!order.coords?.latitude || !order.coords?.longitude) {
@@ -174,32 +290,36 @@ const createOrderService = async (order) => {
     }
 
     const newOrder = new Order({
-      user: order.order.user_id,
-      orderItems: order.order.orderItems,
-      total_price: parseFloat(order.order.total),
-      sub_total: parseFloat(order.order.subTotal),
+      user: orderPayload.user_id,
+      orderItems: orderPayload.orderItems,
+      total_price: parseFloat(orderPayload.total),
+      sub_total: parseFloat(orderPayload.subTotal),
       delivery_fee: normalizedDeliveryFee,
       type: order.type,
       coords: coords,
       code,
       address: order.address || "",
-      instructions: order.order.instructions,
-      status: order.order.scheduled?.isScheduled ? SCHEDULED : ON_GOING,
-      offers: order.order.offers,
+      instructions: orderPayload.instructions,
+      status: orderPayload.scheduled?.isScheduled ? SCHEDULED : ON_GOING,
+      offers: orderPayload.offers,
       rewards: rewardsList,
       createdAt: new Date().toISOString(),
       restaurant: order.restaurant,
       discount: normalizedDiscount,
-      sub_total_after_discount: parseFloat(order.order.subTotalAfterDiscount),
-      tip: parseFloat(order.order.tip),
-      paymentIntentId: order.order.paymentIntentId,
-      payment_method: order.order.paymentMethod,
+      sub_total_after_discount: parseFloat(orderPayload.subTotalAfterDiscount),
+      tip: parseFloat(orderPayload.tip),
+      paymentIntentId: allowZeroTotalSubscriptionOrder
+        ? null
+        : orderPayload.paymentIntentId,
+      payment_method: allowZeroTotalSubscriptionOrder
+        ? "subscription_free_item"
+        : orderPayload.paymentMethod,
       promoCode: promoCodeId,
       subscriptionBenefits,
       birthdayBenefits,
       scheduled: {
-        isScheduled: order.order.scheduled?.isScheduled || false,
-        scheduledFor: order.order.scheduled?.scheduledFor || null,
+        isScheduled: orderPayload.scheduled?.isScheduled || false,
+        scheduledFor: orderPayload.scheduled?.scheduledFor || null,
       },
     });
 
@@ -217,14 +337,16 @@ const createOrderService = async (order) => {
       }
     }
 
-    const existingOrderWithPaymentIntent = user.orders.find(
-      (userOrder) => userOrder.paymentIntentId === order.order.paymentIntentId,
-    );
+    if (orderPayload.paymentIntentId) {
+      const existingOrderWithPaymentIntent = user.orders.find(
+        (userOrder) => userOrder.paymentIntentId === orderPayload.paymentIntentId,
+      );
 
-    if (existingOrderWithPaymentIntent) {
-      return {
-        error: "This payment intent has already been used for another order.",
-      };
+      if (existingOrderWithPaymentIntent) {
+        return {
+          error: "This payment intent has already been used for another order.",
+        };
+      }
     }
 
     const response = await newOrder.save();
@@ -247,7 +369,7 @@ const sendNotifications = async (restaurant, orderId, code) => {
   const expo = new Expo({ useFcmV1: true });
 
   const dashboardMessage = {
-    to: restaurant.expo_token,
+    to: restaurant?.expo_token,
     body: `Nouvelle commande en attente, code:${code}`,
     channel: "default",
     data: { order_id: orderId },
@@ -256,10 +378,8 @@ const sendNotifications = async (restaurant, orderId, code) => {
   };
 
   try {
-    if (restaurant.expo_token) {
-      const response = await expo.sendPushNotificationsAsync([
-        dashboardMessage,
-      ]);
+    if (restaurant?.expo_token) {
+      await expo.sendPushNotificationsAsync([dashboardMessage]);
     }
   } catch (err) {
     console.error(`Error sending notifications: ${err.message}`);

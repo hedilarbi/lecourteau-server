@@ -158,9 +158,22 @@ module.exports = async function confirmOrderService(orderId) {
 
   try {
     if (!order.paymentIntentId) {
-      // No card payment (e.g., cash), just mark confirmed
+      // No card payment (e.g., subscription free-item total 0)
       order.confirmed = true;
+      const totalPrice = Number(order?.total_price || 0);
+      if (
+        totalPrice <= 0 ||
+        String(order?.payment_method || "").trim().toLowerCase() ===
+          "subscription_free_item"
+      ) {
+        order.payment_status = true;
+      }
       await order.save();
+      await finalizeLoyaltyAndPromo(order);
+      process.nextTick(() =>
+        sendPush(order.user, order._id, calculatePoints(order)),
+      );
+      process.nextTick(() => sendMail(order));
       return { response: "Order confirmed (no card capture)" };
     }
 

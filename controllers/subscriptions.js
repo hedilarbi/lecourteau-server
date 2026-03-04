@@ -2,6 +2,7 @@ const User = require("../models/User");
 const Subscription = require("../models/Subscription");
 const SubscriptionPayment = require("../models/SubscriptionPayment");
 const SubscriptionHediPayout = require("../models/SubscriptionHediPayout");
+const MenuItem = require("../models/MenuItem");
 const Staff = require("../models/staff");
 const {
   stripe,
@@ -14,6 +15,7 @@ const {
   buildUserSubscriptionSummary,
   refreshUserSubscriptionFromStripe,
   setUserSubscriptionInactive,
+  SUBSCRIPTION_DISCOUNT_PERCENT,
 } = require("../services/subscriptionServices/subscriptionHelpers");
 const {
   sendSubscriptionActivationEmail,
@@ -680,12 +682,24 @@ const formatSubscriptionConfig = (setting) => {
   const currency = String(setting?.subscription?.currency || "cad")
     .trim()
     .toLowerCase();
+  const freeItemMenuItemId = setting?.subscription?.freeItemMenuItemId
+    ? String(setting.subscription.freeItemMenuItemId)
+    : null;
+  const freeItemMenuItemName = String(
+    setting?.subscription?.freeItemMenuItemName || "",
+  ).trim();
 
   return {
     monthlyPrice: Number.isFinite(monthlyPrice) ? monthlyPrice : 11.99,
     currency: currency || "cad",
+    freeItem: freeItemMenuItemId
+      ? {
+          menuItemId: freeItemMenuItemId,
+          menuItemName: freeItemMenuItemName,
+        }
+      : null,
     benefits: {
-      percentDiscount: 20,
+      percentDiscount: SUBSCRIPTION_DISCOUNT_PERCENT,
       freeDelivery: true,
       freeItemPerMonth: 1,
     },
@@ -712,16 +726,66 @@ const updateSubscriptionConfig = async (req, res) => {
     const staff = await ensureAdminStaff(req, res);
     if (!staff) return;
 
-    const nextPrice = Number(req.body?.monthlyPrice);
-    if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
+    const hasMonthlyPriceUpdate = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      "monthlyPrice",
+    );
+    const hasFreeItemUpdate = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      "freeItemMenuItemId",
+    );
+
+    if (!hasMonthlyPriceUpdate && !hasFreeItemUpdate) {
       return res.status(400).json({
         success: false,
-        message: "Le prix mensuel est invalide.",
+        message: "Aucun changement à appliquer.",
       });
     }
 
-    const normalizedPrice = Math.round(nextPrice * 100) / 100;
-    const { setting } = await ensureSubscriptionStripePrice(normalizedPrice);
+    let setting;
+    if (hasMonthlyPriceUpdate) {
+      const nextPrice = Number(req.body?.monthlyPrice);
+      if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Le prix mensuel est invalide.",
+        });
+      }
+
+      const normalizedPrice = Math.round(nextPrice * 100) / 100;
+      const ensurePriceResult = await ensureSubscriptionStripePrice(normalizedPrice);
+      setting = ensurePriceResult.setting;
+    } else {
+      setting = await getOrCreateSettingDocument();
+    }
+
+    if (hasFreeItemUpdate) {
+      const rawFreeItemMenuItemId = String(req.body?.freeItemMenuItemId || "")
+        .trim();
+
+      if (!rawFreeItemMenuItemId) {
+        setting.subscription.freeItemMenuItemId = null;
+        setting.subscription.freeItemMenuItemName = "";
+      } else {
+        const selectedMenuItem = await MenuItem.findById(rawFreeItemMenuItemId)
+          .select("name")
+          .lean();
+
+        if (!selectedMenuItem) {
+          return res.status(404).json({
+            success: false,
+            message: "Article introuvable pour l'article gratuit.",
+          });
+        }
+
+        setting.subscription.freeItemMenuItemId = selectedMenuItem._id;
+        setting.subscription.freeItemMenuItemName = String(
+          selectedMenuItem.name || "",
+        ).trim();
+      }
+    }
+
+    await setting.save();
 
     return res.status(200).json({
       success: true,
@@ -731,7 +795,8 @@ const updateSubscriptionConfig = async (req, res) => {
     return res.status(500).json({
       success: false,
       message:
-        error.message || "Erreur lors de la mise à jour du prix abonnement.",
+        error.message ||
+        "Erreur lors de la mise à jour de la configuration abonnement.",
     });
   }
 };

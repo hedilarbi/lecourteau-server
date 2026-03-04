@@ -17,9 +17,10 @@ const OPEN_SUBSCRIPTION_STATUSES = new Set([
   "past_due",
   "unpaid",
 ]);
+const SUBSCRIPTION_DISCOUNT_PERCENT = 15;
 const SUBSCRIPTION_PLAN_NAME = "CLUB COURTEAU";
 const SUBSCRIPTION_PLAN_DESCRIPTION =
-  "Abonnement CLUB COURTEAU: 20% de reduction, 0 frais livraison, 1 article gratuit/mois.";
+  "Abonnement CLUB COURTEAU: 15% de reduction, 0 frais livraison, 1 article gratuit/mois.";
 const SUBSCRIPTION_PLAN_METADATA = "club_courteau";
 
 const normalizeCurrency = (currency) =>
@@ -146,6 +147,12 @@ const getOrCreateSettingDocument = async () => {
   setting.subscription.currency = normalizeCurrency(
     setting.subscription.currency || "cad",
   );
+  if (typeof setting.subscription.freeItemMenuItemName !== "string") {
+    setting.subscription.freeItemMenuItemName = "";
+  }
+  if (!setting.subscription.freeItemMenuItemId) {
+    setting.subscription.freeItemMenuItemId = null;
+  }
   setting.subscription.stripeProductId =
     setting.subscription.stripeProductId || "";
   setting.subscription.stripePriceId = setting.subscription.stripePriceId || "";
@@ -441,7 +448,7 @@ const buildUserSubscriptionSummary = (user, config = {}) => {
     freeItemUsedCount: usedInCurrentCycle,
     freeItemRemaining,
     benefits: {
-      percentDiscount: 20,
+      percentDiscount: SUBSCRIPTION_DISCOUNT_PERCENT,
       freeDelivery: true,
       freeItemPerMonth: 1,
     },
@@ -562,4 +569,5 @@ module.exports = {
   ensureUserFreeItemCycle,
   ensureUserSavingsDefaults,
   applyConfirmedOrderSubscriptionBenefits,
+  SUBSCRIPTION_DISCOUNT_PERCENT,
 };

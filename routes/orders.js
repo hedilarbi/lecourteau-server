@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   createOrder,
+  createZeroTotalSubscriptionOrder,
   getOrders,
   getOrder,
   deleteOrder,
@@ -27,6 +28,7 @@ router.get("/total-revenu", getTotalRevenue);
 router.get("/checkOrders/:id", orderChecker);
 router.put("/confirm/:id", authStaff, confirmOrder);
 router.post("/create", createOrder);
+router.post("/create/subscription-zero-total", createZeroTotalSubscriptionOrder);
 router.get("/filter", getFilteredOrders);
 router.get("/filter/:id", getRestaurantFilteredOrders);
 router.delete("/delete/:id", deleteOrder);

@@ -27,6 +27,15 @@ const settingSchema = new Schema({
       type: Number,
       default: 11.99,
     },
+    freeItemMenuItemId: {
+      type: Schema.Types.ObjectId,
+      ref: "MenuItem",
+      default: null,
+    },
+    freeItemMenuItemName: {
+      type: String,
+      default: "",
+    },
     currency: {
       type: String,
       default: "cad",

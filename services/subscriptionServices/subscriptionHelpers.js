@@ -17,6 +17,15 @@ const OPEN_SUBSCRIPTION_STATUSES = new Set([
   "past_due",
   "unpaid",
 ]);
+const RETRY_GRACE_ELIGIBLE_STATUSES = new Set(["past_due", "unpaid"]);
+const SUBSCRIPTION_RENEWAL_RETRY_GRACE_DAYS = Math.max(
+  1,
+  Math.floor(
+    Number(process.env.SUBSCRIPTION_RENEWAL_RETRY_GRACE_DAYS || 3),
+  ),
+);
+const SUBSCRIPTION_RENEWAL_RETRY_GRACE_MS =
+  SUBSCRIPTION_RENEWAL_RETRY_GRACE_DAYS * 24 * 60 * 60 * 1000;
 const SUBSCRIPTION_DISCOUNT_PERCENT = 15;
 const SUBSCRIPTION_PLAN_NAME = "CLUB COURTEAU";
 const SUBSCRIPTION_PLAN_DESCRIPTION =
@@ -89,13 +98,50 @@ const isActiveStatus = (status) =>
 const isOpenStatus = (status) =>
   OPEN_SUBSCRIPTION_STATUSES.has(String(status || "").toLowerCase());
 
-const isSubscriptionCurrentlyActive = (user) => {
-  if (!isActiveStatus(user?.subscriptionStatus)) return false;
-  if (!user?.subscriptionCurrentPeriodEnd) return true;
+const toDateOrNull = (value) => {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
 
-  const periodEnd = new Date(user.subscriptionCurrentPeriodEnd);
-  if (Number.isNaN(periodEnd.getTime())) return true;
-  return periodEnd.getTime() > Date.now();
+const getSubscriptionRenewalGraceEndFromDate = (date = new Date()) => {
+  const startDate = toDateOrNull(date) || new Date();
+  return new Date(startDate.getTime() + SUBSCRIPTION_RENEWAL_RETRY_GRACE_MS);
+};
+
+const clearUserRenewalFailureState = (user) => {
+  if (!user) return;
+  user.subscriptionRenewalFailureInvoiceId = null;
+  user.subscriptionRenewalFailureStartedAt = null;
+  user.subscriptionRenewalGraceEndsAt = null;
+  user.subscriptionRenewalFirstFailureEmailSentAt = null;
+  user.subscriptionSuspendedAt = null;
+  user.subscriptionSuspensionReason = "";
+  user.subscriptionSuspensionEmailSentAt = null;
+};
+
+const isSubscriptionInRetryGrace = (user) => {
+  const status = String(user?.subscriptionStatus || "").toLowerCase();
+  if (!RETRY_GRACE_ELIGIBLE_STATUSES.has(status)) return false;
+  if (toDateOrNull(user?.subscriptionSuspendedAt)) return false;
+
+  const graceEnd = toDateOrNull(user?.subscriptionRenewalGraceEndsAt);
+  if (!graceEnd) return false;
+
+  return graceEnd.getTime() > Date.now();
+};
+
+const isSubscriptionCurrentlyActive = (user) => {
+  if (isActiveStatus(user?.subscriptionStatus)) {
+    if (!user?.subscriptionCurrentPeriodEnd) return true;
+
+    const periodEnd = new Date(user.subscriptionCurrentPeriodEnd);
+    if (Number.isNaN(periodEnd.getTime())) return true;
+    return periodEnd.getTime() > Date.now();
+  }
+
+  return isSubscriptionInRetryGrace(user);
 };
 
 const ensureUserSavingsDefaults = (user) => {
@@ -354,13 +400,16 @@ const syncUserWithStripeSubscription = async (
 
   ensureUserSavingsDefaults(user);
   user.subscriptionStatus = status;
-  user.subscriptionIsActive = isActiveStatus(status);
   user.subscriptionAutoRenew = !cancelAtPeriodEnd;
   user.subscriptionStripeSubscriptionId = stripeSubscription.id;
   user.subscriptionCurrentPeriodStart = currentPeriodStart;
   user.subscriptionCurrentPeriodEnd = currentPeriodEnd;
   user.subscriptionMonthlyPrice = monthlyPrice;
   ensureUserFreeItemCycle(user, currentPeriodStart || new Date());
+  if (isActiveStatus(status)) {
+    clearUserRenewalFailureState(user);
+  }
+  user.subscriptionIsActive = isSubscriptionCurrentlyActive(user);
 
   await user.save();
 
@@ -423,16 +472,8 @@ const buildUserSubscriptionSummary = (user, config = {}) => {
       : 0;
   const freeItemRemaining = Math.max(0, 1 - usedInCurrentCycle);
 
-  const periodEnd = user?.subscriptionCurrentPeriodEnd
-    ? new Date(user.subscriptionCurrentPeriodEnd)
-    : null;
-  const isExpired =
-    periodEnd instanceof Date &&
-    !Number.isNaN(periodEnd.getTime()) &&
-    periodEnd.getTime() <= Date.now();
-
   return {
-    isActive: isSubscriptionCurrentlyActive(user) && !isExpired,
+    isActive: isSubscriptionCurrentlyActive(user),
     status: user?.subscriptionStatus || "inactive",
     autoRenew: Boolean(user?.subscriptionAutoRenew),
     stripeSubscriptionId: user?.subscriptionStripeSubscriptionId || null,
@@ -558,7 +599,10 @@ module.exports = {
   isOpenStatus,
   getCycleKey,
   getSubscriptionFreeItemCycleKey,
+  getSubscriptionRenewalGraceEndFromDate,
+  isSubscriptionInRetryGrace,
   isSubscriptionCurrentlyActive,
+  clearUserRenewalFailureState,
   buildUserSubscriptionSummary,
   ensureStripeCustomerForUser,
   ensureSubscriptionStripePrice,
@@ -570,4 +614,5 @@ module.exports = {
   ensureUserSavingsDefaults,
   applyConfirmedOrderSubscriptionBenefits,
   SUBSCRIPTION_DISCOUNT_PERCENT,
+  SUBSCRIPTION_RENEWAL_RETRY_GRACE_DAYS,
 };

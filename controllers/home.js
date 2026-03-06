@@ -42,6 +42,29 @@ const formatSubscriptionFreeItem = (setting) => {
   };
 };
 
+const formatBirthdayFreeItem = (setting) => {
+  const freeItemDoc = setting?.birthday?.freeItemMenuItemId || null;
+  const freeItemMenuItemId = freeItemDoc?._id
+    ? String(freeItemDoc._id)
+    : setting?.birthday?.freeItemMenuItemId
+      ? String(setting.birthday.freeItemMenuItemId)
+      : "";
+  const freeItemMenuItemName = String(
+    setting?.birthday?.freeItemMenuItemName ||
+      freeItemDoc?.name ||
+      "",
+  ).trim();
+
+  if (!freeItemMenuItemId) return null;
+
+  return {
+    menuItemId: freeItemMenuItemId,
+    menuItemName: freeItemMenuItemName,
+    image: freeItemDoc?.image || null,
+    basePrice: resolveMenuItemBasePrice(freeItemDoc),
+  };
+};
+
 const getHomeContent = async (req, res) => {
   try {
     const { error: normalizeError } = await normalizeOffersOrderService();
@@ -68,7 +91,8 @@ const getHomeContent = async (req, res) => {
           },
         }),
       Setting.findOne()
-        .populate("subscription.freeItemMenuItemId", "name image prices"),
+        .populate("subscription.freeItemMenuItemId", "name image prices")
+        .populate("birthday.freeItemMenuItemId", "name image prices"),
     ]);
 
     return res.status(200).json({
@@ -79,6 +103,7 @@ const getHomeContent = async (req, res) => {
         vedettes,
         homeSettings: homeSettings || null,
         subscriptionFreeItem: formatSubscriptionFreeItem(settings),
+        birthdayFreeItem: formatBirthdayFreeItem(settings),
       },
     });
   } catch (error) {

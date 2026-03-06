@@ -7,8 +7,10 @@ const Staff = require("../models/staff");
 const {
   stripe,
   isActiveStatus,
+  isSubscriptionCurrentlyActive,
   isOpenStatus,
   getOrCreateSettingDocument,
+  getSubscriptionRenewalGraceEndFromDate,
   ensureSubscriptionStripePrice,
   ensureStripeCustomerForUser,
   syncUserWithStripeSubscription,
@@ -21,10 +23,10 @@ const {
   sendSubscriptionActivationEmail,
   sendSubscriptionRenewalSuccessEmail,
   sendSubscriptionRenewalFailedEmail,
+  sendSubscriptionSuspendedEmail,
 } = require("../services/subscriptionServices/subscriptionMailService");
 
 const HEDI_SHARE_PERCENT = 10;
-const ACTIVE_STATUSES = new Set(["active", "trialing"]);
 const OPEN_STATUSES = new Set([
   "active",
   "trialing",
@@ -32,6 +34,7 @@ const OPEN_STATUSES = new Set([
   "past_due",
   "unpaid",
 ]);
+const DELINQUENT_SUBSCRIPTION_STATUSES = new Set(["past_due", "unpaid"]);
 
 const SUBSCRIPTION_3DS_PAYMENT_SETTINGS = {
   payment_method_types: ["card"],
@@ -144,18 +147,7 @@ const isUserSubscriptionOpen = (user) => {
 };
 
 const isUserSubscriptionActive = (user) => {
-  const status = String(user?.subscriptionStatus || "")
-    .trim()
-    .toLowerCase();
-  if (!ACTIVE_STATUSES.has(status)) return false;
-
-  const periodEnd = user?.subscriptionCurrentPeriodEnd
-    ? new Date(user.subscriptionCurrentPeriodEnd)
-    : null;
-  if (!(periodEnd instanceof Date) || Number.isNaN(periodEnd.getTime())) {
-    return true;
-  }
-  return periodEnd.getTime() > Date.now();
+  return isSubscriptionCurrentlyActive(user);
 };
 
 const ensureAdminStaff = async (req, res) => {
@@ -370,6 +362,255 @@ const resolveUserFromInvoice = async (invoice, subscriptionId) => {
   return null;
 };
 
+const toDateOrNull = (value) => {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const isDelinquentSubscriptionStatus = (status) =>
+  DELINQUENT_SUBSCRIPTION_STATUSES.has(String(status || "").toLowerCase());
+
+const resolveUserFromSubscriptionId = async (subscriptionId) => {
+  const resolvedSubscriptionId = resolveStripeSubscriptionId(subscriptionId);
+  if (!resolvedSubscriptionId) return null;
+
+  const byUserSubscriptionId = await User.findOne({
+    subscriptionStripeSubscriptionId: resolvedSubscriptionId,
+  });
+  if (byUserSubscriptionId) {
+    return byUserSubscriptionId;
+  }
+
+  const subscriptionRecord = await Subscription.findOne({
+    stripeSubscriptionId: resolvedSubscriptionId,
+  }).select("user");
+  if (!subscriptionRecord?.user) {
+    return null;
+  }
+
+  return User.findById(subscriptionRecord.user);
+};
+
+const clearRenewalFailureState = (user) => {
+  if (!user) return;
+  user.subscriptionRenewalFailureInvoiceId = null;
+  user.subscriptionRenewalFailureStartedAt = null;
+  user.subscriptionRenewalGraceEndsAt = null;
+  user.subscriptionRenewalFirstFailureEmailSentAt = null;
+  user.subscriptionSuspendedAt = null;
+  user.subscriptionSuspensionReason = "";
+  user.subscriptionSuspensionEmailSentAt = null;
+};
+
+const suspendSubscriptionAfterRetryWindow = async ({
+  userId,
+  subscriptionId,
+  failureInvoiceId,
+  now = new Date(),
+}) => {
+  if (!userId) {
+    return { suspended: false, shouldSendSuspensionEmail: false };
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return { suspended: false, shouldSendSuspensionEmail: false };
+  }
+
+  const currentStatus = String(user.subscriptionStatus || "").toLowerCase();
+  if (!isDelinquentSubscriptionStatus(currentStatus)) {
+    return { suspended: false, shouldSendSuspensionEmail: false };
+  }
+
+  const graceEndsAt = toDateOrNull(user.subscriptionRenewalGraceEndsAt);
+  if (!graceEndsAt || graceEndsAt.getTime() > now.getTime()) {
+    return { suspended: false, shouldSendSuspensionEmail: false };
+  }
+
+  const suspensionAlreadyEmailed = Boolean(
+    toDateOrNull(user.subscriptionSuspensionEmailSentAt),
+  );
+
+  const resolvedSubscriptionId =
+    resolveStripeSubscriptionId(subscriptionId) ||
+    resolveStripeSubscriptionId(user.subscriptionStripeSubscriptionId);
+
+  if (resolvedSubscriptionId) {
+    try {
+      await stripe.subscriptions.cancel(resolvedSubscriptionId);
+    } catch (error) {
+      const errorMessage = String(error?.message || "").toLowerCase();
+      const alreadyStopped =
+        String(error?.code || "").toLowerCase() === "resource_missing" ||
+        errorMessage.includes("already canceled") ||
+        errorMessage.includes("no such subscription");
+
+      if (!alreadyStopped) {
+        logWithTimestamp(
+          "Failed to suspend subscription after retry grace period",
+          {
+            subscriptionId: resolvedSubscriptionId,
+            userId: String(user._id || ""),
+            error: error.message,
+          },
+        );
+        return { suspended: false, shouldSendSuspensionEmail: false };
+      }
+    }
+
+    await syncSubscriptionFromWebhook(resolvedSubscriptionId);
+  }
+
+  const refreshedUser = await User.findById(user._id);
+  if (!refreshedUser) {
+    return { suspended: false, shouldSendSuspensionEmail: false };
+  }
+
+  refreshedUser.subscriptionIsActive = false;
+  refreshedUser.subscriptionAutoRenew = false;
+  refreshedUser.subscriptionSuspendedAt = now;
+  refreshedUser.subscriptionSuspensionReason =
+    "renewal_payment_failed_after_retry_window";
+  if (!refreshedUser.subscriptionSuspensionEmailSentAt) {
+    refreshedUser.subscriptionSuspensionEmailSentAt = now;
+  }
+  if (failureInvoiceId) {
+    refreshedUser.subscriptionRenewalFailureInvoiceId = failureInvoiceId;
+  }
+  await refreshedUser.save();
+
+  return {
+    suspended: true,
+    shouldSendSuspensionEmail: !suspensionAlreadyEmailed,
+    userId: refreshedUser._id,
+  };
+};
+
+const handleRenewalFailedInvoice = async (invoice) => {
+  const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
+  if (!subscriptionId) {
+    return {
+      shouldSendFirstFailureEmail: false,
+      shouldSendSuspensionEmail: false,
+      graceEndsAt: null,
+      userId: null,
+    };
+  }
+
+  const user = await resolveUserFromInvoice(invoice, subscriptionId);
+  if (!user) {
+    return {
+      shouldSendFirstFailureEmail: false,
+      shouldSendSuspensionEmail: false,
+      graceEndsAt: null,
+      userId: null,
+    };
+  }
+
+  const currentStatus = String(user.subscriptionStatus || "").toLowerCase();
+  if (!isDelinquentSubscriptionStatus(currentStatus)) {
+    return {
+      shouldSendFirstFailureEmail: false,
+      shouldSendSuspensionEmail: false,
+      graceEndsAt: toDateOrNull(user.subscriptionRenewalGraceEndsAt),
+      userId: user._id,
+    };
+  }
+
+  const now = new Date();
+  const invoiceId = resolveStripeInvoiceId(invoice) || `sub-${subscriptionId}`;
+  const previousInvoiceId = String(user.subscriptionRenewalFailureInvoiceId || "")
+    .trim();
+  const isNewFailureCycle =
+    !previousInvoiceId ||
+    previousInvoiceId !== invoiceId ||
+    !toDateOrNull(user.subscriptionRenewalFailureStartedAt);
+
+  let shouldSendFirstFailureEmail = false;
+  if (isNewFailureCycle) {
+    user.subscriptionRenewalFailureInvoiceId = invoiceId;
+    user.subscriptionRenewalFailureStartedAt = now;
+    user.subscriptionRenewalGraceEndsAt =
+      getSubscriptionRenewalGraceEndFromDate(now);
+    user.subscriptionRenewalFirstFailureEmailSentAt = now;
+    user.subscriptionSuspendedAt = null;
+    user.subscriptionSuspensionReason = "";
+    user.subscriptionSuspensionEmailSentAt = null;
+    shouldSendFirstFailureEmail = true;
+  } else if (!toDateOrNull(user.subscriptionRenewalFirstFailureEmailSentAt)) {
+    user.subscriptionRenewalFirstFailureEmailSentAt = now;
+    shouldSendFirstFailureEmail = true;
+  }
+
+  user.subscriptionIsActive = true;
+
+  await user.save();
+
+  const graceEndsAt = toDateOrNull(user.subscriptionRenewalGraceEndsAt);
+  const graceExpired =
+    graceEndsAt instanceof Date && graceEndsAt.getTime() <= now.getTime();
+
+  if (!graceExpired) {
+    return {
+      shouldSendFirstFailureEmail,
+      shouldSendSuspensionEmail: false,
+      graceEndsAt,
+      userId: user._id,
+    };
+  }
+
+  const suspensionResult = await suspendSubscriptionAfterRetryWindow({
+    userId: user._id,
+    subscriptionId,
+    failureInvoiceId: invoiceId,
+    now,
+  });
+
+  return {
+    shouldSendFirstFailureEmail: false,
+    shouldSendSuspensionEmail: Boolean(
+      suspensionResult?.shouldSendSuspensionEmail,
+    ),
+    graceEndsAt,
+    userId: user._id,
+  };
+};
+
+const handleSubscriptionStatusRetryPolicy = async (subscriptionId) => {
+  const resolvedSubscriptionId = resolveStripeSubscriptionId(subscriptionId);
+  if (!resolvedSubscriptionId) {
+    return { shouldSendSuspensionEmail: false, userId: null };
+  }
+
+  const user = await resolveUserFromSubscriptionId(resolvedSubscriptionId);
+  if (!user) {
+    return { shouldSendSuspensionEmail: false, userId: null };
+  }
+
+  const status = String(user.subscriptionStatus || "").toLowerCase();
+  if (!isDelinquentSubscriptionStatus(status)) {
+    return { shouldSendSuspensionEmail: false, userId: user._id };
+  }
+
+  const graceEndsAt = toDateOrNull(user.subscriptionRenewalGraceEndsAt);
+  if (!graceEndsAt || graceEndsAt.getTime() > Date.now()) {
+    return { shouldSendSuspensionEmail: false, userId: user._id };
+  }
+
+  const failureInvoiceId = String(
+    user.subscriptionRenewalFailureInvoiceId || "",
+  ).trim();
+
+  return suspendSubscriptionAfterRetryWindow({
+    userId: user._id,
+    subscriptionId: resolvedSubscriptionId,
+    failureInvoiceId,
+    now: new Date(),
+  });
+};
+
 const recordSubscriptionPaymentFromInvoice = async (invoice) => {
   const invoiceId = String(invoice?.id || "").trim();
   if (!invoiceId) return null;
@@ -443,6 +684,7 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
   );
   user.subscriptionPaymentsCount =
     Math.max(0, Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0))) + 1;
+  clearRenewalFailureState(user);
   await user.save();
 
   return {
@@ -504,7 +746,7 @@ const createPaymentSuccessEmailJob = (paymentRecord) => async () => {
   }
 };
 
-const createRenewalFailureEmailJob = (invoice) => async () => {
+const createRenewalFailureEmailJob = ({ invoice, graceEndsAt }) => async () => {
   const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
   if (!subscriptionId) return;
 
@@ -520,6 +762,33 @@ const createRenewalFailureEmailJob = (invoice) => async () => {
     amountDue,
     currency: normalizeCurrency(invoice?.currency || "cad"),
     nextAttemptDate,
+    graceEndDate: graceEndsAt,
+  });
+};
+
+const createRenewalSuspendedEmailJob = ({ invoice, userId }) => async () => {
+  let user = null;
+  if (userId) {
+    user = await User.findById(userId).select(
+      "name email subscriptionMonthlyPrice",
+    );
+  } else {
+    const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
+    if (!subscriptionId) return;
+    user = await resolveUserFromInvoice(invoice, subscriptionId);
+  }
+  if (!user?.email) return;
+
+  let amountDue = roundMoney(toSafeNumber(invoice?.amount_due, 0) / 100, 0);
+  if (amountDue <= 0) {
+    amountDue = roundMoney(toSafeNumber(user.subscriptionMonthlyPrice, 11.99), 11.99);
+  }
+
+  await sendSubscriptionSuspendedEmail({
+    userEmail: user.email,
+    userName: user.name || "Client",
+    amountDue,
+    currency: normalizeCurrency(invoice?.currency || "cad"),
   });
 };
 
@@ -630,7 +899,19 @@ const handleStripeWebhook = async (req, res) => {
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const stripeSubscription = event.data?.object;
-        await syncSubscriptionFromWebhook(stripeSubscription?.id);
+        const stripeSubscriptionId = stripeSubscription?.id;
+        await syncSubscriptionFromWebhook(stripeSubscriptionId);
+        const statusPolicyResult = await handleSubscriptionStatusRetryPolicy(
+          stripeSubscriptionId,
+        );
+        if (statusPolicyResult?.shouldSendSuspensionEmail) {
+          backgroundJobs.push(
+            createRenewalSuspendedEmailJob({
+              invoice: null,
+              userId: statusPolicyResult?.userId || null,
+            }),
+          );
+        }
         break;
       }
       case "invoice.paid":
@@ -658,7 +939,23 @@ const handleStripeWebhook = async (req, res) => {
           await syncSubscriptionFromWebhook(invoiceSubscriptionId);
         }
         if (paymentType === "renewal") {
-          backgroundJobs.push(createRenewalFailureEmailJob(invoice));
+          const failureResult = await handleRenewalFailedInvoice(invoice);
+          if (failureResult?.shouldSendFirstFailureEmail) {
+            backgroundJobs.push(
+              createRenewalFailureEmailJob({
+                invoice,
+                graceEndsAt: failureResult?.graceEndsAt || null,
+              }),
+            );
+          }
+          if (failureResult?.shouldSendSuspensionEmail) {
+            backgroundJobs.push(
+              createRenewalSuspendedEmailJob({
+                invoice,
+                userId: failureResult?.userId || null,
+              }),
+            );
+          }
         }
         break;
       }
@@ -688,6 +985,12 @@ const formatSubscriptionConfig = (setting) => {
   const freeItemMenuItemName = String(
     setting?.subscription?.freeItemMenuItemName || "",
   ).trim();
+  const birthdayFreeItemMenuItemId = setting?.birthday?.freeItemMenuItemId
+    ? String(setting.birthday.freeItemMenuItemId)
+    : null;
+  const birthdayFreeItemMenuItemName = String(
+    setting?.birthday?.freeItemMenuItemName || "",
+  ).trim();
 
   return {
     monthlyPrice: Number.isFinite(monthlyPrice) ? monthlyPrice : 11.99,
@@ -698,10 +1001,17 @@ const formatSubscriptionConfig = (setting) => {
           menuItemName: freeItemMenuItemName,
         }
       : null,
+    birthdayFreeItem: birthdayFreeItemMenuItemId
+      ? {
+          menuItemId: birthdayFreeItemMenuItemId,
+          menuItemName: birthdayFreeItemMenuItemName,
+        }
+      : null,
     benefits: {
       percentDiscount: SUBSCRIPTION_DISCOUNT_PERCENT,
       freeDelivery: true,
       freeItemPerMonth: 1,
+      birthdayFreeItemPerYear: 1,
     },
   };
 };
@@ -734,8 +1044,16 @@ const updateSubscriptionConfig = async (req, res) => {
       req.body || {},
       "freeItemMenuItemId",
     );
+    const hasBirthdayFreeItemUpdate = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      "birthdayFreeItemMenuItemId",
+    );
 
-    if (!hasMonthlyPriceUpdate && !hasFreeItemUpdate) {
+    if (
+      !hasMonthlyPriceUpdate &&
+      !hasFreeItemUpdate &&
+      !hasBirthdayFreeItemUpdate
+    ) {
       return res.status(400).json({
         success: false,
         message: "Aucun changement à appliquer.",
@@ -759,6 +1077,13 @@ const updateSubscriptionConfig = async (req, res) => {
       setting = await getOrCreateSettingDocument();
     }
 
+    if (!setting.subscription || typeof setting.subscription !== "object") {
+      setting.subscription = {};
+    }
+    if (!setting.birthday || typeof setting.birthday !== "object") {
+      setting.birthday = {};
+    }
+
     if (hasFreeItemUpdate) {
       const rawFreeItemMenuItemId = String(req.body?.freeItemMenuItemId || "")
         .trim();
@@ -780,6 +1105,35 @@ const updateSubscriptionConfig = async (req, res) => {
 
         setting.subscription.freeItemMenuItemId = selectedMenuItem._id;
         setting.subscription.freeItemMenuItemName = String(
+          selectedMenuItem.name || "",
+        ).trim();
+      }
+    }
+
+    if (hasBirthdayFreeItemUpdate) {
+      const rawBirthdayFreeItemMenuItemId = String(
+        req.body?.birthdayFreeItemMenuItemId || "",
+      ).trim();
+
+      if (!rawBirthdayFreeItemMenuItemId) {
+        setting.birthday.freeItemMenuItemId = null;
+        setting.birthday.freeItemMenuItemName = "";
+      } else {
+        const selectedMenuItem = await MenuItem.findById(
+          rawBirthdayFreeItemMenuItemId,
+        )
+          .select("name")
+          .lean();
+
+        if (!selectedMenuItem) {
+          return res.status(404).json({
+            success: false,
+            message: "Article anniversaire introuvable.",
+          });
+        }
+
+        setting.birthday.freeItemMenuItemId = selectedMenuItem._id;
+        setting.birthday.freeItemMenuItemName = String(
           selectedMenuItem.name || "",
         ).trim();
       }

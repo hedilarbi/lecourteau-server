@@ -3,6 +3,7 @@ const {
   generateSubscriptionActivationEmail,
   generateSubscriptionRenewalSuccessEmail,
   generateSubscriptionRenewalFailedEmail,
+  generateSubscriptionSuspendedEmail,
 } = require("../../utils/mailTemplateGenerators");
 
 const logWithTimestamp = (message, extra = {}) => {
@@ -104,6 +105,7 @@ const sendSubscriptionRenewalFailedEmail = async ({
   amountDue,
   currency,
   nextAttemptDate,
+  graceEndDate,
 }) => {
   try {
     return await sendMail({
@@ -114,6 +116,7 @@ const sendSubscriptionRenewalFailedEmail = async ({
         amountDue,
         currency,
         nextAttemptDate,
+        graceEndDate,
       }),
     });
   } catch (error) {
@@ -125,8 +128,34 @@ const sendSubscriptionRenewalFailedEmail = async ({
   }
 };
 
+const sendSubscriptionSuspendedEmail = async ({
+  userEmail,
+  userName,
+  amountDue,
+  currency,
+}) => {
+  try {
+    return await sendMail({
+      to: userEmail,
+      subject: "Abonnement CLUB COURTEAU suspendu",
+      html: generateSubscriptionSuspendedEmail({
+        userName,
+        amountDue,
+        currency,
+      }),
+    });
+  } catch (error) {
+    logWithTimestamp("Error sending subscription suspended email", {
+      error: error.message,
+      userEmail,
+    });
+    return false;
+  }
+};
+
 module.exports = {
   sendSubscriptionActivationEmail,
   sendSubscriptionRenewalSuccessEmail,
   sendSubscriptionRenewalFailedEmail,
+  sendSubscriptionSuspendedEmail,
 };

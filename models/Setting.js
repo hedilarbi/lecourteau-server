@@ -49,6 +49,17 @@ const settingSchema = new Schema({
       default: "",
     },
   },
+  birthday: {
+    freeItemMenuItemId: {
+      type: Schema.Types.ObjectId,
+      ref: "MenuItem",
+      default: null,
+    },
+    freeItemMenuItemName: {
+      type: String,
+      default: "",
+    },
+  },
 });
 
 module.exports = model("Setting", settingSchema);

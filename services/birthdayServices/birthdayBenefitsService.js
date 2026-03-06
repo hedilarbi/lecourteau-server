@@ -1,5 +1,6 @@
 const { Expo } = require("expo-server-sdk");
 const User = require("../../models/User");
+const Setting = require("../../models/Setting");
 
 const DEFAULT_BIRTHDAY_TIMEZONE =
   String(process.env.BIRTHDAY_NOTIFICATION_TIMEZONE || "America/Toronto")
@@ -139,13 +140,36 @@ const applyConfirmedOrderBirthdayBenefits = async (order) => {
   return user;
 };
 
-const buildBirthdayPushBody = (name) => {
+const resolveBirthdayConfiguredFreeItemName = async () => {
+  try {
+    const setting = await Setting.findOne()
+      .select("birthday.freeItemMenuItemName birthday.freeItemMenuItemId")
+      .populate("birthday.freeItemMenuItemId", "name")
+      .lean();
+    const fromSetting = String(setting?.birthday?.freeItemMenuItemName || "")
+      .trim();
+    if (fromSetting) return fromSetting;
+    const fromMenuItem = String(
+      setting?.birthday?.freeItemMenuItemId?.name || "",
+    ).trim();
+    if (fromMenuItem) return fromMenuItem;
+    return "";
+  } catch (error) {
+    return "";
+  }
+};
+
+const buildBirthdayPushBody = (name, freeItemName = "") => {
   const cleanName = String(name || "").trim();
   const firstName = cleanName ? cleanName.split(/\s+/).filter(Boolean)[0] : "";
+  const giftLabel = String(freeItemName || "").trim();
+  const giftPart = giftLabel
+    ? `ton cadeau gratuit du jour: ${giftLabel}.`
+    : "profitez d'un article gratuit aujourd'hui.";
   if (firstName) {
-    return `Joyeux anniversaire ${firstName}, profitez d'un article gratuit aujourd'hui.`;
+    return `Joyeux anniversaire ${firstName}, ${giftPart}`;
   }
-  return "Joyeux anniversaire, profitez d'un article gratuit aujourd'hui.";
+  return `Joyeux anniversaire, ${giftPart}`;
 };
 
 const sendBirthdayPushNotificationsForToday = async (options = {}) => {
@@ -168,6 +192,7 @@ const sendBirthdayPushNotificationsForToday = async (options = {}) => {
     const summary = getBirthdayBenefitSummary(user, now, { timezone });
     return summary.canClaimFreeItem;
   });
+  const configuredFreeItemName = await resolveBirthdayConfiguredFreeItemName();
 
   if (!eligibleUsers.length) {
     return {
@@ -189,10 +214,11 @@ const sendBirthdayPushNotificationsForToday = async (options = {}) => {
       to: user.expo_token,
       sound: "default",
       title: "Joyeux anniversaire",
-      body: buildBirthdayPushBody(user.name),
+      body: buildBirthdayPushBody(user.name, configuredFreeItemName),
       priority: "high",
       data: {
         type: "birthday_free_item",
+        freeItemName: configuredFreeItemName || "",
       },
     });
     userIds.push(String(user._id));

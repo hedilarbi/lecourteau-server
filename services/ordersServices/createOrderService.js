@@ -1,6 +1,6 @@
 const { default: mongoose } = require("mongoose");
 const Order = require("../../models/Order");
-const { ON_GOING, SCHEDULED } = require("../../utils/constants");
+const { ON_GOING, SCHEDULED, CANCELED } = require("../../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const generateRandomCode = require("../../utils/generateOrderCode");
 const { default: Stripe } = require("stripe");
@@ -10,6 +10,7 @@ const {
 const {
   getOrCreateSettingDocument,
   getSubscriptionFreeItemCycleKey,
+  isSubscriptionCurrentlyActive,
   SUBSCRIPTION_DISCOUNT_PERCENT,
 } = require("../subscriptionServices/subscriptionHelpers");
 
@@ -30,19 +31,6 @@ const roundMoney = (value, fallback = 0) => {
 };
 
 const normalizeId = (value) => String(value || "").trim();
-
-const isUserSubscriptionActive = (user) => {
-  const status = String(user?.subscriptionStatus || "").toLowerCase();
-  const statusActive = status === "active" || status === "trialing";
-  const periodEnd = user?.subscriptionCurrentPeriodEnd
-    ? new Date(user.subscriptionCurrentPeriodEnd)
-    : null;
-  const hasValidPeriodEnd =
-    periodEnd instanceof Date && !Number.isNaN(periodEnd.getTime());
-  const periodNotExpired = !hasValidPeriodEnd || periodEnd.getTime() > Date.now();
-
-  return statusActive && periodNotExpired;
-};
 
 const createOrderService = async (order, options = {}) => {
   try {
@@ -71,6 +59,12 @@ const createOrderService = async (order, options = {}) => {
     const configuredFreeItemName = String(
       setting?.subscription?.freeItemMenuItemName || "",
     ).trim();
+    const configuredBirthdayFreeItemId = normalizeId(
+      setting?.birthday?.freeItemMenuItemId,
+    );
+    const configuredBirthdayFreeItemName = String(
+      setting?.birthday?.freeItemMenuItemName || "",
+    ).trim();
 
     const totalPrice = roundMoney(orderPayload.total, 0);
     const isZeroTotalOrder = totalPrice <= 0;
@@ -78,14 +72,14 @@ const createOrderService = async (order, options = {}) => {
     if (allowZeroTotalSubscriptionOrder && !isZeroTotalOrder) {
       return {
         error:
-          "Cette route est réservée aux commandes abonnement avec total à 0.",
+          "Cette route est réservée aux commandes total 0 avec article gratuit éligible.",
       };
     }
 
     if (!allowZeroTotalSubscriptionOrder && isZeroTotalOrder) {
       return {
         error:
-          "Les commandes avec total 0 doivent utiliser la route dédiée abonnement.",
+          "Les commandes avec total 0 doivent utiliser la route dédiée article gratuit.",
       };
     }
 
@@ -110,7 +104,7 @@ const createOrderService = async (order, options = {}) => {
       await stripe.paymentIntents.retrieve(orderPayload.paymentIntentId);
     }
 
-    const subscriptionActive = isUserSubscriptionActive(user);
+    const subscriptionActive = isSubscriptionCurrentlyActive(user);
     const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
       subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
@@ -195,22 +189,59 @@ const createOrderService = async (order, options = {}) => {
     const shouldApplyBirthdayBenefits =
       birthdaySummary.canClaimFreeItem &&
       Boolean(requestedBirthdayBenefits?.isApplied);
+    const requestedBirthdayFreeItemId = normalizeId(
+      requestedBirthdayBenefits?.freeItemMenuItemId,
+    );
+    const requestedBirthdayFreeItemApplied = Boolean(
+      requestedBirthdayBenefits?.freeItemApplied,
+    );
+    let hasPendingBirthdayFreeItemOrder = false;
+    if (shouldApplyBirthdayBenefits && requestedBirthdayFreeItemApplied) {
+      hasPendingBirthdayFreeItemOrder = Boolean(
+        await Order.exists({
+          user: user._id,
+          confirmed: { $ne: true },
+          status: { $ne: CANCELED },
+          "birthdayBenefits.isApplied": true,
+          "birthdayBenefits.freeItemApplied": true,
+          "birthdayBenefits.cycleYear": birthdaySummary.cycleYear,
+        }),
+      );
+    }
+    const configuredBirthdayFreeItemSelected =
+      Boolean(configuredBirthdayFreeItemId) &&
+      Boolean(requestedBirthdayFreeItemId) &&
+      configuredBirthdayFreeItemId === requestedBirthdayFreeItemId;
+    const canApplyConfiguredBirthdayFreeItem =
+      shouldApplyBirthdayBenefits &&
+      requestedBirthdayFreeItemApplied &&
+      configuredBirthdayFreeItemSelected &&
+      !hasPendingBirthdayFreeItemOrder;
+
+    if (hasPendingBirthdayFreeItemOrder) {
+      return {
+        error:
+          "Le cadeau anniversaire est déjà utilisé ou en attente de confirmation pour cette année.",
+      };
+    }
 
     const birthdayBenefits = shouldApplyBirthdayBenefits
       ? {
           isApplied: true,
-          freeItemApplied: Boolean(requestedBirthdayBenefits.freeItemApplied),
-          freeItemAmount: toSafeNumber(
-            requestedBirthdayBenefits.freeItemAmount,
-            0,
-          ),
-          freeItemBasePrice: toSafeNumber(
-            requestedBirthdayBenefits.freeItemBasePrice,
-            0,
-          ),
-          freeItemMenuItemId:
-            requestedBirthdayBenefits.freeItemMenuItemId || null,
-          freeItemLabel: String(requestedBirthdayBenefits.freeItemLabel || ""),
+          freeItemApplied: canApplyConfiguredBirthdayFreeItem,
+          freeItemAmount: canApplyConfiguredBirthdayFreeItem
+            ? toSafeNumber(requestedBirthdayBenefits.freeItemAmount, 0)
+            : 0,
+          freeItemBasePrice: canApplyConfiguredBirthdayFreeItem
+            ? toSafeNumber(requestedBirthdayBenefits.freeItemBasePrice, 0)
+            : 0,
+          freeItemMenuItemId: canApplyConfiguredBirthdayFreeItem
+            ? configuredBirthdayFreeItemId
+            : null,
+          freeItemLabel: canApplyConfiguredBirthdayFreeItem
+            ? configuredBirthdayFreeItemName ||
+              String(requestedBirthdayBenefits.freeItemLabel || "")
+            : "",
           cycleYear: Math.floor(
             toSafeNumber(
               requestedBirthdayBenefits.cycleYear,
@@ -249,16 +280,12 @@ const createOrderService = async (order, options = {}) => {
         : requestedDeliveryFee;
 
     if (allowZeroTotalSubscriptionOrder) {
-      if (!subscriptionActive) {
-        return {
-          error: "Un abonnement actif est requis pour une commande à total 0.",
-        };
-      }
-
-      if (!canApplyConfiguredFreeItem) {
+      const canUseAnyConfiguredFreeItem =
+        canApplyConfiguredFreeItem || canApplyConfiguredBirthdayFreeItem;
+      if (!canUseAnyConfiguredFreeItem) {
         return {
           error:
-            "L'article gratuit mensuel configuré est requis pour une commande à total 0.",
+            "Un article gratuit éligible (abonnement ou anniversaire) est requis pour une commande à total 0.",
         };
       }
 
@@ -272,11 +299,16 @@ const createOrderService = async (order, options = {}) => {
       const hasSingleConfiguredFreeItem =
         orderItems.length === 1 &&
         normalizeId(orderItems[0]?.item) === configuredFreeItemId;
+      const hasSingleConfiguredBirthdayFreeItem =
+        orderItems.length === 1 &&
+        normalizeId(orderItems[0]?.item) === configuredBirthdayFreeItemId;
+      const hasSingleEligibleFreeItem =
+        hasSingleConfiguredFreeItem || hasSingleConfiguredBirthdayFreeItem;
 
-      if (!hasSingleConfiguredFreeItem || offers.length > 0 || rewards.length > 0) {
+      if (!hasSingleEligibleFreeItem || offers.length > 0 || rewards.length > 0) {
         return {
           error:
-            "La commande à total 0 doit contenir uniquement l'article gratuit configuré.",
+            "La commande à total 0 doit contenir uniquement l'article gratuit éligible configuré.",
         };
       }
     }

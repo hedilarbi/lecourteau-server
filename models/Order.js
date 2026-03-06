@@ -22,6 +22,14 @@ const orderSchema = new Schema({
       price: Number,
       basePrice: Number,
       comment: String,
+      isSubscriptionFreeItem: {
+        type: Boolean,
+        default: false,
+      },
+      isBirthdayFreeItem: {
+        type: Boolean,
+        default: false,
+      },
     },
   ],
   offers: [

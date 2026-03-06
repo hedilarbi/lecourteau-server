@@ -232,14 +232,16 @@ const generateSubscriptionRenewalFailedEmail = ({
   amountDue,
   currency,
   nextAttemptDate,
+  graceEndDate,
 }) => {
   const safeName = userName || "Client";
   const amountLabel = formatMoneyForMail(amountDue, currency);
   const nextAttemptLabel = formatDateForMail(nextAttemptDate);
+  const graceEndLabel = formatDateForMail(graceEndDate);
 
   return wrapSimpleMail(
     "Paiement de renouvellement échoué",
-    "Votre abonnement reste en attente de paiement.",
+    "Premier échec détecté, nous réessaierons pendant 3 jours.",
     `
       <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
       <p style="margin:0 0 12px;font-size:15px;">
@@ -251,8 +253,37 @@ const generateSubscriptionRenewalFailedEmail = ({
       <p style="margin:0 0 8px;font-size:14px;">
         Prochaine tentative Stripe: <strong>${nextAttemptLabel}</strong>
       </p>
+      <p style="margin:0 0 8px;font-size:14px;">
+        Date limite avant suspension: <strong>${graceEndLabel}</strong>
+      </p>
       <p style="margin:0;font-size:14px;">
         Vous pouvez mettre à jour votre carte dans l'application, section <strong>Mon abonnement</strong>.
+      </p>
+    `,
+  );
+};
+
+const generateSubscriptionSuspendedEmail = ({
+  userName,
+  amountDue,
+  currency,
+}) => {
+  const safeName = userName || "Client";
+  const amountLabel = formatMoneyForMail(amountDue, currency);
+
+  return wrapSimpleMail(
+    "Abonnement suspendu",
+    "Le paiement n'a pas pu être récupéré après 3 jours de tentatives.",
+    `
+      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 12px;font-size:15px;">
+        Votre abonnement <strong>CLUB COURTEAU</strong> est maintenant suspendu.
+      </p>
+      <p style="margin:0 0 8px;font-size:14px;">
+        Montant non payé: <strong>${amountLabel}</strong>
+      </p>
+      <p style="margin:0;font-size:14px;">
+        Pour réactiver votre abonnement, ouvrez <strong>Mes abonnements</strong> dans l'application et relancez l'abonnement avec une méthode de paiement valide.
       </p>
     `,
   );
@@ -263,4 +294,5 @@ module.exports = {
   generateSubscriptionActivationEmail,
   generateSubscriptionRenewalSuccessEmail,
   generateSubscriptionRenewalFailedEmail,
+  generateSubscriptionSuspendedEmail,
 };

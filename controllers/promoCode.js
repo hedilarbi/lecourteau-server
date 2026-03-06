@@ -2,6 +2,9 @@ const PromoCode = require("../models/PromoCode");
 const User = require("../models/User");
 const { default: Expo } = require("expo-server-sdk");
 const { default: mongoose } = require("mongoose");
+const {
+  isSubscriptionCurrentlyActive,
+} = require("../services/subscriptionServices/subscriptionHelpers");
 const logWithTimestamp = (message) => {
   const timestamp = new Date().toISOString();
   console.error(`${timestamp} - ${message}`);
@@ -192,19 +195,7 @@ const verifyPromoCode = async (req, res) => {
       });
     }
 
-    const subscriptionStatus = String(user.subscriptionStatus || "").toLowerCase();
-    const subscriptionStatusActive =
-      subscriptionStatus === "active" || subscriptionStatus === "trialing";
-    const subscriptionPeriodEnd = user.subscriptionCurrentPeriodEnd
-      ? new Date(user.subscriptionCurrentPeriodEnd)
-      : null;
-    const hasValidPeriodEnd =
-      subscriptionPeriodEnd instanceof Date &&
-      !Number.isNaN(subscriptionPeriodEnd.getTime());
-    const subscriptionNotExpired =
-      !hasValidPeriodEnd || subscriptionPeriodEnd.getTime() > Date.now();
-    const hasActiveSubscription =
-      subscriptionStatusActive && subscriptionNotExpired;
+    const hasActiveSubscription = isSubscriptionCurrentlyActive(user);
     if (hasActiveSubscription) {
       return res.status(400).json({
         success: false,

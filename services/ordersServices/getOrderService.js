@@ -37,6 +37,7 @@ const getOrderService = async (id) => {
       .populate({ path: "user", select: "name phone_number email" })
       .populate("restaurant", "name")
       .populate("subscriptionBenefits.freeItemMenuItemId", "name")
+      .populate("birthdayBenefits.freeItemMenuItemId", "name")
       .populate({
         path: "promoCode",
         populate: { path: "freeItem", select: "name" },

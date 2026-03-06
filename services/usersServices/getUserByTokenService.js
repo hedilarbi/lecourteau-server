@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const {
   refreshUserSubscriptionFromStripe,
   getSubscriptionFreeItemCycleKey,
+  isSubscriptionCurrentlyActive,
 } = require("../subscriptionServices/subscriptionHelpers");
 const {
   getBirthdayBenefitSummary,
@@ -40,24 +41,8 @@ const getUserByTokenService = async (token) => {
     normalizedUser.subscriptionAutoRenew = Boolean(
       normalizedUser.subscriptionAutoRenew,
     );
-    const normalizedSubscriptionStatus = String(
-      normalizedUser.subscriptionStatus || "",
-    )
-      .toLowerCase()
-      .trim();
-    const statusIsActive =
-      normalizedSubscriptionStatus === "active" ||
-      normalizedSubscriptionStatus === "trialing";
-    const subscriptionPeriodEnd = normalizedUser.subscriptionCurrentPeriodEnd
-      ? new Date(normalizedUser.subscriptionCurrentPeriodEnd)
-      : null;
-    const hasValidPeriodEnd =
-      subscriptionPeriodEnd instanceof Date &&
-      !Number.isNaN(subscriptionPeriodEnd.getTime());
-    const subscriptionNotExpired =
-      !hasValidPeriodEnd || subscriptionPeriodEnd.getTime() > Date.now();
     normalizedUser.subscriptionIsActive =
-      statusIsActive && subscriptionNotExpired;
+      isSubscriptionCurrentlyActive(normalizedUser);
     normalizedUser.subscriptionMonthlyPrice = Number.isFinite(monthlyPrice)
       ? monthlyPrice
       : 11.99;

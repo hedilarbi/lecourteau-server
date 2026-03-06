@@ -123,6 +123,34 @@ const userSchema = new Schema({
     type: Number,
     default: 0,
   },
+  subscriptionRenewalFailureInvoiceId: {
+    type: String,
+    default: null,
+  },
+  subscriptionRenewalFailureStartedAt: {
+    type: Date,
+    default: null,
+  },
+  subscriptionRenewalGraceEndsAt: {
+    type: Date,
+    default: null,
+  },
+  subscriptionRenewalFirstFailureEmailSentAt: {
+    type: Date,
+    default: null,
+  },
+  subscriptionSuspendedAt: {
+    type: Date,
+    default: null,
+  },
+  subscriptionSuspensionReason: {
+    type: String,
+    default: "",
+  },
+  subscriptionSuspensionEmailSentAt: {
+    type: Date,
+    default: null,
+  },
 });
 
 module.exports = model("User", userSchema);

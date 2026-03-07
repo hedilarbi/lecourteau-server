@@ -91,6 +91,7 @@ const getHomeContent = async (req, res) => {
           },
         }),
       Setting.findOne()
+        .sort({ _id: 1 })
         .populate("subscription.freeItemMenuItemId", "name image prices")
         .populate("birthday.freeItemMenuItemId", "name image prices"),
     ]);

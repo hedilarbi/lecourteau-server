@@ -38,8 +38,15 @@ const createOrderService = async (order, options = {}) => {
     const allowZeroTotalSubscriptionOrder = Boolean(
       options?.allowZeroTotalSubscriptionOrder,
     );
-    const rewardsList = Array.isArray(orderPayload.rewards)
+    const orderItems = Array.isArray(orderPayload.orderItems)
+      ? orderPayload.orderItems
+      : [];
+    const offers = Array.isArray(orderPayload.offers) ? orderPayload.offers : [];
+    const rewards = Array.isArray(orderPayload.rewards)
       ? orderPayload.rewards
+      : [];
+    const rewardsList = rewards.length
+      ? rewards
           .map((item) => item?.id)
           .filter((rewardId) => Boolean(rewardId))
       : [];
@@ -195,35 +202,79 @@ const createOrderService = async (order, options = {}) => {
     const requestedBirthdayFreeItemApplied = Boolean(
       requestedBirthdayBenefits?.freeItemApplied,
     );
-    let hasPendingBirthdayFreeItemOrder = false;
-    if (shouldApplyBirthdayBenefits && requestedBirthdayFreeItemApplied) {
-      hasPendingBirthdayFreeItemOrder = Boolean(
-        await Order.exists({
-          user: user._id,
-          confirmed: { $ne: true },
-          status: { $ne: CANCELED },
-          "birthdayBenefits.isApplied": true,
-          "birthdayBenefits.freeItemApplied": true,
-          "birthdayBenefits.cycleYear": birthdaySummary.cycleYear,
-        }),
-      );
-    }
+    const containsBirthdayGiftInOrderItems = orderItems.some((item) => {
+      if (Boolean(item?.isBirthdayFreeItem)) return true;
+      const itemId = normalizeId(item?.item);
+      if (!configuredBirthdayFreeItemId || itemId !== configuredBirthdayFreeItemId) {
+        return false;
+      }
+      const basePrice = toSafeNumber(item?.basePrice, 0);
+      const price = toSafeNumber(item?.price, 0);
+      return basePrice > price;
+    });
     const configuredBirthdayFreeItemSelected =
       Boolean(configuredBirthdayFreeItemId) &&
       Boolean(requestedBirthdayFreeItemId) &&
       configuredBirthdayFreeItemId === requestedBirthdayFreeItemId;
+    const cycleYearStart = new Date(
+      Date.UTC(birthdaySummary.cycleYear, 0, 1, 0, 0, 0, 0),
+    );
+    const cycleYearEnd = new Date(
+      Date.UTC(birthdaySummary.cycleYear, 11, 31, 23, 59, 59, 999),
+    );
+    const hasExistingBirthdayGiftOrderThisCycle = containsBirthdayGiftInOrderItems
+      ? Boolean(
+          await Order.exists({
+            user: user._id,
+            status: { $ne: CANCELED },
+            $or: [
+              {
+                "birthdayBenefits.isApplied": true,
+                "birthdayBenefits.freeItemApplied": true,
+                "birthdayBenefits.cycleYear": birthdaySummary.cycleYear,
+              },
+              {
+                "orderItems.isBirthdayFreeItem": true,
+                createdAt: {
+                  $gte: cycleYearStart,
+                  $lte: cycleYearEnd,
+                },
+              },
+            ],
+          }),
+        )
+      : false;
+
+    if (containsBirthdayGiftInOrderItems && !birthdaySummary.canClaimFreeItem) {
+      return {
+        error:
+          "Le cadeau anniversaire est disponible uniquement le jour de l'anniversaire et une seule fois par an.",
+      };
+    }
+
+    if (hasExistingBirthdayGiftOrderThisCycle) {
+      return {
+        error:
+          "Vous avez déjà une commande avec cadeau anniversaire pour cette année.",
+      };
+    }
+
+    if (
+      containsBirthdayGiftInOrderItems &&
+      (!Boolean(requestedBirthdayBenefits?.isApplied) ||
+        !requestedBirthdayFreeItemApplied ||
+        !configuredBirthdayFreeItemSelected)
+    ) {
+      return {
+        error:
+          "Les informations du cadeau anniversaire sont invalides pour cette commande.",
+      };
+    }
+
     const canApplyConfiguredBirthdayFreeItem =
       shouldApplyBirthdayBenefits &&
       requestedBirthdayFreeItemApplied &&
-      configuredBirthdayFreeItemSelected &&
-      !hasPendingBirthdayFreeItemOrder;
-
-    if (hasPendingBirthdayFreeItemOrder) {
-      return {
-        error:
-          "Le cadeau anniversaire est déjà utilisé ou en attente de confirmation pour cette année.",
-      };
-    }
+      configuredBirthdayFreeItemSelected;
 
     const birthdayBenefits = shouldApplyBirthdayBenefits
       ? {
@@ -289,13 +340,6 @@ const createOrderService = async (order, options = {}) => {
         };
       }
 
-      const orderItems = Array.isArray(orderPayload.orderItems)
-        ? orderPayload.orderItems
-        : [];
-      const offers = Array.isArray(orderPayload.offers) ? orderPayload.offers : [];
-      const rewards = Array.isArray(orderPayload.rewards)
-        ? orderPayload.rewards
-        : [];
       const hasSingleConfiguredFreeItem =
         orderItems.length === 1 &&
         normalizeId(orderItems[0]?.item) === configuredFreeItemId;

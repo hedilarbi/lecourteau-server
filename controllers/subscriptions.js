@@ -714,13 +714,27 @@ const createPaymentSuccessEmailJob = (paymentRecord) => async () => {
   if (!paymentRecord?.user) return;
 
   const user = await User.findById(paymentRecord.user).select(
-    "name email subscriptionCurrentPeriodEnd",
+    "name email subscriptionCurrentPeriodEnd subscriptionPaymentsCount",
   );
   if (!user?.email) return;
 
-  const paymentType = String(paymentRecord.paymentType || "")
+  const rawPaymentType = String(paymentRecord.paymentType || "")
     .trim()
     .toLowerCase();
+  const paymentType =
+    rawPaymentType === "activation" || rawPaymentType === "renewal"
+      ? rawPaymentType
+      : Math.max(0, Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0))) > 1
+        ? "renewal"
+        : "activation";
+  if (rawPaymentType !== "activation" && rawPaymentType !== "renewal") {
+    logWithTimestamp("Subscription payment type fallback applied for email", {
+      paymentType: rawPaymentType || "unknown",
+      resolvedType: paymentType,
+      userId: String(user._id),
+      paymentId: String(paymentRecord?._id || ""),
+    });
+  }
   const amount = roundMoney(paymentRecord.amount, 0);
   const currency = normalizeCurrency(paymentRecord.currency || "cad");
 

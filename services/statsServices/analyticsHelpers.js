@@ -48,6 +48,24 @@ const formatIsoDay = (date) => {
   return `${year}-${month}-${day}`;
 };
 
+const formatIsoDayInTimezone = (date, timezone = DEFAULT_TIMEZONE) => {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone || DEFAULT_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parts.find((part) => part.type === "year")?.value || "1970";
+    const month = parts.find((part) => part.type === "month")?.value || "01";
+    const day = parts.find((part) => part.type === "day")?.value || "01";
+    return `${year}-${month}-${day}`;
+  } catch (error) {
+    return formatIsoDay(date);
+  }
+};
+
 const toObjectId = (value) => {
   if (!value || typeof value !== "string") return null;
   if (!mongoose.Types.ObjectId.isValid(value)) return null;
@@ -236,7 +254,7 @@ const buildOrdersMatch = ({
   return match;
 };
 
-const fillRevenueByDay = (series, startDate, endDate) => {
+const fillRevenueByDay = (series, startDate, endDate, timezone = DEFAULT_TIMEZONE) => {
   if (
     !(startDate instanceof Date) ||
     !(endDate instanceof Date) ||
@@ -263,7 +281,7 @@ const fillRevenueByDay = (series, startDate, endDate) => {
     cursor.getTime() <= endDate.getTime();
     cursor = new Date(cursor.getTime() + DAY_MS)
   ) {
-    const key = formatIsoDay(cursor);
+    const key = formatIsoDayInTimezone(cursor, timezone);
     const existing = map.get(key);
     filled.push(
       existing || {
@@ -539,7 +557,7 @@ const buildOrdersAnalytics = async ({
 
   const revenueByDaySeries =
     startDate && endDate
-      ? fillRevenueByDay(revenueByDayAgg || [], startDate, endDate)
+      ? fillRevenueByDay(revenueByDayAgg || [], startDate, endDate, timezone)
       : (revenueByDayAgg || []).map((entry) => ({
           day: entry.day,
           revenue: roundMoney(entry.revenue, 0),

@@ -66,6 +66,24 @@ const formatIsoDayInTimezone = (date, timezone = DEFAULT_TIMEZONE) => {
   }
 };
 
+const normalizeDayKey = (value) => {
+  if (value === null || value === undefined) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+
+  const directMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (directMatch?.[1]) {
+    return directMatch[1];
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatIsoDay(parsed);
+  }
+
+  return raw;
+};
+
 const toObjectId = (value) => {
   if (!value || typeof value !== "string") return null;
   if (!mongoose.Types.ObjectId.isValid(value)) return null;
@@ -265,15 +283,37 @@ const fillRevenueByDay = (series, startDate, endDate, timezone = DEFAULT_TIMEZON
   }
 
   const map = new Map(
-    (series || []).map((entry) => [
-      String(entry.day || ""),
-      {
-        day: String(entry.day || ""),
-        revenue: roundMoney(entry.revenue, 0),
-        orders: Math.max(0, Math.floor(safeNumber(entry.orders, 0))),
-      },
-    ]),
+    (series || [])
+      .map((entry) => {
+        const dayKey = normalizeDayKey(entry.day);
+        if (!dayKey) return null;
+        return [
+          dayKey,
+          {
+            day: dayKey,
+            revenue: roundMoney(entry.revenue, 0),
+            orders: Math.max(0, Math.floor(safeNumber(entry.orders, 0))),
+          },
+        ];
+      })
+      .filter(Boolean),
   );
+
+  const pickExistingPoint = (cursorDate) => {
+    const utcKey = formatIsoDay(cursorDate);
+    const timezoneKey = formatIsoDayInTimezone(cursorDate, timezone);
+    const middayTimezoneKey = formatIsoDayInTimezone(
+      new Date(cursorDate.getTime() + 12 * 60 * 60 * 1000),
+      timezone,
+    );
+
+    return (
+      map.get(utcKey) ||
+      map.get(timezoneKey) ||
+      map.get(middayTimezoneKey) ||
+      null
+    );
+  };
 
   const filled = [];
   for (
@@ -281,14 +321,20 @@ const fillRevenueByDay = (series, startDate, endDate, timezone = DEFAULT_TIMEZON
     cursor.getTime() <= endDate.getTime();
     cursor = new Date(cursor.getTime() + DAY_MS)
   ) {
-    const key = formatIsoDayInTimezone(cursor, timezone);
-    const existing = map.get(key);
+    const displayDay = formatIsoDay(cursor);
+    const existing = pickExistingPoint(cursor);
     filled.push(
-      existing || {
-        day: key,
-        revenue: 0,
-        orders: 0,
-      },
+      existing
+        ? {
+            day: displayDay,
+            revenue: roundMoney(existing.revenue, 0),
+            orders: Math.max(0, Math.floor(safeNumber(existing.orders, 0))),
+          }
+        : {
+            day: displayDay,
+            revenue: 0,
+            orders: 0,
+          },
     );
   }
 

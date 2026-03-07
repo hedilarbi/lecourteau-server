@@ -1,4 +1,5 @@
 const User = require("../../models/User");
+const { getUserService } = require("./getUserService");
 
 const setUserInfoService = async (
   id,
@@ -9,29 +10,38 @@ const setUserInfoService = async (
   date_of_birth,
 ) => {
   try {
-    let newAddress;
-    if (address.length > 0 && coords.longitude) {
-      newAddress = {
-        address,
-        coords,
+    const hasAddress =
+      typeof address === "string" &&
+      address.trim().length > 0 &&
+      Number.isFinite(Number(coords?.latitude)) &&
+      Number.isFinite(Number(coords?.longitude));
+
+    const updateQuery = {
+      $set: {
+        name: name,
+        email: email,
+        is_profile_setup: true,
+        date_of_birth: date_of_birth ? new Date(date_of_birth) : null,
+      },
+    };
+
+    if (hasAddress) {
+      updateQuery.$push = {
+        addresses: {
+          address,
+          coords,
+        },
       };
     }
 
-    const response = await User.findOneAndUpdate(
+    await User.findOneAndUpdate(
       { _id: id },
-      {
-        $set: {
-          name: name,
-          email: email,
-          is_profile_setup: true,
-          date_of_birth: date_of_birth ? new Date(date_of_birth) : null,
-        },
-        $push: {
-          addresses: newAddress,
-        },
-      },
+      updateQuery,
       { new: true },
     );
+
+    const { response, error } = await getUserService(id);
+    if (error) return { error };
 
     return { response };
   } catch (err) {

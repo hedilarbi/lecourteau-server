@@ -1,4 +1,5 @@
 const User = require("../../models/User");
+const { getUserService } = require("./getUserService");
 
 const updateUserService = async (id, email, name, date_of_birth) => {
   try {
@@ -14,13 +15,16 @@ const updateUserService = async (id, email, name, date_of_birth) => {
       }
     }
 
-    const response = await User.findOneAndUpdate(
+    await User.findOneAndUpdate(
       { _id: id },
       {
         $set: updateData,
       },
       { new: true } // This option returns the updated user
     );
+
+    const { response, error } = await getUserService(id);
+    if (error) return { error };
 
     return { response };
   } catch (err) {

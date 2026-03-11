@@ -101,6 +101,15 @@ const resolveStripeInvoiceId = (value) => {
   return "";
 };
 
+const resolveStripePaymentMethodId = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && typeof value.id === "string") {
+    return value.id;
+  }
+  return "";
+};
+
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -224,6 +233,170 @@ const findMatchingSavedCard = async (customerId, paymentMethod) => {
   } while (true);
 
   return null;
+};
+
+const setCustomerDefaultPaymentMethodAfterDetach = async (
+  customerId,
+  detachedPaymentMethodId,
+) => {
+  if (!customerId) return;
+
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    const currentDefaultPmId = resolveStripePaymentMethodId(
+      customer?.invoice_settings?.default_payment_method,
+    );
+
+    if (currentDefaultPmId && currentDefaultPmId !== detachedPaymentMethodId) {
+      return;
+    }
+
+    const savedCards = await stripe.paymentMethods.list({
+      customer: customerId,
+      type: "card",
+      limit: 1,
+    });
+    const fallbackDefaultPmId = savedCards?.data?.[0]?.id || null;
+
+    await stripe.customers.update(customerId, {
+      invoice_settings: {
+        default_payment_method: fallbackDefaultPmId,
+      },
+    });
+  } catch (error) {
+    logWithTimestamp("setCustomerDefaultPaymentMethodAfterDetach failed", {
+      customerId,
+      detachedPaymentMethodId,
+      error: error?.message || "unknown",
+    });
+  }
+};
+
+const hasSuccessfulChargeForPaymentMethod = async ({
+  customerId,
+  paymentMethodId,
+}) => {
+  if (!customerId || !paymentMethodId) return false;
+
+  try {
+    let startingAfter;
+    do {
+      const charges = await stripe.charges.list({
+        customer: customerId,
+        payment_method: paymentMethodId,
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+
+      if (
+        (charges?.data || []).some(
+          (charge) =>
+            String(charge?.status || "").toLowerCase() === "succeeded" ||
+            Boolean(charge?.paid),
+        )
+      ) {
+        return true;
+      }
+
+      if (!charges?.has_more || !(charges?.data || []).length) {
+        break;
+      }
+      startingAfter = charges.data[charges.data.length - 1].id;
+    } while (true);
+  } catch (error) {
+    logWithTimestamp("hasSuccessfulChargeForPaymentMethod failed", {
+      customerId,
+      paymentMethodId,
+      error: error?.message || "unknown",
+    });
+  }
+
+  return false;
+};
+
+const detachFailedAttemptPaymentMethodIfNeeded = async ({
+  user,
+  stripeSubscription,
+  paymentIntent,
+}) => {
+  try {
+    const paymentMethodId = resolveStripePaymentMethodId(
+      paymentIntent?.payment_method,
+    );
+    if (!paymentMethodId) return;
+
+    const subscriptionMetadata =
+      stripeSubscription?.metadata &&
+      typeof stripeSubscription.metadata === "object"
+        ? stripeSubscription.metadata
+        : {};
+    const attemptedPaymentMethodId = resolveStripePaymentMethodId(
+      subscriptionMetadata?.lastAttemptPaymentMethodId,
+    );
+    const wasAttachedForThisAttempt =
+      String(subscriptionMetadata?.lastAttemptPaymentMethodAttached || "")
+        .trim()
+        .toLowerCase() === "true";
+    const isUnpaidSubscriptionUser =
+      toSafeNumber(user?.subscriptionPaymentsCount, 0) <= 0 &&
+      toSafeNumber(user?.subscriptionAmountPaidTotal, 0) <= 0;
+    const matchesAttemptedPaymentMethod =
+      attemptedPaymentMethodId && attemptedPaymentMethodId === paymentMethodId;
+    const shouldDetachForCurrentAttempt =
+      wasAttachedForThisAttempt &&
+      (!attemptedPaymentMethodId || matchesAttemptedPaymentMethod);
+    const shouldDetachForUnpaidFallback =
+      isUnpaidSubscriptionUser &&
+      (!wasAttachedForThisAttempt || !attemptedPaymentMethodId) &&
+      (matchesAttemptedPaymentMethod || !attemptedPaymentMethodId);
+
+    if (!shouldDetachForCurrentAttempt && !shouldDetachForUnpaidFallback) {
+      return;
+    }
+
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+    const paymentMethodCustomerId = resolveStripeCustomerId(paymentMethod?.customer);
+    const intentCustomerId = resolveStripeCustomerId(paymentIntent?.customer);
+    const userCustomerId = resolveStripeCustomerId(user?.stripe_id);
+    const expectedCustomerId = intentCustomerId || userCustomerId;
+
+    if (!paymentMethodCustomerId) return;
+    if (expectedCustomerId && paymentMethodCustomerId !== expectedCustomerId) {
+      return;
+    }
+
+    const alreadyUsedSuccessfully = await hasSuccessfulChargeForPaymentMethod({
+      customerId: paymentMethodCustomerId,
+      paymentMethodId,
+    });
+    if (alreadyUsedSuccessfully) {
+      return;
+    }
+
+    await stripe.paymentMethods.detach(paymentMethodId);
+    await setCustomerDefaultPaymentMethodAfterDetach(
+      paymentMethodCustomerId,
+      paymentMethodId,
+    );
+
+    if (stripeSubscription?.id) {
+      await stripe.subscriptions.update(stripeSubscription.id, {
+        metadata: {
+          ...subscriptionMetadata,
+          userId: String(user?._id || subscriptionMetadata?.userId || ""),
+          lastAttemptPaymentMethodId: "",
+          lastAttemptPaymentMethodAttached: "false",
+        },
+      });
+    }
+  } catch (error) {
+    logWithTimestamp("detachFailedAttemptPaymentMethodIfNeeded failed", {
+      userId: String(user?._id || ""),
+      subscriptionId: stripeSubscription?.id || "",
+      paymentIntentId: paymentIntent?.id || "",
+      error: error?.message || "unknown",
+    });
+  }
 };
 
 const findUserByStripeSubscription = async (stripeSubscription) => {
@@ -1274,6 +1447,7 @@ const createSubscription = async (req, res) => {
     }
 
     let resolvedPaymentMethodId = paymentMethodId;
+    let wasPaymentMethodAttachedNow = false;
     if (!paymentMethodCustomerId) {
       const existingCard = await findMatchingSavedCard(customer.id, paymentMethod);
       if (existingCard?.id) {
@@ -1282,8 +1456,15 @@ const createSubscription = async (req, res) => {
         await stripe.paymentMethods.attach(paymentMethodId, {
           customer: customer.id,
         });
+        wasPaymentMethodAttachedNow = true;
       }
     }
+
+    const subscriptionAttemptMetadata = {
+      userId: String(user._id),
+      lastAttemptPaymentMethodId: resolvedPaymentMethodId,
+      lastAttemptPaymentMethodAttached: String(wasPaymentMethodAttachedNow),
+    };
 
     await stripe.customers.update(customer.id, {
       invoice_settings: {
@@ -1305,6 +1486,12 @@ const createSubscription = async (req, res) => {
               cancel_at_period_end: desiredCancelAtPeriodEnd,
               default_payment_method: resolvedPaymentMethodId,
               payment_settings: SUBSCRIPTION_3DS_PAYMENT_SETTINGS,
+              metadata: {
+                ...(existing?.metadata && typeof existing.metadata === "object"
+                  ? existing.metadata
+                  : {}),
+                ...subscriptionAttemptMetadata,
+              },
               expand: ["items.data.price", "latest_invoice.payment_intent"],
             },
           );
@@ -1405,9 +1592,7 @@ const createSubscription = async (req, res) => {
       collection_method: "charge_automatically",
       payment_settings: SUBSCRIPTION_3DS_PAYMENT_SETTINGS,
       cancel_at_period_end: !autoRenew,
-      metadata: {
-        userId: String(user._id),
-      },
+      metadata: subscriptionAttemptMetadata,
       expand: ["items.data.price", "latest_invoice.payment_intent"],
     });
 
@@ -1489,6 +1674,31 @@ const confirmSubscriptionPayment = async (req, res) => {
       }
 
       if (paymentIntent?.status === "requires_payment_method") {
+        const cleanupSubscriptionId =
+          subscriptionId || user.subscriptionStripeSubscriptionId || null;
+        let cleanupSubscription = null;
+        if (cleanupSubscriptionId) {
+          try {
+            cleanupSubscription = await stripe.subscriptions.retrieve(
+              cleanupSubscriptionId,
+            );
+          } catch (cleanupError) {
+            logWithTimestamp(
+              "confirmSubscriptionPayment cleanup subscription retrieval failed",
+              {
+                userId: String(user._id),
+                subscriptionId: cleanupSubscriptionId,
+                error: cleanupError?.message || "unknown",
+              },
+            );
+          }
+        }
+        await detachFailedAttemptPaymentMethodIfNeeded({
+          user,
+          stripeSubscription: cleanupSubscription,
+          paymentIntent,
+        });
+
         return res.status(409).json({
           success: false,
           message:
@@ -1567,6 +1777,25 @@ const confirmSubscriptionPayment = async (req, res) => {
             paymentIntentStatus: latestPaymentIntent.status,
             subscriptionId: stripeSubscription?.id || resolvedSubscriptionId,
             status: stripeStatus || "incomplete",
+          },
+        });
+      }
+
+      if (latestPaymentIntent?.status === "requires_payment_method") {
+        await detachFailedAttemptPaymentMethodIfNeeded({
+          user,
+          stripeSubscription,
+          paymentIntent: latestPaymentIntent,
+        });
+        return res.status(409).json({
+          success: false,
+          message:
+            "Le paiement a échoué. Veuillez utiliser une autre carte ou réessayer.",
+          data: {
+            status: stripeStatus || "incomplete",
+            paymentIntentStatus: latestPaymentIntent.status,
+            paymentIntentId: latestPaymentIntent.id || null,
+            subscriptionId: stripeSubscription?.id || resolvedSubscriptionId,
           },
         });
       }

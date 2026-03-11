@@ -1299,7 +1299,7 @@ const createSubscription = async (req, res) => {
         );
         if (isOpenStatus(existing?.status)) {
           const desiredCancelAtPeriodEnd = !autoRenew;
-          const synchronizedSubscription = await stripe.subscriptions.update(
+          let synchronizedSubscription = await stripe.subscriptions.update(
             existing.id,
             {
               cancel_at_period_end: desiredCancelAtPeriodEnd,
@@ -1308,6 +1308,54 @@ const createSubscription = async (req, res) => {
               expand: ["items.data.price", "latest_invoice.payment_intent"],
             },
           );
+
+          const latestInvoiceId = resolveStripeInvoiceId(
+            synchronizedSubscription?.latest_invoice,
+          );
+          if (latestInvoiceId) {
+            try {
+              const latestInvoice = await stripe.invoices.retrieve(latestInvoiceId, {
+                expand: ["payment_intent"],
+              });
+              const invoiceStatus = String(latestInvoice?.status || "")
+                .trim()
+                .toLowerCase();
+              const latestPaymentIntentStatus = String(
+                latestInvoice?.payment_intent?.status || "",
+              )
+                .trim()
+                .toLowerCase();
+              const shouldRetryInvoicePayment =
+                invoiceStatus !== "paid" &&
+                (latestPaymentIntentStatus === "requires_payment_method" ||
+                  latestPaymentIntentStatus === "requires_confirmation" ||
+                  latestPaymentIntentStatus === "requires_action" ||
+                  !latestPaymentIntentStatus);
+
+              if (shouldRetryInvoicePayment) {
+                await stripe.invoices.pay(latestInvoiceId, {
+                  payment_method: resolvedPaymentMethodId,
+                  expand: ["payment_intent"],
+                });
+                synchronizedSubscription = await stripe.subscriptions.retrieve(
+                  existing.id,
+                  {
+                    expand: ["items.data.price", "latest_invoice.payment_intent"],
+                  },
+                );
+              }
+            } catch (retryError) {
+              logWithTimestamp(
+                "createSubscription retry latest invoice payment failed",
+                {
+                  userId: String(user._id),
+                  subscriptionId: existing.id,
+                  invoiceId: latestInvoiceId,
+                  error: retryError?.message || "unknown",
+                },
+              );
+            }
+          }
 
           await syncUserWithStripeSubscription(user, synchronizedSubscription, {
             monthlyPrice,
@@ -1731,16 +1779,12 @@ const getSubscriptionAdminStats = async (req, res) => {
 
     const setting = await getOrCreateSettingDocument();
     const config = formatSubscriptionConfig(setting);
+    // "Abonnés" = utilisateurs actifs/trialing ou ayant au moins un paiement
+    // confirmé. On exclut les tentatives incomplètes (ex: 3DS échoué sans paiement).
     const subscribedUsersQuery = {
       $or: [
         { subscriptionIsActive: true },
-        { subscriptionStatus: { $in: Array.from(OPEN_STATUSES) } },
-        {
-          subscriptionStripeSubscriptionId: {
-            $exists: true,
-            $nin: [null, ""],
-          },
-        },
+        { subscriptionStatus: { $in: ["active", "trialing"] } },
         { subscriptionPaymentsCount: { $gt: 0 } },
         { subscriptionAmountPaidTotal: { $gt: 0 } },
       ],

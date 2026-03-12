@@ -56,6 +56,18 @@ const hasDateOfBirth = (user) => {
   return !Number.isNaN(birthDate.getTime());
 };
 
+const getBirthMonthDay = (value) => {
+  const birthDate = new Date(value);
+  if (Number.isNaN(birthDate.getTime())) {
+    return { month: "", day: "" };
+  }
+
+  return {
+    month: String(birthDate.getUTCMonth() + 1).padStart(2, "0"),
+    day: String(birthDate.getUTCDate()).padStart(2, "0"),
+  };
+};
+
 const getBirthdayBenefitSummary = (user, referenceDate = new Date(), options = {}) => {
   const timezone = resolveTimezone(options.timezone);
   const nowParts = getDatePartsInTimezone(referenceDate, timezone);
@@ -72,8 +84,7 @@ const getBirthdayBenefitSummary = (user, referenceDate = new Date(), options = {
 
   let isBirthdayToday = false;
   if (hasBirthDate) {
-    const birthDate = new Date(user.date_of_birth);
-    const birthParts = getDatePartsInTimezone(birthDate, timezone);
+    const birthParts = getBirthMonthDay(user.date_of_birth);
     isBirthdayToday =
       birthParts.month === nowParts.month && birthParts.day === nowParts.day;
   }

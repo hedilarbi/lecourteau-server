@@ -471,14 +471,26 @@ const buildUserSubscriptionSummary = (user, config = {}) => {
       ? toSafeNumber(user?.subscriptionFreeItemUsedCount, 0)
       : 0;
   const freeItemRemaining = Math.max(0, 1 - usedInCurrentCycle);
+  const status = String(user?.subscriptionStatus || "inactive")
+    .trim()
+    .toLowerCase();
+  const isDelinquent = RETRY_GRACE_ELIGIBLE_STATUSES.has(status);
+  const isInRetryGrace = isSubscriptionInRetryGrace(user);
 
   return {
     isActive: isSubscriptionCurrentlyActive(user),
-    status: user?.subscriptionStatus || "inactive",
+    status,
     autoRenew: Boolean(user?.subscriptionAutoRenew),
     stripeSubscriptionId: user?.subscriptionStripeSubscriptionId || null,
     currentPeriodStart: user?.subscriptionCurrentPeriodStart || null,
     currentPeriodEnd: user?.subscriptionCurrentPeriodEnd || null,
+    renewalFailureStartedAt: user?.subscriptionRenewalFailureStartedAt || null,
+    renewalGraceEndsAt: user?.subscriptionRenewalGraceEndsAt || null,
+    renewalFailureInvoiceId: user?.subscriptionRenewalFailureInvoiceId || null,
+    suspendedAt: user?.subscriptionSuspendedAt || null,
+    suspensionReason: user?.subscriptionSuspensionReason || "",
+    isDelinquent,
+    isInRetryGrace,
     monthlyPrice: roundMoney(
       user?.subscriptionMonthlyPrice || config.monthlyPrice || 11.99,
       11.99,

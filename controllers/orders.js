@@ -23,6 +23,72 @@ const logWithTimestamp = (message) => {
   console.error(`${timeStamp} - ${message}`);
 };
 
+const toSafeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const roundMoney = (value, fallback = 0) => {
+  const normalized = toSafeNumber(value, fallback);
+  return Math.round(normalized * 100) / 100;
+};
+
+const parseDateBoundary = (rawValue, mode = "start") => {
+  if (!rawValue) return null;
+  const parsedDate = new Date(rawValue);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+
+  if (mode === "start") {
+    parsedDate.setHours(0, 0, 0, 0);
+  } else {
+    parsedDate.setHours(23, 59, 59, 999);
+  }
+  return parsedDate;
+};
+
+const getTypeFilterValues = (rawType) => {
+  const normalizedType = String(rawType || "")
+    .trim()
+    .toLowerCase();
+
+  if (!normalizedType) return [];
+  if (normalizedType === "delivery" || normalizedType === "livraison") {
+    return ["delivery", "devliery"];
+  }
+  if (
+    normalizedType === "pick up" ||
+    normalizedType === "pickup" ||
+    normalizedType === "ramassage" ||
+    normalizedType === "emporter"
+  ) {
+    return ["pick up", "pickup"];
+  }
+
+  return [String(rawType).trim()];
+};
+
+const getOrderSummary = async (matchQuery = {}) => {
+  const [summaryAgg] = await Order.aggregate([
+    { $match: matchQuery },
+    {
+      $group: {
+        _id: null,
+        totalOrders: { $sum: 1 },
+        totalAmount: { $sum: { $ifNull: ["$total_price", 0] } },
+        totalDeliveryFee: { $sum: { $ifNull: ["$delivery_fee", 0] } },
+        totalNetSales: { $sum: { $ifNull: ["$sub_total_after_discount", 0] } },
+      },
+    },
+  ]);
+
+  return {
+    totalOrders: Math.max(0, Math.floor(toSafeNumber(summaryAgg?.totalOrders, 0))),
+    totalAmount: roundMoney(summaryAgg?.totalAmount, 0),
+    totalDeliveryFee: roundMoney(summaryAgg?.totalDeliveryFee, 0),
+    totalNetSales: roundMoney(summaryAgg?.totalNetSales, 0),
+  };
+};
+
 const createOrder = async (req, res) => {
   const { order } = req.body;
 
@@ -519,9 +585,24 @@ const escapeRegex = (string) => {
 };
 
 const getFilteredOrders = async (req, res) => {
-  const { page = 1, limit = 15, status, restaurant, search } = req.query;
+  const {
+    page = 1,
+    limit = 15,
+    status,
+    restaurant,
+    search,
+    type,
+    from,
+    to,
+    dateFrom,
+    dateTo,
+  } = req.query;
 
   try {
+    const fromDate = parseDateBoundary(from || dateFrom, "start");
+    const toDateValue = parseDateBoundary(to || dateTo, "end");
+    const typeFilterValues = getTypeFilterValues(type);
+
     let query = {};
 
     if (status) query.status = status;
@@ -530,10 +611,21 @@ const getFilteredOrders = async (req, res) => {
       query.restaurant = restaurant;
     }
 
+    if (typeFilterValues.length > 0) {
+      query.type = { $in: typeFilterValues };
+    }
+
+    if (fromDate || toDateValue) {
+      query.createdAt = {};
+      if (fromDate) query.createdAt.$gte = fromDate;
+      if (toDateValue) query.createdAt.$lte = toDateValue;
+    }
+
     if (search) {
       const escapedSearch = escapeRegex(search);
       const matchingUsers = await User.find({
         $or: [
+          { name: { $regex: escapedSearch, $options: "i" } },
           { email: { $regex: escapedSearch, $options: "i" } },
           { phone_number: { $regex: escapedSearch, $options: "i" } },
         ],
@@ -549,7 +641,7 @@ const getFilteredOrders = async (req, res) => {
     }
 
     const orders = await Order.find(query)
-      .populate("user", "email phone_number")
+      .populate("user", "name email phone_number")
       .populate("restaurant")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -557,11 +649,29 @@ const getFilteredOrders = async (req, res) => {
 
     const total = await Order.countDocuments(query);
 
+    const summaryQuery = {};
+    if (status) summaryQuery.status = status;
+    if (restaurant && restaurant.length > 0) {
+      if (mongoose.Types.ObjectId.isValid(restaurant)) {
+        summaryQuery.restaurant = new mongoose.Types.ObjectId(restaurant);
+      }
+    }
+    if (typeFilterValues.length > 0) {
+      summaryQuery.type = { $in: typeFilterValues };
+    }
+    if (fromDate || toDateValue) {
+      summaryQuery.createdAt = {};
+      if (fromDate) summaryQuery.createdAt.$gte = fromDate;
+      if (toDateValue) summaryQuery.createdAt.$lte = toDateValue;
+    }
+    const summary = await getOrderSummary(summaryQuery);
+
     res.json({
       orders,
       total,
       page: Number(page),
       pages: Math.ceil(total / limit),
+      summary,
     });
   } catch (error) {
     console.error("Error fetching orders:", error);
@@ -575,16 +685,35 @@ const getRestaurantFilteredOrders = async (req, res) => {
     limit = 15,
     status,
     search, // Replaces the 'code' parameter with unified search
+    type,
+    from,
+    to,
+    dateFrom,
+    dateTo,
   } = req.query;
 
   const { id } = req.params; // Restaurant ID from URL params
 
   try {
+    const fromDate = parseDateBoundary(from || dateFrom, "start");
+    const toDateValue = parseDateBoundary(to || dateTo, "end");
+    const typeFilterValues = getTypeFilterValues(type);
+
     // Base query always filters by restaurant
     let query = { restaurant: id };
 
     // Apply status filter if provided
     if (status) query.status = status;
+
+    if (typeFilterValues.length > 0) {
+      query.type = { $in: typeFilterValues };
+    }
+
+    if (fromDate || toDateValue) {
+      query.createdAt = {};
+      if (fromDate) query.createdAt.$gte = fromDate;
+      if (toDateValue) query.createdAt.$lte = toDateValue;
+    }
 
     // Handle unified search (code/email/phone)
     if (search) {
@@ -593,6 +722,7 @@ const getRestaurantFilteredOrders = async (req, res) => {
       // Find matching users (for email/phone search)
       const matchingUsers = await User.find({
         $or: [
+          { name: { $regex: escapedSearch, $options: "i" } },
           { email: { $regex: escapedSearch, $options: "i" } },
           { phone_number: { $regex: escapedSearch, $options: "i" } },
         ],
@@ -610,24 +740,36 @@ const getRestaurantFilteredOrders = async (req, res) => {
         });
       }
 
-      // Combine with existing query using $and
-      query.$and = [{ ...query }, { $or: searchConditions }];
+      query.$or = searchConditions;
     }
 
     // Execute query with pagination
     const orders = await Order.find(query)
-      .populate("user", "email phone_number") // Include user contact info
+      .populate("user", "name email phone_number") // Include user contact info
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
 
     const total = await Order.countDocuments(query);
 
+    const summaryQuery = { restaurant: new mongoose.Types.ObjectId(id) };
+    if (status) summaryQuery.status = status;
+    if (typeFilterValues.length > 0) {
+      summaryQuery.type = { $in: typeFilterValues };
+    }
+    if (fromDate || toDateValue) {
+      summaryQuery.createdAt = {};
+      if (fromDate) summaryQuery.createdAt.$gte = fromDate;
+      if (toDateValue) summaryQuery.createdAt.$lte = toDateValue;
+    }
+    const summary = await getOrderSummary(summaryQuery);
+
     res.json({
       orders,
       total,
       page: Number(page),
       pages: Math.ceil(total / limit),
+      summary,
     });
   } catch (error) {
     console.error("Error fetching restaurant orders:", error);

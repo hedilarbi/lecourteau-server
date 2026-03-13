@@ -123,8 +123,16 @@ const clearUserRenewalFailureState = (user) => {
 
 const isSubscriptionInRetryGrace = (user) => {
   const status = String(user?.subscriptionStatus || "").toLowerCase();
-  if (!RETRY_GRACE_ELIGIBLE_STATUSES.has(status)) return false;
+  if (
+    !RETRY_GRACE_ELIGIBLE_STATUSES.has(status) &&
+    !ACTIVE_SUBSCRIPTION_STATUSES.has(status)
+  ) {
+    return false;
+  }
   if (toDateOrNull(user?.subscriptionSuspendedAt)) return false;
+
+  const failureStartedAt = toDateOrNull(user?.subscriptionRenewalFailureStartedAt);
+  if (!failureStartedAt) return false;
 
   const graceEnd = toDateOrNull(user?.subscriptionRenewalGraceEndsAt);
   if (!graceEnd) return false;
@@ -406,9 +414,6 @@ const syncUserWithStripeSubscription = async (
   user.subscriptionCurrentPeriodEnd = currentPeriodEnd;
   user.subscriptionMonthlyPrice = monthlyPrice;
   ensureUserFreeItemCycle(user, currentPeriodStart || new Date());
-  if (isActiveStatus(status)) {
-    clearUserRenewalFailureState(user);
-  }
   user.subscriptionIsActive = isSubscriptionCurrentlyActive(user);
 
   await user.save();
@@ -474,8 +479,9 @@ const buildUserSubscriptionSummary = (user, config = {}) => {
   const status = String(user?.subscriptionStatus || "inactive")
     .trim()
     .toLowerCase();
-  const isDelinquent = RETRY_GRACE_ELIGIBLE_STATUSES.has(status);
   const isInRetryGrace = isSubscriptionInRetryGrace(user);
+  const isDelinquent =
+    RETRY_GRACE_ELIGIBLE_STATUSES.has(status) || isInRetryGrace;
 
   return {
     isActive: isSubscriptionCurrentlyActive(user),

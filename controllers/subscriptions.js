@@ -34,7 +34,6 @@ const OPEN_STATUSES = new Set([
   "past_due",
   "unpaid",
 ]);
-const DELINQUENT_SUBSCRIPTION_STATUSES = new Set(["past_due", "unpaid"]);
 
 const SUBSCRIPTION_3DS_PAYMENT_SETTINGS = {
   payment_method_types: ["card"],
@@ -539,8 +538,26 @@ const toDateOrNull = (value) => {
   return parsed;
 };
 
-const isDelinquentSubscriptionStatus = (status) =>
-  DELINQUENT_SUBSCRIPTION_STATUSES.has(String(status || "").toLowerCase());
+const resolveRenewalFailureStartDateFromInvoice = (
+  invoice,
+  fallbackDate = new Date(),
+) => {
+  const safeFallback = toDateOrNull(fallbackDate) || new Date();
+  const finalizedAt = toDateFromStripeTimestamp(
+    invoice?.status_transitions?.finalized_at,
+  );
+  const createdAt = toDateFromStripeTimestamp(invoice?.created);
+  const validCandidates = [finalizedAt, createdAt]
+    .filter(
+      (dateValue) =>
+        dateValue instanceof Date &&
+        !Number.isNaN(dateValue.getTime()) &&
+        dateValue.getTime() <= safeFallback.getTime(),
+    )
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  return validCandidates[0] || safeFallback;
+};
 
 const resolveUserFromSubscriptionId = async (subscriptionId) => {
   const resolvedSubscriptionId = resolveStripeSubscriptionId(subscriptionId);
@@ -589,14 +606,47 @@ const suspendSubscriptionAfterRetryWindow = async ({
     return { suspended: false, shouldSendSuspensionEmail: false };
   }
 
-  const currentStatus = String(user.subscriptionStatus || "").toLowerCase();
-  if (!isDelinquentSubscriptionStatus(currentStatus)) {
+  const failureStartedAt = toDateOrNull(user.subscriptionRenewalFailureStartedAt);
+  if (!failureStartedAt) {
+    return { suspended: false, shouldSendSuspensionEmail: false };
+  }
+
+  if (toDateOrNull(user.subscriptionSuspendedAt)) {
     return { suspended: false, shouldSendSuspensionEmail: false };
   }
 
   const graceEndsAt = toDateOrNull(user.subscriptionRenewalGraceEndsAt);
   if (!graceEndsAt || graceEndsAt.getTime() > now.getTime()) {
     return { suspended: false, shouldSendSuspensionEmail: false };
+  }
+
+  const resolvedFailureInvoiceId = String(
+    failureInvoiceId || user.subscriptionRenewalFailureInvoiceId || "",
+  ).trim();
+  if (resolvedFailureInvoiceId) {
+    try {
+      const latestFailureInvoice = await stripe.invoices.retrieve(
+        resolvedFailureInvoiceId,
+      );
+      const invoiceStatus = String(latestFailureInvoice?.status || "")
+        .trim()
+        .toLowerCase();
+      const invoicePaid =
+        Boolean(latestFailureInvoice?.paid) || invoiceStatus === "paid";
+
+      if (invoicePaid) {
+        clearRenewalFailureState(user);
+        user.subscriptionIsActive = isSubscriptionCurrentlyActive(user);
+        await user.save();
+        return { suspended: false, shouldSendSuspensionEmail: false };
+      }
+    } catch (error) {
+      logWithTimestamp("Failed to verify invoice before subscription suspension", {
+        userId: String(user._id || ""),
+        invoiceId: resolvedFailureInvoiceId,
+        error: error?.message || "unknown",
+      });
+    }
   }
 
   const suspensionAlreadyEmailed = Boolean(
@@ -679,17 +729,11 @@ const handleRenewalFailedInvoice = async (invoice) => {
     };
   }
 
-  const currentStatus = String(user.subscriptionStatus || "").toLowerCase();
-  if (!isDelinquentSubscriptionStatus(currentStatus)) {
-    return {
-      shouldSendFirstFailureEmail: false,
-      shouldSendSuspensionEmail: false,
-      graceEndsAt: toDateOrNull(user.subscriptionRenewalGraceEndsAt),
-      userId: user._id,
-    };
-  }
-
   const now = new Date();
+  const failureStartedAtFromInvoice = resolveRenewalFailureStartDateFromInvoice(
+    invoice,
+    now,
+  );
   const invoiceId = resolveStripeInvoiceId(invoice) || `sub-${subscriptionId}`;
   const previousInvoiceId = String(user.subscriptionRenewalFailureInvoiceId || "")
     .trim();
@@ -701,9 +745,9 @@ const handleRenewalFailedInvoice = async (invoice) => {
   let shouldSendFirstFailureEmail = false;
   if (isNewFailureCycle) {
     user.subscriptionRenewalFailureInvoiceId = invoiceId;
-    user.subscriptionRenewalFailureStartedAt = now;
+    user.subscriptionRenewalFailureStartedAt = failureStartedAtFromInvoice;
     user.subscriptionRenewalGraceEndsAt =
-      getSubscriptionRenewalGraceEndFromDate(now);
+      getSubscriptionRenewalGraceEndFromDate(failureStartedAtFromInvoice);
     user.subscriptionRenewalFirstFailureEmailSentAt = now;
     user.subscriptionSuspendedAt = null;
     user.subscriptionSuspensionReason = "";
@@ -712,6 +756,14 @@ const handleRenewalFailedInvoice = async (invoice) => {
   } else if (!toDateOrNull(user.subscriptionRenewalFirstFailureEmailSentAt)) {
     user.subscriptionRenewalFirstFailureEmailSentAt = now;
     shouldSendFirstFailureEmail = true;
+  }
+
+  if (!toDateOrNull(user.subscriptionRenewalGraceEndsAt)) {
+    const normalizedStartDate =
+      toDateOrNull(user.subscriptionRenewalFailureStartedAt) ||
+      failureStartedAtFromInvoice;
+    user.subscriptionRenewalGraceEndsAt =
+      getSubscriptionRenewalGraceEndFromDate(normalizedStartDate);
   }
 
   user.subscriptionIsActive = true;
@@ -759,8 +811,8 @@ const handleSubscriptionStatusRetryPolicy = async (subscriptionId) => {
     return { shouldSendSuspensionEmail: false, userId: null };
   }
 
-  const status = String(user.subscriptionStatus || "").toLowerCase();
-  if (!isDelinquentSubscriptionStatus(status)) {
+  const failureStartedAt = toDateOrNull(user.subscriptionRenewalFailureStartedAt);
+  if (!failureStartedAt) {
     return { shouldSendSuspensionEmail: false, userId: user._id };
   }
 

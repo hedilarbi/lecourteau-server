@@ -12,6 +12,7 @@ function startScheduledOrdersJob() {
       // On "débloque" les commandes dont scheduledFor est dans <= 45 min si delivery, sinon <= 30 min
       const res = await Order.updateMany(
         {
+          confirmed: true,
           status: SCHEDULED,
           "scheduled.isScheduled": true,
           "scheduled.processed": false,

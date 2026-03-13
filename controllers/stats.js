@@ -140,7 +140,13 @@ const getRestaurantStats = async (req, res) => {
           restaurant: id,
           status: ON_GOING,
           confirmed: true,
-          "scheduled.isScheduled": { $ne: true },
+          $or: [
+            { "scheduled.isScheduled": { $ne: true } },
+            {
+              "scheduled.isScheduled": true,
+              "scheduled.processed": true,
+            },
+          ],
         })
           .select(orderProjection)
           .populate({ path: "user", select: "name" })
@@ -159,8 +165,9 @@ const getRestaurantStats = async (req, res) => {
           restaurant: id,
           confirmed: true,
           "scheduled.isScheduled": true,
+          "scheduled.processed": { $ne: true },
           "scheduled.scheduledFor": { $ne: null },
-          status: { $in: [SCHEDULED, ON_GOING] },
+          status: SCHEDULED,
         })
           .select(orderProjection)
           .populate({ path: "user", select: "name" })

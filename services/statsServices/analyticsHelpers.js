@@ -22,6 +22,38 @@ const roundMoney = (value, fallback = 0) => {
   return Math.round(normalized * 100) / 100;
 };
 
+const toNumberOrNullExpr = (fieldPath) => ({
+  $let: {
+    vars: {
+      parsed: {
+        $convert: {
+          input: fieldPath,
+          to: "double",
+          onError: null,
+          onNull: null,
+        },
+      },
+    },
+    in: {
+      $cond: [
+        {
+          $or: [
+            { $eq: ["$$parsed", null] },
+            // NaN guard (NaN is the only value that is not equal to itself)
+            { $ne: ["$$parsed", "$$parsed"] },
+          ],
+        },
+        null,
+        "$$parsed",
+      ],
+    },
+  },
+});
+
+const toNumberOrZeroExpr = (fieldPath) => ({
+  $ifNull: [toNumberOrNullExpr(fieldPath), 0],
+});
+
 const startOfUtcDay = (date) => {
   const result = new Date(date);
   result.setUTCHours(0, 0, 0, 0);
@@ -222,6 +254,21 @@ const buildOrdersMatch = ({
   ];
 
   const { isDeliveryExpr, isPickupExpr } = getOrderTypeExpressions();
+  const normalizedPlatformExpr = {
+    $toLower: {
+      $trim: {
+        input: { $ifNull: ["$platform", ""] },
+      },
+    },
+  };
+  const isAppPlatformExpr = { $eq: [normalizedPlatformExpr, "app"] };
+  const isWebPlatformExpr = { $eq: [normalizedPlatformExpr, "web"] };
+  const isUnknownPlatformExpr = {
+    $and: [
+      { $ne: [normalizedPlatformExpr, "app"] },
+      { $ne: [normalizedPlatformExpr, "web"] },
+    ],
+  };
   const normalizedOrderType = String(orderType || "all")
     .trim()
     .toLowerCase();
@@ -360,6 +407,29 @@ const buildOrdersAnalytics = async ({
     orderType,
   });
   const { isDeliveryExpr, isPickupExpr } = getOrderTypeExpressions();
+  const totalPriceExpr = toNumberOrZeroExpr("$total_price");
+  const deliveryFeeExpr = toNumberOrZeroExpr("$delivery_fee");
+  const tipExpr = toNumberOrZeroExpr("$tip");
+  const subTotalExpr = toNumberOrNullExpr("$sub_total");
+  const subTotalAfterDiscountExpr = toNumberOrNullExpr(
+    "$sub_total_after_discount",
+  );
+  const derivedNetSalesExpr = {
+    $max: [
+      0,
+      {
+        $subtract: [totalPriceExpr, { $add: [deliveryFeeExpr, tipExpr] }],
+      },
+    ],
+  };
+  const netSalesExpr = {
+    $ifNull: [
+      subTotalAfterDiscountExpr,
+      {
+        $ifNull: [subTotalExpr, derivedNetSalesExpr],
+      },
+    ],
+  };
 
   const [
     summaryAgg,
@@ -375,7 +445,9 @@ const buildOrdersAnalytics = async ({
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: { $ifNull: ["$total_price", 0] } },
+          totalRevenue: { $sum: totalPriceExpr },
+          totalNetSales: { $sum: netSalesExpr },
+          totalDeliveryFee: { $sum: deliveryFeeExpr },
           totalOrders: { $sum: 1 },
           promoOrders: {
             $sum: {
@@ -390,6 +462,21 @@ const buildOrdersAnalytics = async ({
           pickupOrders: {
             $sum: {
               $cond: [isPickupExpr, 1, 0],
+            },
+          },
+          appPlatformOrders: {
+            $sum: {
+              $cond: [isAppPlatformExpr, 1, 0],
+            },
+          },
+          webPlatformOrders: {
+            $sum: {
+              $cond: [isWebPlatformExpr, 1, 0],
+            },
+          },
+          unknownPlatformOrders: {
+            $sum: {
+              $cond: [isUnknownPlatformExpr, 1, 0],
             },
           },
           firstOrderAt: { $min: "$createdAt" },
@@ -572,6 +659,8 @@ const buildOrdersAnalytics = async ({
 
   const summary = summaryAgg?.[0] || {};
   const totalRevenue = roundMoney(summary.totalRevenue, 0);
+  const totalNetSales = roundMoney(summary.totalNetSales, 0);
+  const totalDeliveryFee = roundMoney(summary.totalDeliveryFee, 0);
   const totalOrders = Math.max(0, Math.floor(safeNumber(summary.totalOrders, 0)));
   const promoOrders = Math.max(0, Math.floor(safeNumber(summary.promoOrders, 0)));
   const deliveryOrders = Math.max(
@@ -579,6 +668,18 @@ const buildOrdersAnalytics = async ({
     Math.floor(safeNumber(summary.deliveryOrders, 0)),
   );
   const pickupOrders = Math.max(0, Math.floor(safeNumber(summary.pickupOrders, 0)));
+  const appPlatformOrders = Math.max(
+    0,
+    Math.floor(safeNumber(summary.appPlatformOrders, 0)),
+  );
+  const webPlatformOrders = Math.max(
+    0,
+    Math.floor(safeNumber(summary.webPlatformOrders, 0)),
+  );
+  const unknownPlatformOrders = Math.max(
+    0,
+    Math.floor(safeNumber(summary.unknownPlatformOrders, 0)),
+  );
   const noPromoOrders = Math.max(0, totalOrders - promoOrders);
   const otherTypeOrders = Math.max(0, totalOrders - deliveryOrders - pickupOrders);
   const averageBasket = totalOrders > 0 ? roundMoney(totalRevenue / totalOrders, 0) : 0;
@@ -673,6 +774,8 @@ const buildOrdersAnalytics = async ({
     summary: {
       totalOrders,
       totalRevenue,
+      totalNetSales,
+      totalDeliveryFee,
       averageBasket,
       frequencyPerWeek,
       frequencyPerMonth,
@@ -683,6 +786,9 @@ const buildOrdersAnalytics = async ({
       deliveryOrders,
       pickupOrders,
       otherTypeOrders,
+      appPlatformOrders,
+      webPlatformOrders,
+      unknownPlatformOrders,
       deliveryRate:
         totalOrders > 0 ? roundMoney((deliveryOrders / totalOrders) * 100, 0) : 0,
       pickupRate:
@@ -711,6 +817,11 @@ const buildOrdersAnalytics = async ({
         { label: "Livraison", value: deliveryOrders },
         { label: "Ramassage", value: pickupOrders },
         { label: "Autre", value: otherTypeOrders },
+      ],
+      ordersByPlatform: [
+        { label: "App", value: appPlatformOrders },
+        { label: "Web", value: webPlatformOrders },
+        { label: "Non défini", value: unknownPlatformOrders },
       ],
       topProducts,
     },

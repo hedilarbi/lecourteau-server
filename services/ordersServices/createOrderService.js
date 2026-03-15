@@ -35,6 +35,10 @@ const normalizeId = (value) => String(value || "").trim();
 const createOrderService = async (order, options = {}) => {
   try {
     const orderPayload = order?.order || {};
+    const requestedPlatform = String(orderPayload.platform || "")
+      .trim()
+      .toLowerCase();
+    const normalizedPlatform = requestedPlatform === "web" ? "web" : "app";
     const allowZeroTotalSubscriptionOrder = Boolean(
       options?.allowZeroTotalSubscriptionOrder,
     );
@@ -112,6 +116,7 @@ const createOrderService = async (order, options = {}) => {
     }
 
     const subscriptionActive = isSubscriptionCurrentlyActive(user);
+    const firstOrderDiscountEligible = !Boolean(user?.firstOrderDiscountApplied);
     const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
       subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
@@ -141,14 +146,24 @@ const createOrderService = async (order, options = {}) => {
       configuredFreeItemSelected &&
       freeItemRemaining > 0;
 
+    const appliedSubscriptionDiscountPercent =
+      shouldApplySubscriptionBenefits && !firstOrderDiscountEligible
+        ? SUBSCRIPTION_DISCOUNT_PERCENT
+        : 0;
+    const appliedSubscriptionDiscountAmount =
+      appliedSubscriptionDiscountPercent > 0
+        ? roundMoney(
+            toSafeNumber(orderPayload.subTotal, 0) *
+              (appliedSubscriptionDiscountPercent / 100),
+            0,
+          )
+        : 0;
+
     const subscriptionBenefits = shouldApplySubscriptionBenefits
       ? {
           isApplied: true,
-          discountPercent: SUBSCRIPTION_DISCOUNT_PERCENT,
-          discountAmount: toSafeNumber(
-            requestedSubscriptionBenefits.discountAmount,
-            0,
-          ),
+          discountPercent: appliedSubscriptionDiscountPercent,
+          discountAmount: appliedSubscriptionDiscountAmount,
           freeDeliveryApplied: Boolean(
             requestedSubscriptionBenefits.freeDeliveryApplied,
           ),
@@ -318,8 +333,11 @@ const createOrderService = async (order, options = {}) => {
     }
 
     const requestedDiscount = toSafeNumber(orderPayload.discount, 0);
-    const normalizedDiscount = subscriptionBenefits.isApplied
-      ? SUBSCRIPTION_DISCOUNT_PERCENT
+    const normalizedDiscount = firstOrderDiscountEligible
+      ? 20
+      : subscriptionBenefits.isApplied &&
+          toSafeNumber(subscriptionBenefits?.discountPercent, 0) > 0
+        ? toSafeNumber(subscriptionBenefits.discountPercent, 0)
       : subscriptionActive
         ? 0
         : requestedDiscount;
@@ -372,6 +390,7 @@ const createOrderService = async (order, options = {}) => {
       sub_total: parseFloat(orderPayload.subTotal),
       delivery_fee: normalizedDeliveryFee,
       type: order.type,
+      platform: normalizedPlatform,
       coords: coords,
       code,
       address: order.address || "",

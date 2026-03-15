@@ -67,6 +67,11 @@ const orderSchema = new Schema({
   delivery_fee: Number,
   instructions: String,
   type: String,
+  platform: {
+    type: String,
+    enum: ["app", "web"],
+    default: "app",
+  },
   coords: {
     latitude: Number,
     longitude: Number,

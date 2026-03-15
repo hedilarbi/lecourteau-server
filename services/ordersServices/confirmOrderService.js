@@ -288,7 +288,10 @@ async function finalizeLoyaltyAndPromo(order) {
   const pointsEarned = calculatePoints(order);
   const totalPoints = Math.floor(pointsEarned * 10 - pointsToremove);
   user.fidelity_points += totalPoints;
-  if (!user.firstOrderDiscountApplied && !order?.subscriptionBenefits?.isApplied)
+  const orderDiscountPercent = Number(order?.discount);
+  const usedFirstOrderDiscount =
+    Number.isFinite(orderDiscountPercent) && orderDiscountPercent >= 20;
+  if (!user.firstOrderDiscountApplied && usedFirstOrderDiscount)
     user.firstOrderDiscountApplied = true;
 
   if (order.promoCode) {

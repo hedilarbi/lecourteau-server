@@ -4,11 +4,17 @@ const getAllAudits = async (req, res) => {
   const { page = 1, limit = 50 } = req.query;
   const pageNumber = Math.max(1, Number(page) || 1);
   const limitNumber = Math.max(1, Number(limit) || 50);
-  const staff = req.user;
   try {
     const audits = await Audit.find()
-      .populate("userId")
-      .populate("details")
+      .populate("userId", "name email username")
+      .populate({
+        path: "details",
+        select: "code orderCode user name",
+        populate: {
+          path: "user",
+          select: "name email username",
+        },
+      })
       .sort({ timestamp: -1, _id: -1 })
       .skip((pageNumber - 1) * limitNumber)
       .limit(limitNumber);

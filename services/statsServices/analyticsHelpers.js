@@ -407,6 +407,21 @@ const buildOrdersAnalytics = async ({
     orderType,
   });
   const { isDeliveryExpr, isPickupExpr } = getOrderTypeExpressions();
+  const normalizedPlatformExpr = {
+    $toLower: {
+      $trim: {
+        input: { $ifNull: ["$platform", ""] },
+      },
+    },
+  };
+  const isAppPlatformExpr = { $eq: [normalizedPlatformExpr, "app"] };
+  const isWebPlatformExpr = { $eq: [normalizedPlatformExpr, "web"] };
+  const isUnknownPlatformExpr = {
+    $and: [
+      { $ne: [normalizedPlatformExpr, "app"] },
+      { $ne: [normalizedPlatformExpr, "web"] },
+    ],
+  };
   const totalPriceExpr = toNumberOrZeroExpr("$total_price");
   const deliveryFeeExpr = toNumberOrZeroExpr("$delivery_fee");
   const tipExpr = toNumberOrZeroExpr("$tip");

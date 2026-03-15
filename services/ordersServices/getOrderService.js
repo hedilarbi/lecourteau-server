@@ -12,7 +12,7 @@ const getOrderService = async (id) => {
           },
           {
             path: "customizations",
-            select: "name",
+            select: "name price",
           },
         ],
       })
@@ -29,7 +29,7 @@ const getOrderService = async (id) => {
           },
           {
             path: "items.customizations",
-            select: "name",
+            select: "name price",
           },
         ],
       })

@@ -8,7 +8,12 @@ const getOrderService = async (id) => {
         populate: [
           {
             path: "item",
-            select: "name",
+            select: "name customization_group",
+            populate: {
+              path: "customization_group",
+              select: "name selectionRule toppings",
+              populate: { path: "toppings", select: "name price" },
+            },
           },
           {
             path: "customizations",
@@ -25,7 +30,12 @@ const getOrderService = async (id) => {
           },
           {
             path: "items.item",
-            select: "name",
+            select: "name customization_group",
+            populate: {
+              path: "customization_group",
+              select: "name selectionRule toppings",
+              populate: { path: "toppings", select: "name price" },
+            },
           },
           {
             path: "items.customizations",

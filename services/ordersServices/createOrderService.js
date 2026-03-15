@@ -112,7 +112,55 @@ const createOrderService = async (order, options = {}) => {
         };
       }
 
-      await stripe.paymentIntents.retrieve(orderPayload.paymentIntentId);
+      const paymentIntent = await stripe.paymentIntents.retrieve(
+        orderPayload.paymentIntentId,
+      );
+      const expectedAmountCents = Math.round(
+        toSafeNumber(orderPayload.total, 0) * 100,
+      );
+      const paymentIntentAmountCents = Math.round(
+        toSafeNumber(paymentIntent?.amount, 0),
+      );
+      const paymentIntentStatus = String(paymentIntent?.status || "")
+        .toLowerCase()
+        .trim();
+      const allowedStatuses = new Set([
+        "requires_capture",
+        "processing",
+        "succeeded",
+      ]);
+
+      if (expectedAmountCents <= 0) {
+        return {
+          error:
+            "Le montant de la commande est invalide. Veuillez relancer votre paiement.",
+        };
+      }
+
+      if (paymentIntentAmountCents !== expectedAmountCents) {
+        return {
+          error:
+            "Le montant du paiement ne correspond plus à la commande. Veuillez relancer le paiement.",
+        };
+      }
+
+      if (!allowedStatuses.has(paymentIntentStatus)) {
+        return {
+          error:
+            "Le paiement n'est plus valide pour cette commande. Veuillez relancer le paiement.",
+        };
+      }
+
+      if (
+        user?.stripe_id &&
+        paymentIntent?.customer &&
+        String(paymentIntent.customer) !== String(user.stripe_id)
+      ) {
+        return {
+          error:
+            "Le paiement ne correspond pas à ce compte utilisateur. Veuillez relancer le paiement.",
+        };
+      }
     }
 
     const subscriptionActive = isSubscriptionCurrentlyActive(user);

@@ -1,11 +1,35 @@
 const Audit = require("../models/Audit");
 
 const getAllAudits = async (req, res) => {
-  const { page = 1, limit = 50 } = req.query;
+  const { page = 1, limit = 50, from, to } = req.query;
   const pageNumber = Math.max(1, Number(page) || 1);
   const limitNumber = Math.max(1, Number(limit) || 50);
+  const query = {};
+
+  if (from || to) {
+    query.timestamp = {};
+    if (from) {
+      const fromDate = new Date(from);
+      if (!Number.isNaN(fromDate.getTime())) {
+        fromDate.setHours(0, 0, 0, 0);
+        query.timestamp.$gte = fromDate;
+      }
+    }
+
+    if (to) {
+      const toDate = new Date(to);
+      if (!Number.isNaN(toDate.getTime())) {
+        toDate.setHours(23, 59, 59, 999);
+        query.timestamp.$lte = toDate;
+      }
+    }
+
+    if (Object.keys(query.timestamp).length === 0) {
+      delete query.timestamp;
+    }
+  }
   try {
-    const audits = await Audit.find()
+    const audits = await Audit.find(query)
       .populate("userId", "name email username")
       .populate({
         path: "details",
@@ -19,7 +43,7 @@ const getAllAudits = async (req, res) => {
       .skip((pageNumber - 1) * limitNumber)
       .limit(limitNumber);
 
-    const total = await Audit.countDocuments();
+    const total = await Audit.countDocuments(query);
 
     res.json({
       audits,

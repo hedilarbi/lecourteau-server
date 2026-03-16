@@ -159,7 +159,11 @@ const isUserSubscriptionActive = (user) => {
 };
 
 const ensureAdminStaff = async (req, res) => {
-  const staffId = req?.staff?.id;
+  const staffId =
+    req?.staff?.id ||
+    req?.staff?._id ||
+    req?.staff?.staffId ||
+    req?.staff?.userId;
   if (!staffId) {
     res.status(401).json({
       success: false,

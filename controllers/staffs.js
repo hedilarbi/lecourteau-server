@@ -142,6 +142,9 @@ const getStaffByToken = async (req, res) => {
     if (error) {
       return res.status(400).json({ message: error });
     }
+    if (!response) {
+      return res.status(404).json({ message: "staff not found" });
+    }
 
     res.status(200).json(response);
   } catch (error) {

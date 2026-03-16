@@ -16,7 +16,18 @@ const authStaff = (req, res, next) => {
         .json({ success: false, message: "Failed to authenticate token." });
     }
 
-    req.staff = decoded;
+    const rawStaffId =
+      decoded?.id || decoded?._id || decoded?.staffId || decoded?.userId || "";
+    const normalizedStaffId =
+      rawStaffId && typeof rawStaffId === "object"
+        ? rawStaffId?.id || rawStaffId?._id || rawStaffId?.toString?.() || ""
+        : rawStaffId;
+
+    req.staff = {
+      ...decoded,
+      id: normalizedStaffId || decoded?.id || "",
+      _id: normalizedStaffId || decoded?._id || "",
+    };
     next();
   });
 };

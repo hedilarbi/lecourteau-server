@@ -57,6 +57,12 @@ const getUserByTokenService = async (token) => {
     normalizedUser.birthdayFreeItemUsedCount = birthdayBenefits.freeItemUsedCount;
     normalizedUser.birthdayBenefits = birthdayBenefits;
     normalizedUser.isDateOfBirthMissing = !birthdayBenefits.hasDateOfBirth;
+    normalizedUser.birthdayDobPromptDismissed = Boolean(
+      normalizedUser.birthdayDobPromptDismissed,
+    );
+    normalizedUser.firstOrderDiscountPromptDismissed = Boolean(
+      normalizedUser.firstOrderDiscountPromptDismissed,
+    );
 
     return { user: normalizedUser, error: null };
   } catch (err) {

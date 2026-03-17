@@ -16,6 +16,8 @@ const {
   getOrdersList,
   setUserInfo,
   updateUserExpoToken,
+  dismissBirthdayDobPrompt,
+  dismissFirstOrderDiscountPrompt,
   updateUserDiscount,
   savePayementDetails,
   getUsersPagination,
@@ -37,6 +39,11 @@ router.put("/ban/:id", banUser);
 router.put("/favorites/update/remove/:id", removeFromFavorites);
 router.put("/addresses/update/add/:id", addToAddresses);
 router.put("/update/expoToken/:id", updateUserExpoToken);
+router.put("/update/birthday-dob-prompt/:id", dismissBirthdayDobPrompt);
+router.put(
+  "/update/first-order-discount-prompt/:id",
+  dismissFirstOrderDiscountPrompt,
+);
 router.put("/:id/delete/addresses/:addressId", deleteFromAddresses);
 router.get("/orders/:id", getOrdersList);
 router.put("/update/:id", updateUser);

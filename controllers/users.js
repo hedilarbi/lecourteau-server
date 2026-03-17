@@ -328,6 +328,56 @@ const updateUserExpoToken = async (req, res) => {
   }
 };
 
+const dismissBirthdayDobPrompt = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await User.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          birthdayDobPromptDismissed: true,
+        },
+      },
+      { new: true },
+    );
+
+    const { response, error } = await getUserService(id);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
+
+    return res.status(200).json(response);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const dismissFirstOrderDiscountPrompt = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await User.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          firstOrderDiscountPromptDismissed: true,
+        },
+      },
+      { new: true },
+    );
+
+    const { response, error } = await getUserService(id);
+    if (error) {
+      return res.status(400).json({ success: false, error });
+    }
+
+    return res.status(200).json(response);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 const updateUserDiscount = async (req, res) => {
   try {
     const response = await User.updateMany(
@@ -456,6 +506,8 @@ module.exports = {
   getUserByToken,
   setUserInfo,
   updateUserExpoToken,
+  dismissBirthdayDobPrompt,
+  dismissFirstOrderDiscountPrompt,
   updateUserDiscount,
   savePayementDetails,
   getUsersPagination,

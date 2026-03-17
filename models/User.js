@@ -47,6 +47,10 @@ const userSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  firstOrderDiscountPromptDismissed: {
+    type: Boolean,
+    default: false,
+  },
   stripe_id: String,
   subscriptionIsActive: {
     type: Boolean,
@@ -95,6 +99,10 @@ const userSchema = new Schema({
   birthdayLastNotificationYear: {
     type: Number,
     default: 0,
+  },
+  birthdayDobPromptDismissed: {
+    type: Boolean,
+    default: false,
   },
   isBanned: {
     type: Boolean,

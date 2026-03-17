@@ -20,12 +20,14 @@ const {
   savePayementDetails,
   getUsersPagination,
   banUser,
+  nullifyDefaultBirthdates,
 } = require("../controllers/users");
 const router = express.Router();
 
 router.get("/", getUsers);
 router.get("/pagination", getUsersPagination);
 router.get("/userByToken", getUserByToken);
+router.put("/admin/nullify-default-birthdates", nullifyDefaultBirthdates);
 router.put("/update/discount", updateUserDiscount);
 router.post("/create", createUser);
 router.get("/favorites/:id", getFavorites);

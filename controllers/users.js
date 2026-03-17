@@ -70,6 +70,10 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   const { email, name, date_of_birth } = req.body;
   const { id } = req.params;
+  const hasDateOfBirthField = Object.prototype.hasOwnProperty.call(
+    req.body || {},
+    "date_of_birth",
+  );
 
   try {
     const { response, error } = await updateUserService(
@@ -77,6 +81,7 @@ const updateUser = async (req, res) => {
       email,
       name,
       date_of_birth,
+      hasDateOfBirthField,
     );
     if (error) {
       return res.status(400).json(error);
@@ -396,6 +401,45 @@ const banUser = async (req, res) => {
   }
 };
 
+const nullifyDefaultBirthdates = async (req, res) => {
+  try {
+    const start = new Date(Date.UTC(2007, 0, 1, 0, 0, 0, 0));
+    const end = new Date(Date.UTC(2007, 0, 1, 23, 59, 59, 999));
+    const filter = {
+      date_of_birth: {
+        $gte: start,
+        $lte: end,
+      },
+    };
+
+    const matched = await User.countDocuments(filter);
+    const updateResult = await User.updateMany(filter, {
+      $set: {
+        date_of_birth: null,
+      },
+    });
+    const remaining = await User.countDocuments(filter);
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Les dates de naissance par défaut au 2007-01-01 ont été remises à null.",
+      data: {
+        targetDate: "2007-01-01",
+        matched,
+        modified:
+          updateResult?.modifiedCount ?? updateResult?.nModified ?? 0,
+        remaining,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -416,4 +460,5 @@ module.exports = {
   savePayementDetails,
   getUsersPagination,
   banUser,
+  nullifyDefaultBirthdates,
 };

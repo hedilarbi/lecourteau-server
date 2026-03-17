@@ -33,16 +33,21 @@ const normalizeDateOfBirth = (value) => {
   return new Date(Date.UTC(year, month, day, 12, 0, 0, 0));
 };
 
-const updateUserService = async (id, email, name, date_of_birth) => {
+const updateUserService = async (
+  id,
+  email,
+  name,
+  date_of_birth,
+  hasDateOfBirthField = false,
+) => {
   try {
     const updateData = {
       name,
       email,
     };
 
-    if (date_of_birth) {
-      const normalizedDate = normalizeDateOfBirth(date_of_birth);
-      if (normalizedDate) updateData.date_of_birth = normalizedDate;
+    if (hasDateOfBirthField) {
+      updateData.date_of_birth = normalizeDateOfBirth(date_of_birth);
     }
 
     await User.findOneAndUpdate(

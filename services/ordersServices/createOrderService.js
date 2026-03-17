@@ -83,7 +83,7 @@ const createOrderService = async (order, options = {}) => {
     if (allowZeroTotalSubscriptionOrder && !isZeroTotalOrder) {
       return {
         error:
-          "Cette route est réservée aux commandes total 0 avec article gratuit éligible.",
+          "Cette route est réservée aux commandes total 0 avec article gratuit éligible (abonnement ou anniversaire).",
       };
     }
 
@@ -406,19 +406,25 @@ const createOrderService = async (order, options = {}) => {
         };
       }
 
-      const hasSingleConfiguredFreeItem =
-        orderItems.length === 1 &&
-        normalizeId(orderItems[0]?.item) === configuredFreeItemId;
-      const hasSingleConfiguredBirthdayFreeItem =
-        orderItems.length === 1 &&
-        normalizeId(orderItems[0]?.item) === configuredBirthdayFreeItemId;
-      const hasSingleEligibleFreeItem =
-        hasSingleConfiguredFreeItem || hasSingleConfiguredBirthdayFreeItem;
+      const hasOnlyEligibleFreeItems =
+        orderItems.length > 0 &&
+        orderItems.every((item) => {
+          const itemId = normalizeId(item?.item);
+          const isEligibleSubscriptionFreeItem =
+            canApplyConfiguredFreeItem && itemId === configuredFreeItemId;
+          const isEligibleBirthdayFreeItem =
+            canApplyConfiguredBirthdayFreeItem &&
+            itemId === configuredBirthdayFreeItemId;
 
-      if (!hasSingleEligibleFreeItem || offers.length > 0 || rewards.length > 0) {
+          return (
+            isEligibleSubscriptionFreeItem || isEligibleBirthdayFreeItem
+          );
+        });
+
+      if (!hasOnlyEligibleFreeItems || offers.length > 0 || rewards.length > 0) {
         return {
           error:
-            "La commande à total 0 doit contenir uniquement l'article gratuit éligible configuré.",
+            "La commande à total 0 doit contenir uniquement les articles gratuits éligibles configurés.",
         };
       }
     }

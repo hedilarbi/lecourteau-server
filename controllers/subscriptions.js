@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const Subscription = require("../models/Subscription");
 const SubscriptionPayment = require("../models/SubscriptionPayment");
+const SubscriptionEvent = require("../models/SubscriptionEvent");
 const SubscriptionHediPayout = require("../models/SubscriptionHediPayout");
 const MenuItem = require("../models/MenuItem");
 const Staff = require("../models/staff");
@@ -119,6 +120,9 @@ const roundMoney = (value, fallback = 0) => {
   return Math.round(normalized * 100) / 100;
 };
 
+const isValidObjectId = (value) =>
+  typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value.trim());
+
 const normalizeCurrency = (currency) =>
   String(currency || "cad")
     .trim()
@@ -190,6 +194,74 @@ const ensureAdminStaff = async (req, res) => {
   }
 
   return staff;
+};
+
+const toDateOrNull = (value) => {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const normalizeSubscriptionEventType = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const recordSubscriptionEvent = async ({
+  userId,
+  stripeSubscriptionId = "",
+  stripeInvoiceId = "",
+  eventType,
+  occurredAt = new Date(),
+  reason = "",
+  metadata = null,
+}) => {
+  if (!userId) return null;
+
+  const normalizedEventType = normalizeSubscriptionEventType(eventType);
+  if (!normalizedEventType) return null;
+
+  const normalizedSubscriptionId =
+    resolveStripeSubscriptionId(stripeSubscriptionId);
+  const normalizedInvoiceId = resolveStripeInvoiceId(stripeInvoiceId);
+  const normalizedOccurredAt = toDateOrNull(occurredAt) || new Date();
+
+  try {
+    if (normalizedInvoiceId) {
+      const existingEvent = await SubscriptionEvent.findOne({
+        user: userId,
+        eventType: normalizedEventType,
+        stripeInvoiceId: normalizedInvoiceId,
+      })
+        .select("_id")
+        .lean();
+
+      if (existingEvent?._id) {
+        return existingEvent;
+      }
+    }
+
+    return await SubscriptionEvent.create({
+      user: userId,
+      stripeSubscriptionId: normalizedSubscriptionId,
+      stripeInvoiceId: normalizedInvoiceId,
+      eventType: normalizedEventType,
+      occurredAt: normalizedOccurredAt,
+      reason: String(reason || "").trim(),
+      metadata:
+        metadata && typeof metadata === "object" ? metadata : metadata || null,
+    });
+  } catch (error) {
+    logWithTimestamp("Failed to record subscription event", {
+      userId: String(userId || ""),
+      subscriptionId: normalizedSubscriptionId,
+      invoiceId: normalizedInvoiceId,
+      eventType: normalizedEventType,
+      error: error?.message || "unknown",
+    });
+    return null;
+  }
 };
 
 const paymentMethodsAreSameCard = (candidate, reference) => {
@@ -535,13 +607,6 @@ const resolveUserFromInvoice = async (invoice, subscriptionId) => {
   return null;
 };
 
-const toDateOrNull = (value) => {
-  if (!value) return null;
-  const parsed = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
-};
-
 const resolveRenewalFailureStartDateFromInvoice = (
   invoice,
   fallbackDate = new Date(),
@@ -704,6 +769,18 @@ const suspendSubscriptionAfterRetryWindow = async ({
     refreshedUser.subscriptionRenewalFailureInvoiceId = failureInvoiceId;
   }
   await refreshedUser.save();
+  await recordSubscriptionEvent({
+    userId: refreshedUser._id,
+    stripeSubscriptionId: resolvedSubscriptionId,
+    stripeInvoiceId: resolvedFailureInvoiceId,
+    eventType: "suspended",
+    occurredAt: now,
+    reason: refreshedUser.subscriptionSuspensionReason,
+    metadata: {
+      failureStartedAt: failureStartedAt,
+      graceEndsAt: graceEndsAt,
+    },
+  });
 
   return {
     suspended: true,
@@ -773,6 +850,19 @@ const handleRenewalFailedInvoice = async (invoice) => {
   user.subscriptionIsActive = true;
 
   await user.save();
+  if (isNewFailureCycle) {
+    await recordSubscriptionEvent({
+      userId: user._id,
+      stripeSubscriptionId: subscriptionId,
+      stripeInvoiceId: invoiceId,
+      eventType: "payment_failed",
+      occurredAt: failureStartedAtFromInvoice,
+      reason: "renewal_payment_failed",
+      metadata: {
+        graceEndsAt: user.subscriptionRenewalGraceEndsAt || null,
+      },
+    });
+  }
 
   const graceEndsAt = toDateOrNull(user.subscriptionRenewalGraceEndsAt);
   const graceExpired =
@@ -2455,6 +2545,214 @@ const getSubscriptionAdminStats = async (req, res) => {
   }
 };
 
+const getSubscriptionAdminUserDetails = async (req, res) => {
+  try {
+    const staff = await ensureAdminStaff(req, res);
+    if (!staff) return;
+
+    const userId = String(req.params?.userId || "").trim();
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Identifiant utilisateur invalide.",
+      });
+    }
+
+    const [user, subscriptionRecord, paymentDocs, eventDocs] = await Promise.all([
+      User.findById(userId)
+        .select(
+          "name email phone_number createdAt stripe_id subscriptionStatus subscriptionIsActive subscriptionAutoRenew subscriptionStripeSubscriptionId subscriptionCurrentPeriodStart subscriptionCurrentPeriodEnd subscriptionMonthlyPrice subscriptionAmountPaidTotal subscriptionPaymentsCount subscriptionSavingsTotal subscriptionRenewalFailureStartedAt subscriptionRenewalGraceEndsAt subscriptionRenewalFailureInvoiceId subscriptionSuspendedAt subscriptionSuspensionReason subscriptionSuspensionEmailSentAt",
+        )
+        .lean(),
+      Subscription.findOne({ user: userId })
+        .select(
+          "stripeSubscriptionId status cancelAtPeriodEnd canceledAt currentPeriodStart currentPeriodEnd monthlyPrice currency createdAt updatedAt",
+        )
+        .lean(),
+      SubscriptionPayment.find({ user: userId })
+        .sort({ paidAt: -1, createdAt: -1 })
+        .select(
+          "amount currency paymentType billingReason paidAt stripeInvoiceId stripePaymentIntentId createdAt",
+        )
+        .lean(),
+      SubscriptionEvent.find({ user: userId })
+        .sort({ occurredAt: -1, createdAt: -1 })
+        .select(
+          "eventType occurredAt stripeInvoiceId stripeSubscriptionId reason metadata createdAt",
+        )
+        .lean(),
+    ]);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Utilisateur introuvable.",
+      });
+    }
+
+    const paymentHistory = paymentDocs.map((payment) => ({
+      _id: payment._id,
+      amount: roundMoney(payment.amount, 0),
+      currency: normalizeCurrency(payment.currency || "cad"),
+      paymentType: payment.paymentType || "subscription",
+      billingReason: payment.billingReason || "subscription",
+      paidAt: payment.paidAt || payment.createdAt || null,
+      stripeInvoiceId: payment.stripeInvoiceId || "",
+      stripePaymentIntentId: payment.stripePaymentIntentId || "",
+      createdAt: payment.createdAt || null,
+    }));
+
+    const activationPaymentsAsc = [...paymentHistory]
+      .filter((payment) => payment.paymentType === "activation")
+      .sort((a, b) => {
+        const aTime = toDateOrNull(a.paidAt)?.getTime() || 0;
+        const bTime = toDateOrNull(b.paidAt)?.getTime() || 0;
+        return aTime - bTime;
+      });
+
+    const reSubscriptionHistory = activationPaymentsAsc
+      .slice(1)
+      .reverse()
+      .map((payment) => ({
+        _id: payment._id,
+        occurredAt: payment.paidAt || payment.createdAt || null,
+        amount: payment.amount,
+        currency: payment.currency,
+        stripeInvoiceId: payment.stripeInvoiceId || "",
+      }));
+
+    const failedPaymentHistory = eventDocs
+      .filter((event) => event.eventType === "payment_failed")
+      .map((event) => ({
+        _id: event._id,
+        occurredAt: event.occurredAt || event.createdAt || null,
+        stripeInvoiceId: event.stripeInvoiceId || "",
+        reason: event.reason || "",
+        graceEndsAt: event?.metadata?.graceEndsAt || null,
+        createdAt: event.createdAt || null,
+      }));
+
+    const suspensionHistory = eventDocs
+      .filter((event) => event.eventType === "suspended")
+      .map((event) => ({
+        _id: event._id,
+        occurredAt: event.occurredAt || event.createdAt || null,
+        stripeInvoiceId: event.stripeInvoiceId || "",
+        reason: event.reason || "",
+        graceEndsAt: event?.metadata?.graceEndsAt || null,
+        failureStartedAt: event?.metadata?.failureStartedAt || null,
+        createdAt: event.createdAt || null,
+      }));
+
+    if (
+      failedPaymentHistory.length === 0 &&
+      toDateOrNull(user.subscriptionRenewalFailureStartedAt)
+    ) {
+      failedPaymentHistory.push({
+        _id: `current-failure-${user._id}`,
+        occurredAt: user.subscriptionRenewalFailureStartedAt,
+        stripeInvoiceId: user.subscriptionRenewalFailureInvoiceId || "",
+        reason: "renewal_payment_failed",
+        graceEndsAt: user.subscriptionRenewalGraceEndsAt || null,
+        createdAt: user.subscriptionRenewalFailureStartedAt,
+      });
+    }
+
+    if (suspensionHistory.length === 0 && toDateOrNull(user.subscriptionSuspendedAt)) {
+      suspensionHistory.push({
+        _id: `current-suspension-${user._id}`,
+        occurredAt: user.subscriptionSuspendedAt,
+        stripeInvoiceId: user.subscriptionRenewalFailureInvoiceId || "",
+        reason: user.subscriptionSuspensionReason || "",
+        graceEndsAt: user.subscriptionRenewalGraceEndsAt || null,
+        failureStartedAt: user.subscriptionRenewalFailureStartedAt || null,
+        createdAt: user.subscriptionSuspendedAt,
+      });
+    }
+
+    const firstPayment = [...paymentHistory]
+      .sort((a, b) => {
+        const aTime = toDateOrNull(a.paidAt)?.getTime() || 0;
+        const bTime = toDateOrNull(b.paidAt)?.getTime() || 0;
+        return aTime - bTime;
+      })[0];
+
+    const memberSinceAt =
+      activationPaymentsAsc[0]?.paidAt ||
+      firstPayment?.paidAt ||
+      user.subscriptionCurrentPeriodStart ||
+      subscriptionRecord?.currentPeriodStart ||
+      subscriptionRecord?.createdAt ||
+      user.createdAt ||
+      null;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name || "Sans nom",
+          email: user.email || "",
+          phoneNumber: user.phone_number || "",
+          stripeCustomerId: user.stripe_id || "",
+          stripeSubscriptionId:
+            user.subscriptionStripeSubscriptionId ||
+            subscriptionRecord?.stripeSubscriptionId ||
+            "",
+        },
+        summary: {
+          status: user.subscriptionStatus || subscriptionRecord?.status || "inactive",
+          isActive: isUserSubscriptionActive(user),
+          isOpen: isUserSubscriptionOpen(user),
+          autoRenew: Boolean(user.subscriptionAutoRenew),
+          currentPeriodStart:
+            user.subscriptionCurrentPeriodStart ||
+            subscriptionRecord?.currentPeriodStart ||
+            null,
+          currentPeriodEnd:
+            user.subscriptionCurrentPeriodEnd ||
+            subscriptionRecord?.currentPeriodEnd ||
+            null,
+          canceledAt: subscriptionRecord?.canceledAt || null,
+          monthlyPrice: roundMoney(
+            user.subscriptionMonthlyPrice || subscriptionRecord?.monthlyPrice || 11.99,
+            11.99,
+          ),
+          currency: normalizeCurrency(subscriptionRecord?.currency || "cad"),
+          amountPaidTotal: roundMoney(user.subscriptionAmountPaidTotal, 0),
+          paymentsCount: Math.max(
+            0,
+            Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0)),
+          ),
+          savingsTotal: roundMoney(user.subscriptionSavingsTotal, 0),
+          memberSinceAt,
+          renewalFailureStartedAt: user.subscriptionRenewalFailureStartedAt || null,
+          renewalGraceEndsAt: user.subscriptionRenewalGraceEndsAt || null,
+          suspendedAt: user.subscriptionSuspendedAt || null,
+          suspensionReason: user.subscriptionSuspensionReason || "",
+          lastPaymentAt: paymentHistory[0]?.paidAt || null,
+          lastFailedPaymentAt: failedPaymentHistory[0]?.occurredAt || null,
+          lastSuspendedAt: suspensionHistory[0]?.occurredAt || null,
+          lastReSubscribedAt: reSubscriptionHistory[0]?.occurredAt || null,
+        },
+        history: {
+          payments: paymentHistory,
+          failedPayments: failedPaymentHistory,
+          suspensions: suspensionHistory,
+          resubscriptions: reSubscriptionHistory,
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Erreur lors du chargement du détail de l'abonnement utilisateur.",
+    });
+  }
+};
+
 const createHediPayout = async (req, res) => {
   try {
     const staff = await ensureAdminStaff(req, res);
@@ -2535,5 +2833,6 @@ module.exports = {
   cancelSubscription,
   refreshUserSubscription,
   getSubscriptionAdminStats,
+  getSubscriptionAdminUserDetails,
   createHediPayout,
 };

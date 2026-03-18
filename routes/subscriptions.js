@@ -10,6 +10,7 @@ const {
   cancelSubscription,
   refreshUserSubscription,
   getSubscriptionAdminStats,
+  getSubscriptionAdminUserDetails,
   createHediPayout,
 } = require("../controllers/subscriptions");
 const authStaff = require("../middlewares/authStaff");
@@ -26,6 +27,7 @@ router.post("/auto-renew", setSubscriptionAutoRenew);
 router.post("/cancel", cancelSubscription);
 router.post("/refresh/:userId", refreshUserSubscription);
 router.get("/admin/stats", authStaff, getSubscriptionAdminStats);
+router.get("/admin/user/:userId", authStaff, getSubscriptionAdminUserDetails);
 router.post("/admin/hedi-payout", authStaff, createHediPayout);
 
 module.exports = router;

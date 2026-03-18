@@ -203,6 +203,22 @@ const toDateOrNull = (value) => {
   return parsed;
 };
 
+const findUniqueUserByStripeCustomerId = async (customerId) => {
+  const resolvedCustomerId = resolveStripeCustomerId(customerId);
+  if (!resolvedCustomerId) return null;
+
+  const matchedUsers = await User.find({ stripe_id: resolvedCustomerId })
+    .select("_id")
+    .limit(2)
+    .lean();
+
+  if (matchedUsers.length !== 1) {
+    return null;
+  }
+
+  return User.findById(matchedUsers[0]._id);
+};
+
 const normalizeSubscriptionEventType = (value) =>
   String(value || "")
     .trim()
@@ -500,7 +516,7 @@ const findUserByStripeSubscription = async (stripeSubscription) => {
       ? stripeSubscription.customer
       : stripeSubscription?.customer?.id || "";
   if (customerId) {
-    const userByCustomer = await User.findOne({ stripe_id: customerId });
+    const userByCustomer = await findUniqueUserByStripeCustomerId(customerId);
     if (userByCustomer) return userByCustomer;
   }
 
@@ -557,51 +573,72 @@ const syncSubscriptionFromWebhook = async (subscriptionId) => {
 };
 
 const resolveUserFromInvoice = async (invoice, subscriptionId) => {
+  const resolvedSubscriptionId = resolveStripeSubscriptionId(subscriptionId);
   const customerId = resolveStripeCustomerId(invoice?.customer);
+  let subscriptionRecord = null;
+
+  if (resolvedSubscriptionId) {
+    const userBySubscriptionId = await User.findOne({
+      subscriptionStripeSubscriptionId: resolvedSubscriptionId,
+    });
+    if (userBySubscriptionId) {
+      return userBySubscriptionId;
+    }
+
+    subscriptionRecord = await Subscription.findOne({
+      stripeSubscriptionId: resolvedSubscriptionId,
+    }).select("user stripeCustomerId");
+    if (subscriptionRecord?.user) {
+      const userFromRecord = await User.findById(subscriptionRecord.user);
+      if (userFromRecord) {
+        return userFromRecord;
+      }
+    }
+  }
+
+  if (resolvedSubscriptionId) {
+    try {
+      const stripeSubscription = await stripe.subscriptions.retrieve(
+        resolvedSubscriptionId,
+        { expand: ["items.data.price"] },
+      );
+      const userFromStripe = await findUserByStripeSubscription(stripeSubscription);
+      if (userFromStripe) {
+        await syncUserWithStripeSubscription(userFromStripe, stripeSubscription, {
+          customerId:
+            resolveStripeCustomerId(stripeSubscription?.customer) ||
+            customerId ||
+            userFromStripe?.stripe_id ||
+            "",
+        });
+        return userFromStripe;
+      }
+    } catch (error) {
+      // Continue to safe fallbacks below.
+    }
+  }
+
   if (customerId) {
-    const userByCustomer = await User.findOne({ stripe_id: customerId });
+    const userByCustomer = await findUniqueUserByStripeCustomerId(customerId);
     if (userByCustomer) {
       return userByCustomer;
     }
   }
 
-  const subscriptionRecord = await Subscription.findOne({
-    stripeSubscriptionId: subscriptionId,
-  }).select("user stripeCustomerId");
-  if (subscriptionRecord?.user) {
-    const userFromRecord = await User.findById(subscriptionRecord.user);
-    if (userFromRecord) {
-      return userFromRecord;
-    }
-  }
-
   if (subscriptionRecord?.stripeCustomerId) {
-    const userByRecordCustomer = await User.findOne({
-      stripe_id: subscriptionRecord.stripeCustomerId,
-    });
+    const userByRecordCustomer = await findUniqueUserByStripeCustomerId(
+      subscriptionRecord.stripeCustomerId,
+    );
     if (userByRecordCustomer) {
       return userByRecordCustomer;
     }
   }
 
-  try {
-    const stripeSubscription = await stripe.subscriptions.retrieve(
-      subscriptionId,
-      { expand: ["items.data.price"] },
-    );
-    const userFromStripe = await findUserByStripeSubscription(stripeSubscription);
-    if (userFromStripe) {
-      await syncUserWithStripeSubscription(userFromStripe, stripeSubscription, {
-        customerId:
-          resolveStripeCustomerId(stripeSubscription?.customer) ||
-          customerId ||
-          userFromStripe?.stripe_id ||
-          "",
-      });
-      return userFromStripe;
+  if (subscriptionRecord?.user) {
+    const userFromRecord = await User.findById(subscriptionRecord.user);
+    if (userFromRecord) {
+      return userFromRecord;
     }
-  } catch (error) {
-    return null;
   }
 
   return null;

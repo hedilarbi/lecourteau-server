@@ -217,36 +217,62 @@ const getOrCreateSettingDocument = async () => {
 
 const ensureStripeCustomerForUser = async (user) => {
   if (!user) return null;
+  const normalizedUserId = String(user?._id || "").trim();
 
   if (user.stripe_id) {
     try {
       const existingCustomer = await stripe.customers.retrieve(user.stripe_id);
       if (!existingCustomer?.deleted) {
-        return existingCustomer;
+        const conflictingUser = await User.findOne({
+          stripe_id: existingCustomer.id,
+          _id: { $ne: user._id },
+        })
+          .select("_id")
+          .lean();
+        const metadataUserId = String(
+          existingCustomer?.metadata?.userId ||
+            existingCustomer?.metadata?.user ||
+            "",
+        ).trim();
+
+        if (!conflictingUser?._id && (!metadataUserId || metadataUserId === normalizedUserId)) {
+          const shouldRefreshCustomer =
+            metadataUserId !== normalizedUserId ||
+            String(existingCustomer?.email || "").trim() !==
+              String(user?.email || "").trim() ||
+            String(existingCustomer?.name || "").trim() !==
+              String(user?.name || "").trim();
+
+          if (shouldRefreshCustomer) {
+            const refreshedCustomer = await stripe.customers.update(
+              existingCustomer.id,
+              {
+                email: user.email || undefined,
+                name: user.name || undefined,
+                metadata: {
+                  ...(existingCustomer?.metadata || {}),
+                  userId: normalizedUserId,
+                },
+              },
+            );
+            user.stripe_id = refreshedCustomer.id;
+            await user.save();
+            return refreshedCustomer;
+          }
+
+          return existingCustomer;
+        }
       }
     } catch (error) {
-      // Ignore and create/resolve below
+      // Ignore and create below
     }
   }
 
-  let customer = null;
-  if (user.email) {
-    const listed = await stripe.customers.list({
-      email: user.email,
-      limit: 1,
-    });
-    if (listed?.data?.length) {
-      customer = listed.data[0];
-    }
-  }
-
-  if (!customer) {
-    customer = await stripe.customers.create({
-      email: user.email || undefined,
-      name: user.name || undefined,
-      metadata: { userId: String(user._id) },
-    });
-  }
+  const customer = await stripe.customers.create({
+    email: user.email || undefined,
+    name: user.name || undefined,
+    metadata: { userId: normalizedUserId },
+  });
 
   user.stripe_id = customer.id;
   await user.save();

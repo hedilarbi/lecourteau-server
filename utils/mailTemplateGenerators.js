@@ -247,7 +247,7 @@ const generateSubscriptionRenewalSuccessEmail = ({
         </p>
       </div>
       <p style="margin:0;font-size:14px;line-height:22px;color:#4b5563;">
-        Vous continuez de profiter de 15 % de rabais sur les commandes admissibles, de la livraison gratuite et d&apos;1 article gratuit par mois sur votre nouveau cycle.
+        Vous continuez de profiter de 15 % de rabais sur les commandes admissibles, de la livraison gratuite et d&apos;1 article gratuit par mois pour ce nouveau mois.
       </p>
     `,
   );

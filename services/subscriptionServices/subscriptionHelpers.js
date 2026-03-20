@@ -29,7 +29,7 @@ const SUBSCRIPTION_RENEWAL_RETRY_GRACE_MS =
 const SUBSCRIPTION_DISCOUNT_PERCENT = 15;
 const SUBSCRIPTION_PLAN_NAME = "CLUB COURTEAU";
 const SUBSCRIPTION_PLAN_DESCRIPTION =
-  "Abonnement CLUB COURTEAU: 15% de reduction, livraison gratuite, 1 article gratuit par cycle.";
+  "Abonnement CLUB COURTEAU: 15% de reduction, livraison gratuite, 1 article gratuit par mois.";
 const SUBSCRIPTION_PLAN_METADATA = "club_courteau";
 const SUBSCRIPTION_TPS_RATE = 0.05;
 const SUBSCRIPTION_TVQ_RATE = 0.09975;

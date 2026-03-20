@@ -1,4 +1,5 @@
 const PromoCode = require("../models/PromoCode");
+const Category = require("../models/Category");
 const User = require("../models/User");
 const { default: Expo } = require("expo-server-sdk");
 const { default: mongoose } = require("mongoose");
@@ -9,9 +10,64 @@ const logWithTimestamp = (message) => {
   const timestamp = new Date().toISOString();
   console.error(`${timestamp} - ${message}`);
 };
+
+const normalizeOptionalId = (value) => {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+};
+
+const preparePromoCodePayload = async (payload = {}, existingPromoCode = null) => {
+  const effectiveType = String(payload?.type || existingPromoCode?.type || "")
+    .trim()
+    .toLowerCase();
+
+  const nextCode =
+    payload?.code !== undefined
+      ? String(payload.code || "").trim().toUpperCase()
+      : existingPromoCode?.code;
+
+  const nextFreeItem =
+    effectiveType === "free_item"
+      ? normalizeOptionalId(payload?.freeItem ?? existingPromoCode?.freeItem)
+      : null;
+  const nextCategory =
+    effectiveType === "free_item"
+      ? null
+      : normalizeOptionalId(payload?.category ?? existingPromoCode?.category);
+  const nextAmount =
+    effectiveType === "amount"
+      ? Number(payload?.amount ?? existingPromoCode?.amount ?? 0)
+      : null;
+  const nextPercent =
+    effectiveType === "percent"
+      ? Number(payload?.percent ?? existingPromoCode?.percent ?? 0)
+      : null;
+
+  if (nextCategory) {
+    if (!mongoose.Types.ObjectId.isValid(nextCategory)) {
+      throw new Error("Catégorie invalide.");
+    }
+
+    const categoryExists = await Category.exists({ _id: nextCategory });
+    if (!categoryExists) {
+      throw new Error("Catégorie invalide.");
+    }
+  }
+
+  return {
+    ...payload,
+    code: nextCode,
+    type: effectiveType,
+    freeItem: nextFreeItem,
+    category: nextCategory,
+    amount: nextAmount,
+    percent: nextPercent,
+  };
+};
+
 const createPromoCode = async (req, res) => {
   try {
-    const promoCodeData = req.body;
+    const promoCodeData = await preparePromoCodePayload(req.body);
     const notifContent = promoCodeData.notifContent || {};
     const existingPromoCode = await PromoCode.findOne({
       code: promoCodeData.code,
@@ -77,7 +133,7 @@ const createPromoCode = async (req, res) => {
 
 const getPromoCodes = async (req, res) => {
   try {
-    const promoCodes = await PromoCode.find().populate("freeItem");
+    const promoCodes = await PromoCode.find().populate("freeItem").populate("category");
     res.status(200).json(promoCodes);
   } catch (error) {
     logWithTimestamp(`Error fetching promo codes: ${error}`);
@@ -93,7 +149,9 @@ const getPromoCodeById = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const promoCode = await PromoCode.findById(id);
+    const promoCode = await PromoCode.findById(id)
+      .populate("freeItem")
+      .populate("category");
     if (!promoCode) {
       return res.status(404).json({
         success: false,
@@ -116,22 +174,24 @@ const getPromoCodeById = async (req, res) => {
 
 const updatePromoCode = async (req, res) => {
   const { id } = req.params;
-  const updateData = req.body;
 
   try {
-    const promoCode = await PromoCode.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    const promoCode = await PromoCode.findById(id);
     if (!promoCode) {
       return res.status(404).json({
         success: false,
         error: "Promo code not found.",
       });
     }
+
+    const updateData = await preparePromoCodePayload(req.body, promoCode);
+
+    Object.assign(promoCode, updateData);
+    await promoCode.save();
+
     res.status(200).json({
       success: true,
-      data: promoCode,
+      data: await promoCode.populate(["freeItem", "category"]),
     });
   } catch (error) {
     logWithTimestamp(`Error updating promo code: ${error}`);
@@ -171,7 +231,11 @@ const verifyPromoCode = async (req, res) => {
   const { code, userId } = req.body;
 
   try {
-    const promoCode = await PromoCode.findOne({ code }).populate("freeItem");
+    const promoCode = await PromoCode.findOne({
+      code: String(code || "").trim().toUpperCase(),
+    })
+      .populate("freeItem")
+      .populate("category");
     if (!promoCode) {
       return res.status(404).json({
         success: false,

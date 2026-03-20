@@ -197,7 +197,7 @@ const generateSubscriptionActivationEmail = ({
     `
       <p style="margin:0 0 16px;font-size:15px;line-height:24px;">Bonjour ${safeName},</p>
       <p style="margin:0 0 18px;font-size:15px;line-height:24px;color:#374151;">
-        Votre abonnement <strong>CLUB COURTEAU</strong> a bien été activé. Vous pouvez dès maintenant profiter de vos avantages exclusifs.
+        Votre abonnement <strong>CLUB COURTEAU</strong> a bien été activé. Vous pouvez dès maintenant profiter de 15 % de rabais sur les commandes admissibles, de la livraison gratuite et d&apos;1 article gratuit par mois.
       </p>
       <div style="margin:0 0 18px;border:1px solid #e5e7eb;border-radius:16px;padding:18px;background:#fafafa;">
         <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;font-weight:700;">
@@ -211,7 +211,7 @@ const generateSubscriptionActivationEmail = ({
         </p>
       </div>
       <p style="margin:0;font-size:14px;line-height:22px;color:#4b5563;">
-        Vos avantages incluent 15 % de rabais admissible, la livraison gratuite et un article gratuit par cycle.
+        Vos avantages comprennent 15 % de rabais sur les commandes admissibles, la livraison gratuite et 1 article gratuit par mois.
       </p>
     `,
   );
@@ -233,7 +233,7 @@ const generateSubscriptionRenewalSuccessEmail = ({
     `
       <p style="margin:0 0 16px;font-size:15px;line-height:24px;">Bonjour ${safeName},</p>
       <p style="margin:0 0 18px;font-size:15px;line-height:24px;color:#374151;">
-        Nous confirmons que le paiement de renouvellement de votre abonnement <strong>CLUB COURTEAU</strong> a été accepté.
+        Nous confirmons que le paiement de renouvellement de votre abonnement <strong>CLUB COURTEAU</strong> a été accepté. Vous pouvez dès maintenant profiter de 15 % de rabais sur les commandes admissibles, de la livraison gratuite et d&apos;1 article gratuit par mois.
       </p>
       <div style="margin:0 0 18px;border:1px solid #e5e7eb;border-radius:16px;padding:18px;background:#fafafa;">
         <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;font-weight:700;">
@@ -247,7 +247,7 @@ const generateSubscriptionRenewalSuccessEmail = ({
         </p>
       </div>
       <p style="margin:0;font-size:14px;line-height:22px;color:#4b5563;">
-        Vous continuez de profiter de vos avantages CLUB COURTEAU sur votre nouveau cycle.
+        Vous continuez de profiter de 15 % de rabais sur les commandes admissibles, de la livraison gratuite et d&apos;1 article gratuit par mois sur votre nouveau cycle.
       </p>
     `,
   );

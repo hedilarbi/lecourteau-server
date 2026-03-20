@@ -31,6 +31,11 @@ const PromoCodeSchema = new Schema(
       type: Types.ObjectId,
       ref: "MenuItem", // référence à l'item gratuit
     },
+    category: {
+      type: Types.ObjectId,
+      ref: "Category",
+      default: null,
+    },
     startDate: {
       type: Date,
       default: Date.now, // date de début de validité

@@ -1,5 +1,6 @@
 const { default: mongoose } = require("mongoose");
 const Order = require("../../models/Order");
+const PromoCode = require("../../models/PromoCode");
 const { ON_GOING, SCHEDULED, CANCELED } = require("../../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const generateRandomCode = require("../../utils/generateOrderCode");
@@ -31,6 +32,52 @@ const roundMoney = (value, fallback = 0) => {
 };
 
 const normalizeId = (value) => String(value || "").trim();
+
+const buildOrderItemsSubtotal = (items = []) =>
+  roundMoney(
+    items.reduce((sum, item) => sum + toSafeNumber(item?.price, 0), 0),
+    0,
+  );
+
+const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) => {
+  const promoCategoryId = normalizeId(
+    promoCode?.category?._id || promoCode?.category,
+  );
+
+  if (!promoCategoryId) {
+    return buildOrderItemsSubtotal(orderItems);
+  }
+
+  return roundMoney(
+    orderItems.reduce((sum, orderItem) => {
+      const menuItem = menuItemsById.get(normalizeId(orderItem?.item));
+      if (!menuItem) return sum;
+      if (normalizeId(menuItem?.category) !== promoCategoryId) return sum;
+      return sum + toSafeNumber(orderItem?.price, 0);
+    }, 0),
+    0,
+  );
+};
+
+const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal) => {
+  if (!promoCode) return 0;
+
+  if (promoCode.type === "percent") {
+    return roundMoney(
+      eligibleSubtotal * (toSafeNumber(promoCode?.percent, 0) / 100),
+      0,
+    );
+  }
+
+  if (promoCode.type === "amount") {
+    return roundMoney(
+      Math.min(eligibleSubtotal, toSafeNumber(promoCode?.amount, 0)),
+      0,
+    );
+  }
+
+  return 0;
+};
 
 const createOrderService = async (order, options = {}) => {
   try {
@@ -374,10 +421,117 @@ const createOrderService = async (order, options = {}) => {
       };
 
     let promoCodeId = orderPayload.promoCode
-      ? orderPayload.promoCode.promoCodeId
+      ? normalizeId(orderPayload.promoCode.promoCodeId)
       : null;
     if (subscriptionActive) {
       promoCodeId = null;
+    }
+
+    let promoCodeDocument = null;
+    let promoDiscountAmount = 0;
+
+    if (promoCodeId && firstOrderDiscountEligible) {
+      return {
+        error:
+          "Une autre réduction est déjà appliquée à cette commande. Le code promo ne peut pas être utilisé.",
+      };
+    }
+
+    if (promoCodeId) {
+      promoCodeDocument = await PromoCode.findById(promoCodeId)
+        .populate("freeItem")
+        .populate("category");
+
+      if (!promoCodeDocument) {
+        return {
+          error: "Code promo invalide.",
+        };
+      }
+
+      const currentDate = new Date();
+      if (
+        promoCodeDocument.startDate > currentDate ||
+        promoCodeDocument.endDate < currentDate
+      ) {
+        return {
+          error: "Code promo invalide.",
+        };
+      }
+
+      const usedPromo = user.usedPromoCodes.find(
+        (used) =>
+          normalizeId(used?.promoCode) === normalizeId(promoCodeDocument?._id),
+      );
+
+      if (
+        usedPromo &&
+        typeof promoCodeDocument.usagePerUser === "number" &&
+        usedPromo.numberOfUses >= promoCodeDocument.usagePerUser
+      ) {
+        return {
+          error:
+            "Ce code promo a déjà été utilisé le nombre maximum de fois autorisé.",
+        };
+      }
+
+      if (
+        promoCodeDocument.type === "percent" ||
+        promoCodeDocument.type === "amount"
+      ) {
+        const orderMenuItemIds = [
+          ...new Set(
+            orderItems
+              .map((item) => normalizeId(item?.item))
+              .filter((itemId) => Boolean(itemId)),
+          ),
+        ];
+        const relatedMenuItems = orderMenuItemIds.length
+          ? await mongoose.models.MenuItem.find({
+              _id: { $in: orderMenuItemIds },
+            })
+              .select("_id category")
+              .lean()
+          : [];
+        const menuItemsById = new Map(
+          relatedMenuItems.map((item) => [normalizeId(item?._id), item]),
+        );
+        const eligibleSubtotal = calculatePromoEligibleSubtotal(
+          promoCodeDocument,
+          orderItems,
+          menuItemsById,
+        );
+
+        if (eligibleSubtotal <= 0) {
+          return {
+            error:
+              "Ce code promo ne s'applique à aucun article de cette commande.",
+          };
+        }
+
+        promoDiscountAmount = calculatePromoDiscountAmount(
+          promoCodeDocument,
+          eligibleSubtotal,
+        );
+
+        const expectedSubTotalAfterDiscount = roundMoney(
+          Math.max(0, toSafeNumber(orderPayload.subTotal, 0) - promoDiscountAmount),
+          0,
+        );
+        const receivedSubTotalAfterDiscount = roundMoney(
+          orderPayload.subTotalAfterDiscount,
+          0,
+        );
+
+        if (
+          Math.abs(expectedSubTotalAfterDiscount - receivedSubTotalAfterDiscount) >
+          0.01
+        ) {
+          return {
+            error:
+              "Le montant du code promo ne correspond plus aux articles éligibles de la commande.",
+          };
+        }
+      }
     }
 
     const requestedDiscount = toSafeNumber(orderPayload.discount, 0);
@@ -388,7 +542,7 @@ const createOrderService = async (order, options = {}) => {
         ? toSafeNumber(subscriptionBenefits.discountPercent, 0)
       : subscriptionActive
         ? 0
-        : requestedDiscount;
+      : requestedDiscount;
 
     const requestedDeliveryFee = toSafeNumber(orderPayload.deliveryFee, 0);
     const normalizedDeliveryFee =

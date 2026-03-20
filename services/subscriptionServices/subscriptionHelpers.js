@@ -29,8 +29,10 @@ const SUBSCRIPTION_RENEWAL_RETRY_GRACE_MS =
 const SUBSCRIPTION_DISCOUNT_PERCENT = 15;
 const SUBSCRIPTION_PLAN_NAME = "CLUB COURTEAU";
 const SUBSCRIPTION_PLAN_DESCRIPTION =
-  "Abonnement CLUB COURTEAU: 15% de reduction, 0 frais livraison, 1 article gratuit/mois.";
+  "Abonnement CLUB COURTEAU: 15% de reduction, livraison gratuite, 1 article gratuit par cycle.";
 const SUBSCRIPTION_PLAN_METADATA = "club_courteau";
+const SUBSCRIPTION_TPS_RATE = 0.05;
+const SUBSCRIPTION_TVQ_RATE = 0.09975;
 
 const normalizeCurrency = (currency) =>
   String(currency || "cad")
@@ -45,6 +47,23 @@ const toSafeNumber = (value, fallback = 0) => {
 const roundMoney = (value, fallback = 0) => {
   const normalized = toSafeNumber(value, fallback);
   return Math.round(normalized * 100) / 100;
+};
+
+const buildSubscriptionPricing = (subtotalInput, currencyInput = "cad") => {
+  const subtotal = roundMoney(subtotalInput, 11.99);
+  const tpsAmount = roundMoney(subtotal * SUBSCRIPTION_TPS_RATE, 0);
+  const tvqAmount = roundMoney(subtotal * SUBSCRIPTION_TVQ_RATE, 0);
+  const total = roundMoney(subtotal + tpsAmount + tvqAmount, subtotal);
+
+  return {
+    subtotal,
+    tpsRate: SUBSCRIPTION_TPS_RATE,
+    tpsAmount,
+    tvqRate: SUBSCRIPTION_TVQ_RATE,
+    tvqAmount,
+    total,
+    currency: normalizeCurrency(currencyInput),
+  };
 };
 
 const getSubscriptionRecurringConfig = () => {
@@ -288,7 +307,17 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
   );
   const currency = normalizeCurrency(setting.subscription.currency || "cad");
   const recurringConfig = getSubscriptionRecurringConfig();
-  const desiredPriceNickname = `${SUBSCRIPTION_PLAN_NAME} ${monthlyPrice.toFixed(2)} ${currency.toUpperCase()}`;
+  const pricing = buildSubscriptionPricing(monthlyPrice, currency);
+  const desiredPriceNickname = `${SUBSCRIPTION_PLAN_NAME} ${pricing.total.toFixed(2)} ${currency.toUpperCase()}`;
+  const desiredPriceMetadata = {
+    plan: SUBSCRIPTION_PLAN_METADATA,
+    subtotalPrice: pricing.subtotal.toFixed(2),
+    tpsAmount: pricing.tpsAmount.toFixed(2),
+    tvqAmount: pricing.tvqAmount.toFixed(2),
+    totalPrice: pricing.total.toFixed(2),
+    tpsRate: SUBSCRIPTION_TPS_RATE.toString(),
+    tvqRate: SUBSCRIPTION_TVQ_RATE.toString(),
+  };
 
   let stripeProductId = setting.subscription.stripeProductId || "";
   let stripePriceId = setting.subscription.stripePriceId || "";
@@ -335,7 +364,7 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
       const existingPrice = await stripe.prices.retrieve(stripePriceId);
       const existingAmount = toSafeNumber(existingPrice?.unit_amount, 0) / 100;
       const amountHasChanged =
-        Math.round(existingAmount * 100) !== Math.round(monthlyPrice * 100);
+        Math.round(existingAmount * 100) !== Math.round(pricing.total * 100);
       const currencyChanged =
         normalizeCurrency(existingPrice?.currency || "cad") !== currency;
       const priceInactive = existingPrice?.active === false;
@@ -358,14 +387,23 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
         const metadataPlan = String(existingMetadata?.plan || "").trim();
         const nicknameChanged =
           String(existingPrice?.nickname || "") !== desiredPriceNickname;
-        const metadataChanged = metadataPlan !== SUBSCRIPTION_PLAN_METADATA;
+        const metadataChanged =
+          metadataPlan !== SUBSCRIPTION_PLAN_METADATA ||
+          String(existingMetadata?.subtotalPrice || "") !==
+            desiredPriceMetadata.subtotalPrice ||
+          String(existingMetadata?.tpsAmount || "") !==
+            desiredPriceMetadata.tpsAmount ||
+          String(existingMetadata?.tvqAmount || "") !==
+            desiredPriceMetadata.tvqAmount ||
+          String(existingMetadata?.totalPrice || "") !==
+            desiredPriceMetadata.totalPrice;
 
         if (nicknameChanged || metadataChanged) {
           await stripe.prices.update(stripePriceId, {
             nickname: desiredPriceNickname,
             metadata: {
               ...existingMetadata,
-              plan: SUBSCRIPTION_PLAN_METADATA,
+              ...desiredPriceMetadata,
             },
           });
         }
@@ -379,13 +417,13 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
     const createdPrice = await stripe.prices.create({
       currency,
       product: stripeProductId,
-      unit_amount: Math.round(monthlyPrice * 100),
+      unit_amount: Math.round(pricing.total * 100),
       recurring: {
         interval: recurringConfig.interval,
         interval_count: recurringConfig.intervalCount,
       },
       nickname: desiredPriceNickname,
-      metadata: { plan: SUBSCRIPTION_PLAN_METADATA },
+      metadata: desiredPriceMetadata,
     });
     stripePriceId = createdPrice.id;
   }
@@ -400,6 +438,7 @@ const ensureSubscriptionStripePrice = async (monthlyPriceInput) => {
     setting,
     monthlyPrice,
     currency,
+    pricing,
     stripeProductId,
     stripePriceId,
   };
@@ -421,14 +460,18 @@ const syncUserWithStripeSubscription = async (
     stripeSubscription.current_period_end,
   );
   const stripePriceId = stripeSubscription.items?.data?.[0]?.price?.id || "";
-  const monthlyPriceFromStripe = toSafeNumber(
-    stripeSubscription.items?.data?.[0]?.price?.unit_amount,
+  const stripePriceMetadata = stripeSubscription.items?.data?.[0]?.price?.metadata || {};
+  const monthlyPriceFromStripeMetadata = toSafeNumber(
+    stripePriceMetadata?.subtotalPrice,
     0,
   );
   const monthlyPrice = roundMoney(
-    monthlyPriceFromStripe > 0
-      ? monthlyPriceFromStripe / 100
-      : options.monthlyPrice || user.subscriptionMonthlyPrice || 11.99,
+    monthlyPriceFromStripeMetadata > 0
+      ? monthlyPriceFromStripeMetadata
+      : options?.pricing?.subtotal ||
+          options.monthlyPrice ||
+          user.subscriptionMonthlyPrice ||
+          11.99,
     11.99,
   );
 
@@ -496,6 +539,10 @@ const setUserSubscriptionInactive = async (user, status = "canceled") => {
 };
 
 const buildUserSubscriptionSummary = (user, config = {}) => {
+  const pricing = buildSubscriptionPricing(
+    user?.subscriptionMonthlyPrice || config.monthlyPrice || 11.99,
+    config.currency || "cad",
+  );
   const currentCycleKey = getSubscriptionFreeItemCycleKey(user, new Date());
   const usedInCurrentCycle =
     user?.subscriptionFreeItemCycleKey === currentCycleKey
@@ -513,6 +560,7 @@ const buildUserSubscriptionSummary = (user, config = {}) => {
     isActive: isSubscriptionCurrentlyActive(user),
     status,
     autoRenew: Boolean(user?.subscriptionAutoRenew),
+    recurring: getSubscriptionRecurringConfig(),
     stripeSubscriptionId: user?.subscriptionStripeSubscriptionId || null,
     currentPeriodStart: user?.subscriptionCurrentPeriodStart || null,
     currentPeriodEnd: user?.subscriptionCurrentPeriodEnd || null,
@@ -523,11 +571,9 @@ const buildUserSubscriptionSummary = (user, config = {}) => {
     suspensionReason: user?.subscriptionSuspensionReason || "",
     isDelinquent,
     isInRetryGrace,
-    monthlyPrice: roundMoney(
-      user?.subscriptionMonthlyPrice || config.monthlyPrice || 11.99,
-      11.99,
-    ),
-    currency: normalizeCurrency(config.currency || "cad"),
+    monthlyPrice: pricing.subtotal,
+    pricing,
+    currency: pricing.currency,
     savingsTotal: roundMoney(user?.subscriptionSavingsTotal, 0),
     freeItemCycleKey: currentCycleKey,
     freeItemUsedCount: usedInCurrentCycle,
@@ -552,7 +598,7 @@ const refreshUserSubscriptionFromStripe = async (userId) => {
   }
 
   try {
-    const stripeSubscription = await stripe.subscriptions.retrieve(
+    let stripeSubscription = await stripe.subscriptions.retrieve(
       user.subscriptionStripeSubscriptionId,
       { expand: ["items.data.price"] },
     );
@@ -562,7 +608,34 @@ const refreshUserSubscriptionFromStripe = async (userId) => {
       return user;
     }
 
-    await syncUserWithStripeSubscription(user, stripeSubscription);
+    const currentSubscriptionItem = stripeSubscription?.items?.data?.[0] || null;
+    const { stripePriceId, monthlyPrice, currency, pricing } =
+      await ensureSubscriptionStripePrice();
+    if (
+      currentSubscriptionItem?.id &&
+      stripePriceId &&
+      String(currentSubscriptionItem?.price?.id || "") !== String(stripePriceId)
+    ) {
+      stripeSubscription = await stripe.subscriptions.update(
+        user.subscriptionStripeSubscriptionId,
+        {
+          items: [
+            {
+              id: currentSubscriptionItem.id,
+              price: stripePriceId,
+            },
+          ],
+          proration_behavior: "none",
+          expand: ["items.data.price"],
+        },
+      );
+    }
+
+    await syncUserWithStripeSubscription(user, stripeSubscription, {
+      monthlyPrice,
+      currency,
+      pricing,
+    });
     return user;
   } catch (error) {
     return user;
@@ -639,6 +712,11 @@ const applyConfirmedOrderSubscriptionBenefits = async (order) => {
 
 module.exports = {
   stripe,
+  normalizeCurrency,
+  toSafeNumber,
+  roundMoney,
+  buildSubscriptionPricing,
+  getSubscriptionRecurringConfig,
   isActiveStatus,
   isOpenStatus,
   getCycleKey,

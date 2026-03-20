@@ -7,10 +7,12 @@ const MenuItem = require("../models/MenuItem");
 const Staff = require("../models/staff");
 const {
   stripe,
+  buildSubscriptionPricing,
   isActiveStatus,
   isSubscriptionCurrentlyActive,
   isOpenStatus,
   getOrCreateSettingDocument,
+  getSubscriptionRecurringConfig,
   getSubscriptionRenewalGraceEndFromDate,
   ensureSubscriptionStripePrice,
   ensureStripeCustomerForUser,
@@ -1095,7 +1097,7 @@ const createPaymentSuccessEmailJob = (paymentRecord) => async () => {
     await sendSubscriptionActivationEmail({
       userEmail: user.email,
       userName: user.name || "Client",
-      monthlyPrice: amount,
+      amountPaid: amount,
       currency,
       currentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
     });
@@ -1415,6 +1417,8 @@ const formatSubscriptionConfig = (setting) => {
   const currency = String(setting?.subscription?.currency || "cad")
     .trim()
     .toLowerCase();
+  const recurring = getSubscriptionRecurringConfig();
+  const pricing = buildSubscriptionPricing(monthlyPrice, currency);
   const freeItemMenuItemId = setting?.subscription?.freeItemMenuItemId
     ? String(setting.subscription.freeItemMenuItemId)
     : null;
@@ -1430,7 +1434,9 @@ const formatSubscriptionConfig = (setting) => {
 
   return {
     monthlyPrice: Number.isFinite(monthlyPrice) ? monthlyPrice : 11.99,
-    currency: currency || "cad",
+    pricing,
+    currency: pricing.currency,
+    recurring,
     freeItem: freeItemMenuItemId
       ? {
           menuItemId: freeItemMenuItemId,
@@ -1649,7 +1655,7 @@ const createSubscription = async (req, res) => {
   try {
     const userId = req.body?.userId;
     const paymentMethodId = req.body?.paymentMethodId;
-    const autoRenew = req.body?.autoRenew !== false;
+    const autoRenew = true;
 
     if (!userId || !paymentMethodId) {
       return res.status(400).json({
@@ -1674,7 +1680,7 @@ const createSubscription = async (req, res) => {
       });
     }
 
-    const { monthlyPrice, currency, stripePriceId } =
+    const { monthlyPrice, currency, pricing, stripePriceId } =
       await ensureSubscriptionStripePrice();
     const customer = await ensureStripeCustomerForUser(user);
 
@@ -1728,16 +1734,39 @@ const createSubscription = async (req, res) => {
           { expand: ["items.data.price", "latest_invoice.payment_intent"] },
         );
         if (isOpenStatus(existing?.status)) {
+          let synchronizedSubscription = existing;
+          const currentSubscriptionItem = existing?.items?.data?.[0] || null;
+          if (
+            currentSubscriptionItem?.id &&
+            stripePriceId &&
+            String(currentSubscriptionItem?.price?.id || "") !== String(stripePriceId)
+          ) {
+            synchronizedSubscription = await stripe.subscriptions.update(
+              existing.id,
+              {
+                items: [
+                  {
+                    id: currentSubscriptionItem.id,
+                    price: stripePriceId,
+                  },
+                ],
+                proration_behavior: "none",
+                expand: ["items.data.price", "latest_invoice.payment_intent"],
+              },
+            );
+          }
+
           const desiredCancelAtPeriodEnd = !autoRenew;
-          let synchronizedSubscription = await stripe.subscriptions.update(
-            existing.id,
+          synchronizedSubscription = await stripe.subscriptions.update(
+            synchronizedSubscription.id,
             {
               cancel_at_period_end: desiredCancelAtPeriodEnd,
               default_payment_method: resolvedPaymentMethodId,
               payment_settings: SUBSCRIPTION_3DS_PAYMENT_SETTINGS,
               metadata: {
-                ...(existing?.metadata && typeof existing.metadata === "object"
-                  ? existing.metadata
+                ...(synchronizedSubscription?.metadata &&
+                typeof synchronizedSubscription.metadata === "object"
+                  ? synchronizedSubscription.metadata
                   : {}),
                 ...subscriptionAttemptMetadata,
               },
@@ -1796,6 +1825,7 @@ const createSubscription = async (req, res) => {
           await syncUserWithStripeSubscription(user, synchronizedSubscription, {
             monthlyPrice,
             currency,
+            pricing,
             customerId: customer.id,
           });
           const refreshedUser = await User.findById(user._id);
@@ -1848,6 +1878,7 @@ const createSubscription = async (req, res) => {
     await syncUserWithStripeSubscription(user, createdSubscription, {
       monthlyPrice,
       currency,
+      pricing,
       customerId: customer.id,
     });
     const refreshedUser = await User.findById(user._id);

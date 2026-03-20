@@ -154,16 +154,26 @@ const wrapSimpleMail = (title, subtitle, bodyHtml) => `
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${title}</title>
 </head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#111827;">
-  <div style="max-width:640px;margin:0 auto;padding:24px;">
-    <div style="background:#111827;color:#ffffff;padding:20px 24px;border-radius:14px 14px 0 0;">
-      <h1 style="margin:0;font-size:22px;line-height:28px;">${title}</h1>
-      <p style="margin:8px 0 0;font-size:14px;opacity:0.9;">${subtitle}</p>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#111827;">
+  <div style="max-width:640px;margin:0 auto;padding:28px 18px;">
+    <div style="background:#111827;border-radius:24px;overflow:hidden;box-shadow:0 18px 40px rgba(17,24,39,0.14);">
+      <div style="padding:18px 24px;border-bottom:1px solid rgba(255,255,255,0.08);">
+        <p style="margin:0;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:#f7a600;font-weight:700;">
+          CLUB COURTEAU
+        </p>
+      </div>
+      <div style="padding:28px 24px 24px;color:#ffffff;">
+        <h1 style="margin:0;font-size:28px;line-height:34px;font-weight:700;">${title}</h1>
+        <p style="margin:10px 0 0;font-size:15px;line-height:23px;color:rgba(255,255,255,0.82);">
+          ${subtitle}
+        </p>
+      </div>
     </div>
-    <div style="background:#ffffff;border:1px solid #e5e7eb;border-top:none;padding:24px;border-radius:0 0 14px 14px;">
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-top:none;padding:28px 24px;border-radius:0 0 24px 24px;box-shadow:0 10px 30px rgba(15,23,42,0.06);">
       ${bodyHtml}
-      <p style="margin:20px 0 0;font-size:12px;color:#6b7280;">
-        Équipe CLUB COURTEAU
+      <p style="margin:28px 0 0;font-size:12px;line-height:18px;color:#6b7280;">
+        Merci de faire partie de CLUB COURTEAU.<br />
+        Équipe Courteau
       </p>
     </div>
   </div>
@@ -173,27 +183,35 @@ const wrapSimpleMail = (title, subtitle, bodyHtml) => `
 
 const generateSubscriptionActivationEmail = ({
   userName,
-  monthlyPrice,
+  amountPaid,
   currency,
   currentPeriodEnd,
 }) => {
   const safeName = userName || "Client";
-  const priceLabel = formatMoneyForMail(monthlyPrice, currency);
+  const amountLabel = formatMoneyForMail(amountPaid, currency);
   const periodEndLabel = formatDateForMail(currentPeriodEnd);
 
   return wrapSimpleMail(
-    "Bienvenue au CLUB COURTEAU",
-    "Votre abonnement est maintenant actif.",
+    "Votre abonnement est confirmé",
+    "Bienvenue dans CLUB COURTEAU. Votre accès premium est maintenant actif.",
     `
-      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
-      <p style="margin:0 0 12px;font-size:15px;">
-        Félicitations, votre abonnement <strong>CLUB COURTEAU</strong> est activé.
+      <p style="margin:0 0 16px;font-size:15px;line-height:24px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 18px;font-size:15px;line-height:24px;color:#374151;">
+        Votre abonnement <strong>CLUB COURTEAU</strong> a bien été activé. Vous pouvez dès maintenant profiter de vos avantages exclusifs.
       </p>
-      <p style="margin:0 0 8px;font-size:14px;">
-        Prix mensuel: <strong>${priceLabel}</strong>
-      </p>
-      <p style="margin:0;font-size:14px;">
-        Prochaine échéance: <strong>${periodEndLabel}</strong>
+      <div style="margin:0 0 18px;border:1px solid #e5e7eb;border-radius:16px;padding:18px;background:#fafafa;">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;font-weight:700;">
+          Récapitulatif
+        </p>
+        <p style="margin:0 0 10px;font-size:15px;line-height:22px;color:#111827;">
+          Montant facturé aujourd&apos;hui: <strong>${amountLabel}</strong>
+        </p>
+        <p style="margin:0;font-size:15px;line-height:22px;color:#111827;">
+          Prochaine échéance: <strong>${periodEndLabel}</strong>
+        </p>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:22px;color:#4b5563;">
+        Vos avantages incluent 15 % de rabais admissible, la livraison gratuite et un article gratuit par cycle.
       </p>
     `,
   );
@@ -211,17 +229,25 @@ const generateSubscriptionRenewalSuccessEmail = ({
 
   return wrapSimpleMail(
     "Renouvellement confirmé",
-    "Votre abonnement CLUB COURTEAU a été renouvelé.",
+    "Votre abonnement CLUB COURTEAU continue sans interruption.",
     `
-      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
-      <p style="margin:0 0 12px;font-size:15px;">
-        Votre paiement de renouvellement a été accepté.
+      <p style="margin:0 0 16px;font-size:15px;line-height:24px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 18px;font-size:15px;line-height:24px;color:#374151;">
+        Nous confirmons que le paiement de renouvellement de votre abonnement <strong>CLUB COURTEAU</strong> a été accepté.
       </p>
-      <p style="margin:0 0 8px;font-size:14px;">
-        Montant payé: <strong>${amountLabel}</strong>
-      </p>
-      <p style="margin:0;font-size:14px;">
-        Nouvelle échéance: <strong>${periodEndLabel}</strong>
+      <div style="margin:0 0 18px;border:1px solid #e5e7eb;border-radius:16px;padding:18px;background:#fafafa;">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#6b7280;font-weight:700;">
+          Paiement reçu
+        </p>
+        <p style="margin:0 0 10px;font-size:15px;line-height:22px;color:#111827;">
+          Montant payé: <strong>${amountLabel}</strong>
+        </p>
+        <p style="margin:0;font-size:15px;line-height:22px;color:#111827;">
+          Prochaine échéance: <strong>${periodEndLabel}</strong>
+        </p>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:22px;color:#4b5563;">
+        Vous continuez de profiter de vos avantages CLUB COURTEAU sur votre nouveau cycle.
       </p>
     `,
   );
@@ -241,23 +267,28 @@ const generateSubscriptionRenewalFailedEmail = ({
 
   return wrapSimpleMail(
     "Paiement de renouvellement échoué",
-    "Premier échec détecté, nous réessaierons pendant 3 jours.",
+    "Nous n&apos;avons pas pu traiter votre paiement. Nous réessaierons automatiquement.",
     `
-      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
-      <p style="margin:0 0 12px;font-size:15px;">
-        Le paiement de renouvellement de votre abonnement <strong>CLUB COURTEAU</strong> a échoué.
+      <p style="margin:0 0 16px;font-size:15px;line-height:24px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 18px;font-size:15px;line-height:24px;color:#374151;">
+        Le renouvellement de votre abonnement <strong>CLUB COURTEAU</strong> n&apos;a pas pu être complété avec la carte enregistrée.
       </p>
-      <p style="margin:0 0 8px;font-size:14px;">
-        Montant dû: <strong>${amountLabel}</strong>
-      </p>
-      <p style="margin:0 0 8px;font-size:14px;">
-        Prochaine tentative Stripe: <strong>${nextAttemptLabel}</strong>
-      </p>
-      <p style="margin:0 0 8px;font-size:14px;">
-        Date limite avant suspension: <strong>${graceEndLabel}</strong>
-      </p>
-      <p style="margin:0;font-size:14px;">
-        Vous pouvez mettre à jour votre carte dans l'application, section <strong>Mon abonnement</strong>.
+      <div style="margin:0 0 18px;border:1px solid #F7D9A2;border-radius:16px;padding:18px;background:#FFF8EA;">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#9A6700;font-weight:700;">
+          Action recommandée
+        </p>
+        <p style="margin:0 0 10px;font-size:15px;line-height:22px;color:#7A4D00;">
+          Montant dû: <strong>${amountLabel}</strong>
+        </p>
+        <p style="margin:0 0 10px;font-size:15px;line-height:22px;color:#7A4D00;">
+          Prochaine tentative: <strong>${nextAttemptLabel}</strong>
+        </p>
+        <p style="margin:0;font-size:15px;line-height:22px;color:#7A4D00;">
+          Date limite avant suspension: <strong>${graceEndLabel}</strong>
+        </p>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:22px;color:#4b5563;">
+        Pour éviter une suspension, mettez à jour votre moyen de paiement dans l&apos;application, section <strong>Mon abonnement</strong>.
       </p>
     `,
   );
@@ -273,17 +304,19 @@ const generateSubscriptionSuspendedEmail = ({
 
   return wrapSimpleMail(
     "Abonnement suspendu",
-    "Le paiement n'a pas pu être récupéré après 3 jours de tentatives.",
+    "Le paiement n&apos;a pas pu être récupéré après plusieurs tentatives.",
     `
-      <p style="margin:0 0 12px;font-size:15px;">Bonjour ${safeName},</p>
-      <p style="margin:0 0 12px;font-size:15px;">
-        Votre abonnement <strong>CLUB COURTEAU</strong> est maintenant suspendu.
+      <p style="margin:0 0 16px;font-size:15px;line-height:24px;">Bonjour ${safeName},</p>
+      <p style="margin:0 0 18px;font-size:15px;line-height:24px;color:#374151;">
+        Votre abonnement <strong>CLUB COURTEAU</strong> est maintenant suspendu, car nous n&apos;avons pas pu confirmer le paiement de renouvellement.
       </p>
-      <p style="margin:0 0 8px;font-size:14px;">
-        Montant non payé: <strong>${amountLabel}</strong>
-      </p>
-      <p style="margin:0;font-size:14px;">
-        Pour réactiver votre abonnement, ouvrez <strong>Mes abonnements</strong> dans l'application et relancez l'abonnement avec une méthode de paiement valide.
+      <div style="margin:0 0 18px;border:1px solid #e5e7eb;border-radius:16px;padding:18px;background:#fafafa;">
+        <p style="margin:0;font-size:15px;line-height:22px;color:#111827;">
+          Montant non payé: <strong>${amountLabel}</strong>
+        </p>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:22px;color:#4b5563;">
+        Pour réactiver votre abonnement, ouvrez <strong>Mon abonnement</strong> dans l&apos;application et lancez une nouvelle activation avec une méthode de paiement valide.
       </p>
     `,
   );

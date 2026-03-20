@@ -48,17 +48,17 @@ const sendMail = async ({ to, subject, html }) => {
 const sendSubscriptionActivationEmail = async ({
   userEmail,
   userName,
-  monthlyPrice,
+  amountPaid,
   currency,
   currentPeriodEnd,
 }) => {
   try {
     return await sendMail({
       to: userEmail,
-      subject: "Bienvenue au CLUB COURTEAU",
+      subject: "Bienvenue dans CLUB COURTEAU",
       html: generateSubscriptionActivationEmail({
         userName,
-        monthlyPrice,
+        amountPaid,
         currency,
         currentPeriodEnd,
       }),
@@ -82,7 +82,7 @@ const sendSubscriptionRenewalSuccessEmail = async ({
   try {
     return await sendMail({
       to: userEmail,
-      subject: "Renouvellement CLUB COURTEAU confirmé",
+      subject: "Votre abonnement CLUB COURTEAU a été renouvelé",
       html: generateSubscriptionRenewalSuccessEmail({
         userName,
         amountPaid,

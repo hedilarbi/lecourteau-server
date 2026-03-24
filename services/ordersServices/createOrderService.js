@@ -21,6 +21,17 @@ const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
   apiVersion: "2023-08-16",
 });
 
+const logWithTimestamp = (message, meta = {}) => {
+  const timestamp = new Date().toISOString();
+  if (meta && Object.keys(meta).length) {
+    console.log(
+      `[CreateOrderService] ${timestamp} - ${message} ${JSON.stringify(meta)}`,
+    );
+    return;
+  }
+  console.log(`[CreateOrderService] ${timestamp} - ${message}`);
+};
+
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -39,12 +50,26 @@ const buildOrderItemsSubtotal = (items = []) =>
     0,
   );
 
-const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) => {
-  const promoCategoryId = normalizeId(
-    promoCode?.category?._id || promoCode?.category,
-  );
+const getPromoExcludedCategoryIds = (promoCode) => {
+  if (!Array.isArray(promoCode?.excludedCategories)) return [];
 
-  if (!promoCategoryId) {
+  return [
+    ...new Set(
+      promoCode.excludedCategories
+        .map((category) => normalizeId(category?._id || category))
+        .filter(Boolean),
+    ),
+  ];
+};
+
+const getPromoLegacyIncludedCategoryId = (promoCode) =>
+  normalizeId(promoCode?.category?._id || promoCode?.category);
+
+const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) => {
+  const promoExcludedCategoryIds = getPromoExcludedCategoryIds(promoCode);
+  const legacyIncludedCategoryId = getPromoLegacyIncludedCategoryId(promoCode);
+
+  if (!promoExcludedCategoryIds.length && !legacyIncludedCategoryId) {
     return buildOrderItemsSubtotal(orderItems);
   }
 
@@ -52,7 +77,16 @@ const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) =>
     orderItems.reduce((sum, orderItem) => {
       const menuItem = menuItemsById.get(normalizeId(orderItem?.item));
       if (!menuItem) return sum;
-      if (normalizeId(menuItem?.category) !== promoCategoryId) return sum;
+
+      const menuItemCategoryId = normalizeId(menuItem?.category);
+      if (promoExcludedCategoryIds.length) {
+        if (promoExcludedCategoryIds.includes(menuItemCategoryId)) {
+          return sum;
+        }
+      } else if (menuItemCategoryId !== legacyIncludedCategoryId) {
+        return sum;
+      }
+
       return sum + toSafeNumber(orderItem?.price, 0);
     }, 0),
     0,
@@ -185,6 +219,30 @@ const createOrderService = async (order, options = {}) => {
       }
 
       if (paymentIntentAmountCents !== expectedAmountCents) {
+        logWithTimestamp("Payment amount mismatch", {
+          userId: String(user?._id || ""),
+          platform: normalizedPlatform,
+          paymentIntentId: String(paymentIntent?.id || ""),
+          paymentIntentStatus,
+          paymentIntentAmountCents,
+          expectedAmountCents,
+          paymentIntentAmount: roundMoney(paymentIntentAmountCents / 100, 0),
+          expectedOrderTotal: roundMoney(orderPayload.total, 0),
+          rawOrderTotal: orderPayload.total,
+          subTotal: roundMoney(orderPayload.subTotal, 0),
+          subTotalAfterDiscount: roundMoney(
+            orderPayload.subTotalAfterDiscount,
+            0,
+          ),
+          deliveryFee: roundMoney(orderPayload.deliveryFee, 0),
+          tip: roundMoney(orderPayload.tip, 0),
+          orderItemsCount: orderItems.length,
+          offersCount: offers.length,
+          rewardsCount: rewards.length,
+          promoCodeId: normalizeId(orderPayload?.promoCode?.promoCodeId),
+          promoCode: String(orderPayload?.promoCode?.code || ""),
+          scheduled: Boolean(orderPayload?.scheduled?.isScheduled),
+        });
         return {
           error:
             "Le montant du paiement ne correspond plus à la commande. Veuillez relancer le paiement.",
@@ -502,6 +560,23 @@ const createOrderService = async (order, options = {}) => {
         );
 
         if (eligibleSubtotal <= 0) {
+          const promoExcludedCategoryIds =
+            getPromoExcludedCategoryIds(promoCodeDocument);
+          logWithTimestamp("Promo code has no eligible items", {
+            userId: String(user?._id || ""),
+            platform: normalizedPlatform,
+            promoCodeId: normalizeId(promoCodeDocument?._id),
+            promoCode: String(promoCodeDocument?.code || ""),
+            promoType: String(promoCodeDocument?.type || ""),
+            promoExcludedCategoryIds,
+            promoCategoryId: normalizeId(
+              promoCodeDocument?.category?._id || promoCodeDocument?.category,
+            ),
+            eligibleSubtotal,
+            orderItemsCount: orderItems.length,
+            offersCount: offers.length,
+            orderItemIds: orderItems.map((item) => normalizeId(item?.item)),
+          });
           return {
             error:
               "Ce code promo ne s'applique à aucun article de cette commande.",
@@ -526,6 +601,29 @@ const createOrderService = async (order, options = {}) => {
           Math.abs(expectedSubTotalAfterDiscount - receivedSubTotalAfterDiscount) >
           0.01
         ) {
+          const promoExcludedCategoryIds =
+            getPromoExcludedCategoryIds(promoCodeDocument);
+          logWithTimestamp("Promo discount mismatch", {
+            userId: String(user?._id || ""),
+            platform: normalizedPlatform,
+            promoCodeId: normalizeId(promoCodeDocument?._id),
+            promoCode: String(promoCodeDocument?.code || ""),
+            promoType: String(promoCodeDocument?.type || ""),
+            promoPercent: toSafeNumber(promoCodeDocument?.percent, 0),
+            promoAmount: toSafeNumber(promoCodeDocument?.amount, 0),
+            promoExcludedCategoryIds,
+            promoCategoryId: normalizeId(
+              promoCodeDocument?.category?._id || promoCodeDocument?.category,
+            ),
+            subTotal: roundMoney(orderPayload.subTotal, 0),
+            eligibleSubtotal,
+            promoDiscountAmount,
+            expectedSubTotalAfterDiscount,
+            receivedSubTotalAfterDiscount,
+            orderItemsCount: orderItems.length,
+            offersCount: offers.length,
+            orderItemIds: orderItems.map((item) => normalizeId(item?.item)),
+          });
           return {
             error:
               "Le montant du code promo ne correspond plus aux articles éligibles de la commande.",

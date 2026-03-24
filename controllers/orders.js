@@ -16,6 +16,9 @@ const { default: mongoose } = require("mongoose");
 const { ON_GOING, SCHEDULED } = require("../utils/constants");
 const Audit = require("../models/Audit");
 const { Expo } = require("expo-server-sdk");
+const {
+  cancelCheckoutPaymentIntentIfPossible,
+} = require("../services/paymentServices/paymentIntentHelpers");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -31,6 +34,38 @@ const toSafeNumber = (value, fallback = 0) => {
 const roundMoney = (value, fallback = 0) => {
   const normalized = toSafeNumber(value, fallback);
   return Math.round(normalized * 100) / 100;
+};
+
+const shouldReleasePaymentIntentOnOrderFailure = (paymentIntentId, error) => {
+  if (!String(paymentIntentId || "").trim()) return false;
+
+  const normalizedError = String(error || "").toLowerCase();
+  if (
+    normalizedError.includes("already been used for another order") ||
+    normalizedError.includes("already captured")
+  ) {
+    return false;
+  }
+
+  return true;
+};
+
+const releasePaymentIntentAfterOrderFailure = async (paymentIntentId, error) => {
+  if (!shouldReleasePaymentIntentOnOrderFailure(paymentIntentId, error)) {
+    return null;
+  }
+
+  const result = await cancelCheckoutPaymentIntentIfPossible(paymentIntentId, {
+    cancellationReason: "abandoned",
+  });
+
+  if (!result?.status) {
+    logWithTimestamp(
+      `Unable to cancel payment intent after order failure: ${paymentIntentId}, error: ${result?.error?.message || result?.error || "unknown"}`,
+    );
+  }
+
+  return result;
 };
 
 const parseDateBoundary = (rawValue, mode = "start") => {
@@ -91,11 +126,13 @@ const getOrderSummary = async (matchQuery = {}) => {
 
 const createOrder = async (req, res) => {
   const { order } = req.body;
+  const paymentIntentId = order?.order?.paymentIntentId;
 
   try {
     const { error, response } = await createOrderService(order);
 
     if (error) {
+      await releasePaymentIntentAfterOrderFailure(paymentIntentId, error);
       logWithTimestamp(
         `Error creating order service: userId ${order.order.user_id}, error: ${error}`,
       );
@@ -105,6 +142,7 @@ const createOrder = async (req, res) => {
 
     res.status(201).json({ success: true, orderId: response._id });
   } catch (err) {
+    await releasePaymentIntentAfterOrderFailure(paymentIntentId, err?.message);
     logWithTimestamp(`Error creating order service: ${err}`);
 
     res.status(500).json({ success: false, message: err.message });

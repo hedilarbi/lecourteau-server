@@ -12,8 +12,16 @@ const logWithTimestamp = (message) => {
 };
 
 const normalizeOptionalId = (value) => {
-  const normalized = String(value || "").trim();
+  const rawValue =
+    value && typeof value === "object" ? value?._id || value?.value || "" : value;
+  const normalized = String(rawValue || "").trim();
   return normalized || null;
+};
+
+const normalizeOptionalIds = (values) => {
+  if (!Array.isArray(values)) return [];
+
+  return [...new Set(values.map((value) => normalizeOptionalId(value)).filter(Boolean))];
 };
 
 const preparePromoCodePayload = async (payload = {}, existingPromoCode = null) => {
@@ -34,6 +42,16 @@ const preparePromoCodePayload = async (payload = {}, existingPromoCode = null) =
     effectiveType === "free_item"
       ? null
       : normalizeOptionalId(payload?.category ?? existingPromoCode?.category);
+  const nextExcludedCategories =
+    effectiveType === "free_item"
+      ? []
+      : payload?.excludedCategories !== undefined
+        ? normalizeOptionalIds(payload.excludedCategories)
+        : payload?.categories !== undefined
+          ? normalizeOptionalIds(payload.categories)
+          : Array.isArray(existingPromoCode?.excludedCategories)
+            ? normalizeOptionalIds(existingPromoCode.excludedCategories)
+            : [];
   const nextAmount =
     effectiveType === "amount"
       ? Number(payload?.amount ?? existingPromoCode?.amount ?? 0)
@@ -54,12 +72,24 @@ const preparePromoCodePayload = async (payload = {}, existingPromoCode = null) =
     }
   }
 
+  for (const categoryId of nextExcludedCategories) {
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      throw new Error("Catégorie invalide.");
+    }
+
+    const categoryExists = await Category.exists({ _id: categoryId });
+    if (!categoryExists) {
+      throw new Error("Catégorie invalide.");
+    }
+  }
+
   return {
     ...payload,
     code: nextCode,
     type: effectiveType,
     freeItem: nextFreeItem,
     category: nextCategory,
+    excludedCategories: nextExcludedCategories,
     amount: nextAmount,
     percent: nextPercent,
   };
@@ -80,9 +110,14 @@ const createPromoCode = async (req, res) => {
     }
     const promoCode = new PromoCode(promoCodeData);
     await promoCode.save();
+    const populatedPromoCode = await promoCode.populate([
+      "freeItem",
+      "category",
+      "excludedCategories",
+    ]);
     res.status(201).json({
       success: true,
-      data: promoCode,
+      data: populatedPromoCode,
     });
     if (
       promoCodeData?.notifContent?.body &&
@@ -133,7 +168,10 @@ const createPromoCode = async (req, res) => {
 
 const getPromoCodes = async (req, res) => {
   try {
-    const promoCodes = await PromoCode.find().populate("freeItem").populate("category");
+    const promoCodes = await PromoCode.find()
+      .populate("freeItem")
+      .populate("category")
+      .populate("excludedCategories");
     res.status(200).json(promoCodes);
   } catch (error) {
     logWithTimestamp(`Error fetching promo codes: ${error}`);
@@ -151,7 +189,8 @@ const getPromoCodeById = async (req, res) => {
   try {
     const promoCode = await PromoCode.findById(id)
       .populate("freeItem")
-      .populate("category");
+      .populate("category")
+      .populate("excludedCategories");
     if (!promoCode) {
       return res.status(404).json({
         success: false,
@@ -191,7 +230,7 @@ const updatePromoCode = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: await promoCode.populate(["freeItem", "category"]),
+      data: await promoCode.populate(["freeItem", "category", "excludedCategories"]),
     });
   } catch (error) {
     logWithTimestamp(`Error updating promo code: ${error}`);
@@ -235,7 +274,8 @@ const verifyPromoCode = async (req, res) => {
       code: String(code || "").trim().toUpperCase(),
     })
       .populate("freeItem")
-      .populate("category");
+      .populate("category")
+      .populate("excludedCategories");
     if (!promoCode) {
       return res.status(404).json({
         success: false,

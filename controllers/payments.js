@@ -1,6 +1,9 @@
 const Stripe = require("stripe");
 const User = require("../models/User");
 const { default: mongoose } = require("mongoose");
+const {
+  cancelCheckoutPaymentIntentIfPossible,
+} = require("../services/paymentServices/paymentIntentHelpers");
 require("dotenv/config");
 
 const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
@@ -205,6 +208,35 @@ const confirmPayment = async (req, res) => {
   }
 };
 
+const cancelPayment = async (req, res) => {
+  const { paymentIntentId } = req.body;
+
+  if (!paymentIntentId) {
+    return res.status(400).json({
+      success: false,
+      error: "paymentIntentId is required.",
+    });
+  }
+
+  const result = await cancelCheckoutPaymentIntentIfPossible(paymentIntentId, {
+    cancellationReason: "abandoned",
+  });
+
+  if (!result?.status) {
+    return res.status(400).json({
+      success: false,
+      error:
+        result?.error?.message ||
+        "Unable to cancel the payment intent.",
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: result,
+  });
+};
+
 const createSetupIntent = async (req, res) => {
   try {
     const setupIntent = await stripe.setupIntents.create({
@@ -286,4 +318,5 @@ module.exports = {
   verifyPayment,
   catchError,
   confirmPayment,
+  cancelPayment,
 };

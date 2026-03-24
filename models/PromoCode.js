@@ -36,6 +36,12 @@ const PromoCodeSchema = new Schema(
       ref: "Category",
       default: null,
     },
+    excludedCategories: [
+      {
+        type: Types.ObjectId,
+        ref: "Category",
+      },
+    ],
     startDate: {
       type: Date,
       default: Date.now, // date de début de validité

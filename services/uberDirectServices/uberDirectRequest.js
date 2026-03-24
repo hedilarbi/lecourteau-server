@@ -187,6 +187,7 @@ const uberDirectRequest = async ({ method, path, body, query, scope }) => {
       path,
       status: result.status || null,
       error: result.error || null,
+      details: result.details || null,
     });
   }
 

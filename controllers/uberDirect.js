@@ -967,12 +967,30 @@ const createDelivery = async (req, res) => {
 
     if (!quoteId) {
       const quoteBody = stringifyAddressFields(quotePayload);
+      console.log("[UberDirect][createDelivery][quoteRequest]", {
+        orderId,
+        restaurantId,
+        customerId,
+        payload: quoteBody,
+      });
 
       const quoteResult = await uberDirectRequest({
         method: "POST",
         path: `/customers/${customerId}/delivery_quotes`,
         body: quoteBody,
       });
+
+      if (quoteResult?.error) {
+        console.log("[UberDirect][createDelivery][quoteError]", {
+          orderId,
+          restaurantId,
+          customerId,
+          status: quoteResult.status || null,
+          error: quoteResult.error || null,
+          details: quoteResult.details || null,
+          payload: quoteBody,
+        });
+      }
 
       const quoteResponsePayload =
         quoteResult.response && typeof quoteResult.response === "object"

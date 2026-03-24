@@ -1,4 +1,3 @@
-const { default: mongoose } = require("mongoose");
 const Offer = require("../../models/Offer");
 const normalizeOffersOrderService = require("./normalizeOffersOrderService");
 
@@ -33,18 +32,6 @@ const createOfferService = async (
       order: offersCount + 1,
     });
     const response = await newOffer.save();
-
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "offers"
-    );
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          restaurant.offers.push({ offer: response._id, availability: true });
-          return restaurant.save();
-        })
-      );
-    }
 
     return { response };
   } catch (err) {

@@ -1,5 +1,7 @@
 const cron = require("node-cron");
-const Restaurant = require("../models/Restaurant");
+const {
+  resetAllRestaurantMenuItemsAvailability,
+} = require("../services/restaurantsServices/restaurantMenuItemAvailabilityService");
 
 const DEFAULT_ITEMS_RESET_TIMEZONE =
   String(process.env.ITEMS_RESET_TIMEZONE || "America/Toronto").trim() ||
@@ -7,16 +9,7 @@ const DEFAULT_ITEMS_RESET_TIMEZONE =
 
 const resetAllRestaurantsItemsAvailability = async () => {
   try {
-    const result = await Restaurant.updateMany(
-      { "menu_items.0": { $exists: true } },
-      { $set: { "menu_items.$[].availability": true } },
-    );
-
-    return {
-      status: true,
-      matchedCount: Number(result?.matchedCount || 0),
-      modifiedCount: Number(result?.modifiedCount || 0),
-    };
+    return await resetAllRestaurantMenuItemsAvailability();
   } catch (error) {
     return {
       status: false,
@@ -40,7 +33,7 @@ function startResetRestaurantItemsAvailabilityJob() {
       }
 
       console.log(
-        `[resetRestaurantItemsAvailabilityJob] reset done (matched=${result.matchedCount}, modified=${result.modifiedCount})`,
+        `[resetRestaurantItemsAvailabilityJob] reset done (deletedOverrides=${result.deletedCount})`,
       );
     },
     {

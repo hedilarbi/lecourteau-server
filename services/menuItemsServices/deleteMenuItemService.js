@@ -1,6 +1,7 @@
 const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../../firebase");
 const MenuItem = require("../../models/MenuItem");
+const RestaurantMenuItemAvailability = require("../../models/RestaurantMenuItemAvailability");
 
 const deleteMenuItemService = async (id) => {
   try {
@@ -12,29 +13,13 @@ const deleteMenuItemService = async (id) => {
     await deleteImagesFromFirebase(menuItem.image);
     await MenuItem.findByIdAndDelete(id);
 
-    await updateRestaurantsMenuItems(id);
+    await RestaurantMenuItemAvailability.deleteMany({ menuItem: id });
     await deleteRelatedRewards(id);
     await deleteRelatedOffers(id);
 
     return {}; // Return an empty object if the deletion is successful
   } catch (err) {
     return { error: err.message };
-  }
-};
-
-const updateRestaurantsMenuItems = async (itemId) => {
-  const restaurants = await mongoose.models.Restaurant.find().select(
-    "menu_items"
-  );
-  if (restaurants.length > 0) {
-    await Promise.all(
-      restaurants.map(async (restaurant) => {
-        restaurant.menu_items = restaurant.menu_items.filter(
-          (item) => item.menuItem.toString() !== itemId
-        );
-        await restaurant.save();
-      })
-    );
   }
 };
 

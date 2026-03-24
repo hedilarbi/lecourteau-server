@@ -1,4 +1,3 @@
-const { default: mongoose } = require("mongoose");
 const MenuItem = require("../../models/MenuItem");
 
 const createMenuItemService = async (
@@ -33,22 +32,6 @@ const createMenuItemService = async (
     });
 
     const savedMenuItem = await newMenuItem.save(); // Save the new menu item
-
-    // Update related restaurants
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "menu_items"
-    );
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          restaurant.menu_items.push({
-            menuItem: savedMenuItem._id,
-            availability: true,
-          });
-          await restaurant.save(); // Save the updated restaurant
-        })
-      );
-    }
 
     return { response: savedMenuItem }; // Return the saved menu item
   } catch (err) {

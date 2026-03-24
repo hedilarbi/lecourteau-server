@@ -14,6 +14,9 @@ const {
   isSubscriptionCurrentlyActive,
   SUBSCRIPTION_DISCOUNT_PERCENT,
 } = require("../subscriptionServices/subscriptionHelpers");
+const {
+  checkRestaurantOrderAvailabilityService,
+} = require("../restaurantsServices/checkRestaurantOrderAvailabilityService");
 
 require("dotenv/config");
 
@@ -111,6 +114,37 @@ const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal) => {
   }
 
   return 0;
+};
+
+const buildAvailabilityErrorMessage = ({
+  unavailableItems = [],
+  unavailableOffers = [],
+} = {}) => {
+  const parts = [];
+
+  if (unavailableItems.length > 0) {
+    parts.push(
+      `Articles indisponibles: ${unavailableItems
+        .map((item) => item?.name)
+        .filter(Boolean)
+        .join(", ")}`,
+    );
+  }
+
+  if (unavailableOffers.length > 0) {
+    parts.push(
+      `Offres indisponibles: ${unavailableOffers
+        .map((offer) => offer?.name)
+        .filter(Boolean)
+        .join(", ")}`,
+    );
+  }
+
+  if (!parts.length) {
+    return "Certains articles de cette commande ne sont plus disponibles pour cette succursale.";
+  }
+
+  return `${parts.join(" • ")}. Veuillez mettre à jour votre panier.`;
 };
 
 const createOrderService = async (order, options = {}) => {
@@ -266,6 +300,28 @@ const createOrderService = async (order, options = {}) => {
             "Le paiement ne correspond pas à ce compte utilisateur. Veuillez relancer le paiement.",
         };
       }
+    }
+
+    const { response: availabilityResponse, error: availabilityError } =
+      await checkRestaurantOrderAvailabilityService(order.restaurant, {
+        orderItems,
+        offers,
+      });
+
+    if (availabilityError) {
+      return {
+        error:
+          String(availabilityError?.message || availabilityError) ===
+          "Restaurant not found"
+            ? "Restaurant not found."
+            : String(availabilityError?.message || availabilityError),
+      };
+    }
+
+    if (!availabilityResponse?.isValid) {
+      return {
+        error: buildAvailabilityErrorMessage(availabilityResponse),
+      };
     }
 
     const subscriptionActive = isSubscriptionCurrentlyActive(user);

@@ -1,17 +1,23 @@
 const Restaurant = require("../../models/Restaurant");
+const Order = require("../../models/Order");
 
 const getRestaurantOrdersService = async (id) => {
   try {
-    const response = await Restaurant.findById(id)
-      .select("orders")
-      .populate("orders");
-    response.orders.sort((a, b) => b.createdAt - a.createdAt); // Sort orders by date
-    // Check if the restaurant exists
-    if (!response) {
-      return { error: new Error("Restaurant not found") };
+    const restaurant = await Restaurant.findById(id).select(
+      "_id name address location phone_number",
+    );
+    if (!restaurant) {
+      return { error: "Restaurant not found" };
     }
 
-    return { response }; // Return the response containing orders
+    const orders = await Order.find({ restaurant: id }).sort({ createdAt: -1 });
+
+    return {
+      response: {
+        ...restaurant.toObject(),
+        orders,
+      },
+    };
   } catch (error) {
     return { error: error.message };
   }

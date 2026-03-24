@@ -9,6 +9,8 @@ const {
   getRestaurantToppings,
   getRestaurantOffers,
   getRestaurantOrders,
+  checkRestaurantOrderAvailability,
+  migrateLegacyRestaurantAvailability,
   updateRestaurantItemAvailability,
   updateRestaurantOfferAvailability,
   updateRestaurantToppingAvailability,
@@ -30,6 +32,7 @@ router.get("/settings/:id", getRestaurantSettings);
 router.get("/", getRestaurants);
 router.put("/", setSettings);
 router.put("/emploie", updateEmploie);
+router.post("/admin/migrate-legacy-availability", authStaff, migrateLegacyRestaurantAvailability);
 router.get("/list", getRestaurantsList);
 router.get("/:id", getRestaurant);
 router.get("/items/:id", getRestaurantItems);
@@ -37,6 +40,7 @@ router.put("/update/settings/:id", authStaff, updateRestaurantSettings);
 router.get("/toppings/:id", getRestaurantToppings);
 router.get("/offers/:id", getRestaurantOffers);
 router.get("/orders/:id", getRestaurantOrders);
+router.post("/:id/check-availability", checkRestaurantOrderAvailability);
 router.delete("/delete/:id", deleteRestaurant);
 router.put("/update/:id", updateRestaurant);
 router.get("/:restaurantId/items/:id", getRestaurantMenuItem);

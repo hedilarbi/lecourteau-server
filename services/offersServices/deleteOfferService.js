@@ -1,6 +1,6 @@
-const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../../firebase");
 const Offer = require("../../models/Offer");
+const RestaurantOfferAvailability = require("../../models/RestaurantOfferAvailability");
 const normalizeOffersOrderService = require("./normalizeOffersOrderService");
 
 const deleteOfferService = async (id) => {
@@ -19,20 +19,7 @@ const deleteOfferService = async (id) => {
     }
 
     await Offer.findByIdAndDelete(id);
-
-    const restaurants = await mongoose.models.Restaurant.find().select(
-      "offers"
-    );
-    if (restaurants.length > 0) {
-      await Promise.all(
-        restaurants.map(async (restaurant) => {
-          restaurant.offers = restaurant.offers.filter(
-            (restaurantOffer) => restaurantOffer.offer.toString() !== id
-          );
-          await restaurant.save();
-        })
-      );
-    }
+    await RestaurantOfferAvailability.deleteMany({ offer: id });
 
     const { error: normalizeError } = await normalizeOffersOrderService();
     if (normalizeError) {

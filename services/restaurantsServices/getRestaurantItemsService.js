@@ -1,19 +1,10 @@
-const Restaurant = require("../../models/Restaurant");
+const {
+  getRestaurantItemsAvailabilityList,
+} = require("./restaurantMenuItemAvailabilityService");
+
 const getRestaurantItemsService = async (id) => {
   try {
-    const response = await Restaurant.findById(id)
-      .select("menu_items")
-      .populate({
-        path: "menu_items",
-        populate: { path: "menuItem", populate: "category" },
-      });
-
-    if (!response) {
-      return { error: new Error("Restaurant not found") };
-    }
-    response.menu_items.sort((a, b) => a.menuItem.order - b.menuItem.order);
-
-    return { response };
+    return await getRestaurantItemsAvailabilityList(id);
   } catch (error) {
     return { error: error.message };
   }

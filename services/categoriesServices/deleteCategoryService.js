@@ -1,6 +1,7 @@
 const { default: mongoose } = require("mongoose");
 const { deleteImagesFromFirebase } = require("../../firebase");
 const Category = require("../../models/Category");
+const RestaurantMenuItemAvailability = require("../../models/RestaurantMenuItemAvailability");
 
 const deleteCategoryService = async (id) => {
   try {
@@ -14,7 +15,6 @@ const deleteCategoryService = async (id) => {
 
     // Get related items
     const menuItems = await mongoose.models.MenuItem.find().select("category");
-    const restaurants = await mongoose.models.Restaurant.find();
     const rewards = await mongoose.models.Reward.find().select("item");
     const offers = await mongoose.models.Offer.find().select("items");
 
@@ -24,18 +24,9 @@ const deleteCategoryService = async (id) => {
         menuItems.map(async (menuItem) => {
           if (menuItem.category.toString() === id) {
             await mongoose.models.MenuItem.findByIdAndDelete(menuItem._id); // Delete the menu item
-
-            // Remove menu item reference from restaurants
-            if (restaurants.length > 0) {
-              await Promise.all(
-                restaurants.map(async (restaurant) => {
-                  restaurant.menu_items = restaurant.menu_items.filter(
-                    (item) => item.menuItem.toString() !== menuItem._id
-                  );
-                  await restaurant.save(); // Save the updated restaurant
-                })
-              );
-            }
+            await RestaurantMenuItemAvailability.deleteMany({
+              menuItem: menuItem._id,
+            });
 
             // Remove related rewards
             if (rewards.length > 0) {

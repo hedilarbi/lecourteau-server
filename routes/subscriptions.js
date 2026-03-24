@@ -12,6 +12,7 @@ const {
   getSubscriptionAdminStats,
   getSubscriptionAdminUserDetails,
   createHediPayout,
+  migrateHediBalanceToPreTax,
 } = require("../controllers/subscriptions");
 const authStaff = require("../middlewares/authStaff");
 
@@ -29,5 +30,6 @@ router.post("/refresh/:userId", refreshUserSubscription);
 router.get("/admin/stats", authStaff, getSubscriptionAdminStats);
 router.get("/admin/user/:userId", authStaff, getSubscriptionAdminUserDetails);
 router.post("/admin/hedi-payout", authStaff, createHediPayout);
+router.post("/admin/hedi-migrate-pretax", migrateHediBalanceToPreTax);
 
 module.exports = router;

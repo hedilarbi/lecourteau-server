@@ -34,6 +34,18 @@ const subscriptionPaymentSchema = new Schema(
       required: true,
       default: 0,
     },
+    subtotalAmount: {
+      type: Number,
+      default: 0,
+    },
+    tpsAmount: {
+      type: Number,
+      default: 0,
+    },
+    tvqAmount: {
+      type: Number,
+      default: 0,
+    },
     currency: {
       type: String,
       default: "cad",

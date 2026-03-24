@@ -8,6 +8,7 @@ const Staff = require("../models/staff");
 const {
   stripe,
   buildSubscriptionPricing,
+  buildSubscriptionPricingFromTotal,
   isActiveStatus,
   isSubscriptionCurrentlyActive,
   isOpenStatus,
@@ -121,6 +122,34 @@ const roundMoney = (value, fallback = 0) => {
   const normalized = toSafeNumber(value, fallback);
   return Math.round(normalized * 100) / 100;
 };
+
+const buildPaymentPricingSnapshot = ({
+  amountPaid = 0,
+  subtotalAmount = null,
+  tpsAmount = null,
+  tvqAmount = null,
+  currency = "cad",
+}) => {
+  const normalizedCurrency = normalizeCurrency(currency);
+  const safeSubtotal = toSafeNumber(subtotalAmount, -1);
+  const safeTps = toSafeNumber(tpsAmount, -1);
+  const safeTvq = toSafeNumber(tvqAmount, -1);
+
+  if (safeSubtotal >= 0 && safeTps >= 0 && safeTvq >= 0) {
+    return {
+      subtotal: roundMoney(safeSubtotal, 0),
+      tpsAmount: roundMoney(safeTps, 0),
+      tvqAmount: roundMoney(safeTvq, 0),
+      total: roundMoney(amountPaid, safeSubtotal + safeTps + safeTvq),
+      currency: normalizedCurrency,
+    };
+  }
+
+  return buildSubscriptionPricingFromTotal(amountPaid, normalizedCurrency);
+};
+
+const calculateHediShareAmountFromPricing = (pricing) =>
+  roundMoney((toSafeNumber(pricing?.subtotal, 0) * HEDI_SHARE_PERCENT) / 100, 0);
 
 const isValidObjectId = (value) =>
   typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value.trim());
@@ -992,15 +1021,16 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
   if (!user) return null;
 
   const currency = normalizeCurrency(invoice?.currency || "cad");
+  const pricing = buildPaymentPricingSnapshot({
+    amountPaid,
+    currency,
+  });
   const paymentType = resolvePaymentTypeFromInvoice(invoice);
   const billingReason = String(invoice?.billing_reason || "subscription")
     .trim()
     .toLowerCase();
   const paidAt = resolveInvoicePaidDate(invoice);
-  const hediShareAmount = roundMoney(
-    (amountPaid * HEDI_SHARE_PERCENT) / 100,
-    0,
-  );
+  const hediShareAmount = calculateHediShareAmountFromPricing(pricing);
 
   let createdPayment;
   try {
@@ -1012,6 +1042,9 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
       stripeInvoiceId: invoiceId,
       stripePaymentIntentId: String(invoice?.payment_intent || "").trim(),
       amount: amountPaid,
+      subtotalAmount: pricing.subtotal,
+      tpsAmount: pricing.tpsAmount,
+      tvqAmount: pricing.tvqAmount,
       currency,
       billingReason,
       paymentType,
@@ -1217,27 +1250,26 @@ const tryRecoverRenewalPaymentAfterFailure = async (invoice) => {
 };
 
 const getHediBalanceSummary = async () => {
-  const [usersAgg] = await User.aggregate([
+  const [paymentsAgg] = await SubscriptionPayment.aggregate([
     {
       $group: {
         _id: null,
         totalRevenue: {
           $sum: {
-            $ifNull: ["$subscriptionAmountPaidTotal", 0],
+            $ifNull: ["$amount", 0],
           },
         },
         totalPaymentsCount: {
-          $sum: {
-            $ifNull: ["$subscriptionPaymentsCount", 0],
-          },
+          $sum: 1,
         },
         totalRenewalsCount: {
           $sum: {
-            $cond: [
-              { $gt: [{ $ifNull: ["$subscriptionPaymentsCount", 0] }, 1] },
-              { $subtract: [{ $ifNull: ["$subscriptionPaymentsCount", 0] }, 1] },
-              0,
-            ],
+            $cond: [{ $eq: ["$paymentType", "renewal"] }, 1, 0],
+          },
+        },
+        totalHediCredits: {
+          $sum: {
+            $ifNull: ["$hediShareAmount", 0],
           },
         },
       },
@@ -1253,19 +1285,16 @@ const getHediBalanceSummary = async () => {
     },
   ]);
 
-  const totalRevenue = roundMoney(usersAgg?.totalRevenue, 0);
+  const totalRevenue = roundMoney(paymentsAgg?.totalRevenue, 0);
   const totalPaymentsCount = Math.max(
     0,
-    Math.floor(toSafeNumber(usersAgg?.totalPaymentsCount, 0)),
+    Math.floor(toSafeNumber(paymentsAgg?.totalPaymentsCount, 0)),
   );
   const totalRenewalsCount = Math.max(
     0,
-    Math.floor(toSafeNumber(usersAgg?.totalRenewalsCount, 0)),
+    Math.floor(toSafeNumber(paymentsAgg?.totalRenewalsCount, 0)),
   );
-  const totalHediCredits = roundMoney(
-    (totalRevenue * HEDI_SHARE_PERCENT) / 100,
-    0,
-  );
+  const totalHediCredits = roundMoney(paymentsAgg?.totalHediCredits, 0);
   const totalPayouts = roundMoney(payoutAgg?.totalPayouts, 0);
   const balance = roundMoney(totalHediCredits - totalPayouts, 0);
 
@@ -1278,6 +1307,97 @@ const getHediBalanceSummary = async () => {
     balance,
     sharePercent: HEDI_SHARE_PERCENT,
   };
+};
+
+const migrateHediBalanceToPreTax = async (req, res) => {
+  try {
+    const staff = await ensureAdminStaff(req, res);
+    if (!staff) return;
+
+    const beforeSummary = await getHediBalanceSummary();
+    const payments = await SubscriptionPayment.find()
+      .select("amount subtotalAmount tpsAmount tvqAmount currency hediSharePercent hediShareAmount")
+      .lean();
+
+    if (payments.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matchedPayments: 0,
+          updatedPayments: 0,
+          before: beforeSummary,
+          after: beforeSummary,
+        },
+      });
+    }
+
+    const bulkOps = [];
+    for (const payment of payments) {
+      const amountPaid = roundMoney(payment?.amount, 0);
+      if (amountPaid <= 0) continue;
+
+      const pricing = buildPaymentPricingSnapshot({
+        amountPaid,
+        subtotalAmount: payment?.subtotalAmount,
+        tpsAmount: payment?.tpsAmount,
+        tvqAmount: payment?.tvqAmount,
+        currency: payment?.currency || "cad",
+      });
+      const expectedHediShareAmount = calculateHediShareAmountFromPricing(pricing);
+      const currentSubtotal = roundMoney(payment?.subtotalAmount, -1);
+      const currentTps = roundMoney(payment?.tpsAmount, -1);
+      const currentTvq = roundMoney(payment?.tvqAmount, -1);
+      const currentHediPercent = roundMoney(payment?.hediSharePercent, 0);
+      const currentHediShare = roundMoney(payment?.hediShareAmount, -1);
+
+      const needsUpdate =
+        currentSubtotal !== pricing.subtotal ||
+        currentTps !== pricing.tpsAmount ||
+        currentTvq !== pricing.tvqAmount ||
+        currentHediPercent !== HEDI_SHARE_PERCENT ||
+        currentHediShare !== expectedHediShareAmount;
+
+      if (!needsUpdate) continue;
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: payment._id },
+          update: {
+            $set: {
+              subtotalAmount: pricing.subtotal,
+              tpsAmount: pricing.tpsAmount,
+              tvqAmount: pricing.tvqAmount,
+              hediSharePercent: HEDI_SHARE_PERCENT,
+              hediShareAmount: expectedHediShareAmount,
+            },
+          },
+        },
+      });
+    }
+
+    if (bulkOps.length > 0) {
+      await SubscriptionPayment.bulkWrite(bulkOps, { ordered: false });
+    }
+
+    const afterSummary = await getHediBalanceSummary();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        matchedPayments: payments.length,
+        updatedPayments: bulkOps.length,
+        before: beforeSummary,
+        after: afterSummary,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Erreur lors de la migration du solde Hedi vers le calcul HT.",
+    });
+  }
 };
 
 const handleStripeWebhook = async (req, res) => {
@@ -2903,4 +3023,5 @@ module.exports = {
   getSubscriptionAdminStats,
   getSubscriptionAdminUserDetails,
   createHediPayout,
+  migrateHediBalanceToPreTax,
 };

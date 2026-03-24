@@ -66,6 +66,43 @@ const buildSubscriptionPricing = (subtotalInput, currencyInput = "cad") => {
   };
 };
 
+const buildSubscriptionPricingFromTotal = (
+  totalInput,
+  currencyInput = "cad",
+) => {
+  const total = roundMoney(totalInput, 0);
+  if (total <= 0) {
+    return buildSubscriptionPricing(0, currencyInput);
+  }
+
+  const combinedRate = 1 + SUBSCRIPTION_TPS_RATE + SUBSCRIPTION_TVQ_RATE;
+  const estimatedSubtotal = roundMoney(total / combinedRate, 0);
+  let bestPricing = buildSubscriptionPricing(estimatedSubtotal, currencyInput);
+  let bestDiff = Math.abs(roundMoney(bestPricing.total - total, 0));
+
+  const estimatedSubtotalCents = Math.round(estimatedSubtotal * 100);
+  for (
+    let subtotalCents = Math.max(0, estimatedSubtotalCents - 100);
+    subtotalCents <= estimatedSubtotalCents + 100;
+    subtotalCents += 1
+  ) {
+    const pricing = buildSubscriptionPricing(subtotalCents / 100, currencyInput);
+    const diff = Math.abs(roundMoney(pricing.total - total, 0));
+    if (diff < bestDiff) {
+      bestPricing = pricing;
+      bestDiff = diff;
+      if (bestDiff === 0) {
+        break;
+      }
+    }
+  }
+
+  return {
+    ...bestPricing,
+    total,
+  };
+};
+
 const getSubscriptionRecurringConfig = () => {
   const rawInterval = String(
     process.env.SUBSCRIPTION_STRIPE_INTERVAL || "month",
@@ -716,6 +753,7 @@ module.exports = {
   toSafeNumber,
   roundMoney,
   buildSubscriptionPricing,
+  buildSubscriptionPricingFromTotal,
   getSubscriptionRecurringConfig,
   isActiveStatus,
   isOpenStatus,

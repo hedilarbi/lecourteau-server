@@ -225,6 +225,21 @@ const updatePromoCode = async (req, res) => {
 
     const updateData = await preparePromoCodePayload(req.body, promoCode);
 
+    const nextCode = String(updateData?.code || "").trim().toUpperCase();
+    if (nextCode) {
+      const duplicatePromoCode = await PromoCode.findOne({
+        _id: { $ne: id },
+        code: nextCode,
+      }).select("_id");
+
+      if (duplicatePromoCode) {
+        return res.status(400).json({
+          success: false,
+          error: "Code promo déjà utilisé.",
+        });
+      }
+    }
+
     Object.assign(promoCode, updateData);
     await promoCode.save();
 

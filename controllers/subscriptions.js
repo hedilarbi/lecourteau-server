@@ -134,8 +134,17 @@ const buildPaymentPricingSnapshot = ({
   const safeSubtotal = toSafeNumber(subtotalAmount, -1);
   const safeTps = toSafeNumber(tpsAmount, -1);
   const safeTvq = toSafeNumber(tvqAmount, -1);
+  const storedBreakdownTotal = roundMoney(safeSubtotal + safeTps + safeTvq, 0);
+  const breakdownMatchesAmount =
+    Math.abs(storedBreakdownTotal - roundMoney(amountPaid, 0)) <= 0.02;
+  const hasUsableStoredBreakdown =
+    safeSubtotal >= 0 &&
+    safeTps >= 0 &&
+    safeTvq >= 0 &&
+    storedBreakdownTotal > 0 &&
+    breakdownMatchesAmount;
 
-  if (safeSubtotal >= 0 && safeTps >= 0 && safeTvq >= 0) {
+  if (hasUsableStoredBreakdown) {
     return {
       subtotal: roundMoney(safeSubtotal, 0),
       tpsAmount: roundMoney(safeTps, 0),

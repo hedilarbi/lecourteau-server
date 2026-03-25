@@ -50,7 +50,10 @@ const shouldReleasePaymentIntentOnOrderFailure = (paymentIntentId, error) => {
   return true;
 };
 
-const releasePaymentIntentAfterOrderFailure = async (paymentIntentId, error) => {
+const releasePaymentIntentAfterOrderFailure = async (
+  paymentIntentId,
+  error,
+) => {
   if (!shouldReleasePaymentIntentOnOrderFailure(paymentIntentId, error)) {
     return null;
   }
@@ -117,7 +120,10 @@ const getOrderSummary = async (matchQuery = {}) => {
   ]);
 
   return {
-    totalOrders: Math.max(0, Math.floor(toSafeNumber(summaryAgg?.totalOrders, 0))),
+    totalOrders: Math.max(
+      0,
+      Math.floor(toSafeNumber(summaryAgg?.totalOrders, 0)),
+    ),
     totalAmount: roundMoney(summaryAgg?.totalAmount, 0),
     totalDeliveryFee: roundMoney(summaryAgg?.totalDeliveryFee, 0),
     totalNetSales: roundMoney(summaryAgg?.totalNetSales, 0),

@@ -149,7 +149,10 @@ const buildPaymentPricingSnapshot = ({
 };
 
 const calculateHediShareAmountFromPricing = (pricing) =>
-  roundMoney((toSafeNumber(pricing?.subtotal, 0) * HEDI_SHARE_PERCENT) / 100, 0);
+  roundMoney(
+    (toSafeNumber(pricing?.subtotal, 0) * HEDI_SHARE_PERCENT) / 100,
+    0,
+  );
 
 const isValidObjectId = (value) =>
   typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value.trim());
@@ -473,7 +476,9 @@ const detachFailedAttemptPaymentMethodIfNeeded = async ({
     }
 
     const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
-    const paymentMethodCustomerId = resolveStripeCustomerId(paymentMethod?.customer);
+    const paymentMethodCustomerId = resolveStripeCustomerId(
+      paymentMethod?.customer,
+    );
     const intentCustomerId = resolveStripeCustomerId(paymentIntent?.customer);
     const userCustomerId = resolveStripeCustomerId(user?.stripe_id);
     const expectedCustomerId = intentCustomerId || userCustomerId;
@@ -492,10 +497,11 @@ const detachFailedAttemptPaymentMethodIfNeeded = async ({
     }
 
     await stripe.paymentMethods.detach(paymentMethodId);
-    const fallbackDefaultPmId = await setCustomerDefaultPaymentMethodAfterDetach(
-      paymentMethodCustomerId,
-      paymentMethodId,
-    );
+    const fallbackDefaultPmId =
+      await setCustomerDefaultPaymentMethodAfterDetach(
+        paymentMethodCustomerId,
+        paymentMethodId,
+      );
 
     if (stripeSubscription?.id) {
       await stripe.subscriptions.update(stripeSubscription.id, {
@@ -633,15 +639,20 @@ const resolveUserFromInvoice = async (invoice, subscriptionId) => {
         resolvedSubscriptionId,
         { expand: ["items.data.price"] },
       );
-      const userFromStripe = await findUserByStripeSubscription(stripeSubscription);
+      const userFromStripe =
+        await findUserByStripeSubscription(stripeSubscription);
       if (userFromStripe) {
-        await syncUserWithStripeSubscription(userFromStripe, stripeSubscription, {
-          customerId:
-            resolveStripeCustomerId(stripeSubscription?.customer) ||
-            customerId ||
-            userFromStripe?.stripe_id ||
-            "",
-        });
+        await syncUserWithStripeSubscription(
+          userFromStripe,
+          stripeSubscription,
+          {
+            customerId:
+              resolveStripeCustomerId(stripeSubscription?.customer) ||
+              customerId ||
+              userFromStripe?.stripe_id ||
+              "",
+          },
+        );
         return userFromStripe;
       }
     } catch (error) {
@@ -743,7 +754,9 @@ const suspendSubscriptionAfterRetryWindow = async ({
     return { suspended: false, shouldSendSuspensionEmail: false };
   }
 
-  const failureStartedAt = toDateOrNull(user.subscriptionRenewalFailureStartedAt);
+  const failureStartedAt = toDateOrNull(
+    user.subscriptionRenewalFailureStartedAt,
+  );
   if (!failureStartedAt) {
     return { suspended: false, shouldSendSuspensionEmail: false };
   }
@@ -778,11 +791,14 @@ const suspendSubscriptionAfterRetryWindow = async ({
         return { suspended: false, shouldSendSuspensionEmail: false };
       }
     } catch (error) {
-      logWithTimestamp("Failed to verify invoice before subscription suspension", {
-        userId: String(user._id || ""),
-        invoiceId: resolvedFailureInvoiceId,
-        error: error?.message || "unknown",
-      });
+      logWithTimestamp(
+        "Failed to verify invoice before subscription suspension",
+        {
+          userId: String(user._id || ""),
+          invoiceId: resolvedFailureInvoiceId,
+          error: error?.message || "unknown",
+        },
+      );
     }
   }
 
@@ -884,8 +900,9 @@ const handleRenewalFailedInvoice = async (invoice) => {
     now,
   );
   const invoiceId = resolveStripeInvoiceId(invoice) || `sub-${subscriptionId}`;
-  const previousInvoiceId = String(user.subscriptionRenewalFailureInvoiceId || "")
-    .trim();
+  const previousInvoiceId = String(
+    user.subscriptionRenewalFailureInvoiceId || "",
+  ).trim();
   const isNewFailureCycle =
     !previousInvoiceId ||
     previousInvoiceId !== invoiceId ||
@@ -973,7 +990,9 @@ const handleSubscriptionStatusRetryPolicy = async (subscriptionId) => {
     return { shouldSendSuspensionEmail: false, userId: null };
   }
 
-  const failureStartedAt = toDateOrNull(user.subscriptionRenewalFailureStartedAt);
+  const failureStartedAt = toDateOrNull(
+    user.subscriptionRenewalFailureStartedAt,
+  );
   if (!failureStartedAt) {
     return { shouldSendSuspensionEmail: false, userId: user._id };
   }
@@ -1071,12 +1090,15 @@ const recordSubscriptionPaymentFromInvoice = async (invoice) => {
     0,
   );
   user.subscriptionPaymentsCount =
-    Math.max(0, Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0))) + 1;
+    Math.max(0, Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0))) +
+    1;
   clearRenewalFailureState(user);
   await user.save();
 
   return {
-    payment: createdPayment?.toObject ? createdPayment.toObject() : createdPayment,
+    payment: createdPayment?.toObject
+      ? createdPayment.toObject()
+      : createdPayment,
     isNew: true,
     userId: user?._id || null,
   };
@@ -1112,7 +1134,10 @@ const createPaymentSuccessEmailJob = (paymentRecord) => async () => {
   const paymentType =
     rawPaymentType === "activation" || rawPaymentType === "renewal"
       ? rawPaymentType
-      : Math.max(0, Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0))) > 1
+      : Math.max(
+            0,
+            Math.floor(toSafeNumber(user.subscriptionPaymentsCount, 0)),
+          ) > 1
         ? "renewal"
         : "activation";
   if (rawPaymentType !== "activation" && rawPaymentType !== "renewal") {
@@ -1148,51 +1173,60 @@ const createPaymentSuccessEmailJob = (paymentRecord) => async () => {
   }
 };
 
-const createRenewalFailureEmailJob = ({ invoice, graceEndsAt }) => async () => {
-  const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
-  if (!subscriptionId) return;
-
-  const user = await resolveUserFromInvoice(invoice, subscriptionId);
-  if (!user?.email) return;
-
-  const amountDue = roundMoney(toSafeNumber(invoice?.amount_due, 0) / 100, 0);
-  const nextAttemptDate = toDateFromStripeTimestamp(invoice?.next_payment_attempt);
-
-  await sendSubscriptionRenewalFailedEmail({
-    userEmail: user.email,
-    userName: user.name || "Client",
-    amountDue,
-    currency: normalizeCurrency(invoice?.currency || "cad"),
-    nextAttemptDate,
-    graceEndDate: graceEndsAt,
-  });
-};
-
-const createRenewalSuspendedEmailJob = ({ invoice, userId }) => async () => {
-  let user = null;
-  if (userId) {
-    user = await User.findById(userId).select(
-      "name email subscriptionMonthlyPrice",
-    );
-  } else {
+const createRenewalFailureEmailJob =
+  ({ invoice, graceEndsAt }) =>
+  async () => {
     const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
     if (!subscriptionId) return;
-    user = await resolveUserFromInvoice(invoice, subscriptionId);
-  }
-  if (!user?.email) return;
 
-  let amountDue = roundMoney(toSafeNumber(invoice?.amount_due, 0) / 100, 0);
-  if (amountDue <= 0) {
-    amountDue = roundMoney(toSafeNumber(user.subscriptionMonthlyPrice, 11.99), 11.99);
-  }
+    const user = await resolveUserFromInvoice(invoice, subscriptionId);
+    if (!user?.email) return;
 
-  await sendSubscriptionSuspendedEmail({
-    userEmail: user.email,
-    userName: user.name || "Client",
-    amountDue,
-    currency: normalizeCurrency(invoice?.currency || "cad"),
-  });
-};
+    const amountDue = roundMoney(toSafeNumber(invoice?.amount_due, 0) / 100, 0);
+    const nextAttemptDate = toDateFromStripeTimestamp(
+      invoice?.next_payment_attempt,
+    );
+
+    await sendSubscriptionRenewalFailedEmail({
+      userEmail: user.email,
+      userName: user.name || "Client",
+      amountDue,
+      currency: normalizeCurrency(invoice?.currency || "cad"),
+      nextAttemptDate,
+      graceEndDate: graceEndsAt,
+    });
+  };
+
+const createRenewalSuspendedEmailJob =
+  ({ invoice, userId }) =>
+  async () => {
+    let user = null;
+    if (userId) {
+      user = await User.findById(userId).select(
+        "name email subscriptionMonthlyPrice",
+      );
+    } else {
+      const subscriptionId = resolveStripeSubscriptionId(invoice?.subscription);
+      if (!subscriptionId) return;
+      user = await resolveUserFromInvoice(invoice, subscriptionId);
+    }
+    if (!user?.email) return;
+
+    let amountDue = roundMoney(toSafeNumber(invoice?.amount_due, 0) / 100, 0);
+    if (amountDue <= 0) {
+      amountDue = roundMoney(
+        toSafeNumber(user.subscriptionMonthlyPrice, 11.99),
+        11.99,
+      );
+    }
+
+    await sendSubscriptionSuspendedEmail({
+      userEmail: user.email,
+      userName: user.name || "Client",
+      amountDue,
+      currency: normalizeCurrency(invoice?.currency || "cad"),
+    });
+  };
 
 const tryRecoverRenewalPaymentAfterFailure = async (invoice) => {
   const invoiceId = resolveStripeInvoiceId(invoice);
@@ -1311,12 +1345,11 @@ const getHediBalanceSummary = async () => {
 
 const migrateHediBalanceToPreTax = async (req, res) => {
   try {
-    const staff = await ensureAdminStaff(req, res);
-    if (!staff) return;
-
     const beforeSummary = await getHediBalanceSummary();
     const payments = await SubscriptionPayment.find()
-      .select("amount subtotalAmount tpsAmount tvqAmount currency hediSharePercent hediShareAmount")
+      .select(
+        "amount subtotalAmount tpsAmount tvqAmount currency hediSharePercent hediShareAmount",
+      )
       .lean();
 
     if (payments.length === 0) {
@@ -1343,7 +1376,8 @@ const migrateHediBalanceToPreTax = async (req, res) => {
         tvqAmount: payment?.tvqAmount,
         currency: payment?.currency || "cad",
       });
-      const expectedHediShareAmount = calculateHediShareAmountFromPricing(pricing);
+      const expectedHediShareAmount =
+        calculateHediShareAmountFromPricing(pricing);
       const currentSubtotal = roundMoney(payment?.subtotalAmount, -1);
       const currentTps = roundMoney(payment?.tpsAmount, -1);
       const currentTvq = roundMoney(payment?.tvqAmount, -1);
@@ -1427,7 +1461,11 @@ const handleStripeWebhook = async (req, res) => {
 
   let event;
   try {
-    event = stripe.webhooks.constructEvent(rawPayload, signature, webhookSecret);
+    event = stripe.webhooks.constructEvent(
+      rawPayload,
+      signature,
+      webhookSecret,
+    );
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -1445,9 +1483,8 @@ const handleStripeWebhook = async (req, res) => {
         const stripeSubscription = event.data?.object;
         const stripeSubscriptionId = stripeSubscription?.id;
         await syncSubscriptionFromWebhook(stripeSubscriptionId);
-        const statusPolicyResult = await handleSubscriptionStatusRetryPolicy(
-          stripeSubscriptionId,
-        );
+        const statusPolicyResult =
+          await handleSubscriptionStatusRetryPolicy(stripeSubscriptionId);
         if (statusPolicyResult?.shouldSendSuspensionEmail) {
           backgroundJobs.push(
             createRenewalSuspendedEmailJob({
@@ -1461,7 +1498,8 @@ const handleStripeWebhook = async (req, res) => {
       case "invoice.paid":
       case "invoice.payment_succeeded": {
         const invoice = event.data?.object;
-        const paymentResult = await recordSubscriptionPaymentFromInvoice(invoice);
+        const paymentResult =
+          await recordSubscriptionPaymentFromInvoice(invoice);
         const invoiceSubscriptionId = resolveStripeSubscriptionId(
           invoice?.subscription,
         );
@@ -1469,7 +1507,9 @@ const handleStripeWebhook = async (req, res) => {
           await syncSubscriptionFromWebhook(invoiceSubscriptionId);
         }
         if (paymentResult?.isNew && paymentResult?.payment) {
-          backgroundJobs.push(createPaymentSuccessEmailJob(paymentResult.payment));
+          backgroundJobs.push(
+            createPaymentSuccessEmailJob(paymentResult.payment),
+          );
         }
         break;
       }
@@ -1483,9 +1523,8 @@ const handleStripeWebhook = async (req, res) => {
           await syncSubscriptionFromWebhook(invoiceSubscriptionId);
         }
         if (paymentType === "renewal") {
-          const recoveryResult = await tryRecoverRenewalPaymentAfterFailure(
-            invoice,
-          );
+          const recoveryResult =
+            await tryRecoverRenewalPaymentAfterFailure(invoice);
           if (recoveryResult?.recovered) {
             if (recoveryResult?.paymentResult?.isNew) {
               backgroundJobs.push(
@@ -1588,7 +1627,8 @@ const getSubscriptionConfig = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: error.message || "Erreur lors du chargement de la configuration.",
+      message:
+        error.message || "Erreur lors du chargement de la configuration.",
     });
   }
 };
@@ -1633,7 +1673,8 @@ const updateSubscriptionConfig = async (req, res) => {
       }
 
       const normalizedPrice = Math.round(nextPrice * 100) / 100;
-      const ensurePriceResult = await ensureSubscriptionStripePrice(normalizedPrice);
+      const ensurePriceResult =
+        await ensureSubscriptionStripePrice(normalizedPrice);
       setting = ensurePriceResult.setting;
     } else {
       setting = await getOrCreateSettingDocument();
@@ -1647,8 +1688,9 @@ const updateSubscriptionConfig = async (req, res) => {
     }
 
     if (hasFreeItemUpdate) {
-      const rawFreeItemMenuItemId = String(req.body?.freeItemMenuItemId || "")
-        .trim();
+      const rawFreeItemMenuItemId = String(
+        req.body?.freeItemMenuItemId || "",
+      ).trim();
 
       if (!rawFreeItemMenuItemId) {
         setting.subscription.freeItemMenuItemId = null;
@@ -1812,19 +1854,23 @@ const createSubscription = async (req, res) => {
       });
     }
 
-    const paymentMethodCustomerId = resolveStripeCustomerId(paymentMethod.customer);
+    const paymentMethodCustomerId = resolveStripeCustomerId(
+      paymentMethod.customer,
+    );
     if (paymentMethodCustomerId && paymentMethodCustomerId !== customer.id) {
       return res.status(400).json({
         success: false,
-        message:
-          "Cette méthode de paiement est liée à un autre client Stripe.",
+        message: "Cette méthode de paiement est liée à un autre client Stripe.",
       });
     }
 
     let resolvedPaymentMethodId = paymentMethodId;
     let wasPaymentMethodAttachedNow = false;
     if (!paymentMethodCustomerId) {
-      const existingCard = await findMatchingSavedCard(customer.id, paymentMethod);
+      const existingCard = await findMatchingSavedCard(
+        customer.id,
+        paymentMethod,
+      );
       if (existingCard?.id) {
         resolvedPaymentMethodId = existingCard.id;
       } else {
@@ -1859,7 +1905,8 @@ const createSubscription = async (req, res) => {
           if (
             currentSubscriptionItem?.id &&
             stripePriceId &&
-            String(currentSubscriptionItem?.price?.id || "") !== String(stripePriceId)
+            String(currentSubscriptionItem?.price?.id || "") !==
+              String(stripePriceId)
           ) {
             synchronizedSubscription = await stripe.subscriptions.update(
               existing.id,
@@ -1899,9 +1946,12 @@ const createSubscription = async (req, res) => {
           );
           if (latestInvoiceId) {
             try {
-              const latestInvoice = await stripe.invoices.retrieve(latestInvoiceId, {
-                expand: ["payment_intent"],
-              });
+              const latestInvoice = await stripe.invoices.retrieve(
+                latestInvoiceId,
+                {
+                  expand: ["payment_intent"],
+                },
+              );
               const invoiceStatus = String(latestInvoice?.status || "")
                 .trim()
                 .toLowerCase();
@@ -1925,7 +1975,10 @@ const createSubscription = async (req, res) => {
                 synchronizedSubscription = await stripe.subscriptions.retrieve(
                   existing.id,
                   {
-                    expand: ["items.data.price", "latest_invoice.payment_intent"],
+                    expand: [
+                      "items.data.price",
+                      "latest_invoice.payment_intent",
+                    ],
                   },
                 );
               }
@@ -1971,8 +2024,7 @@ const createSubscription = async (req, res) => {
                     ?.client_secret || null,
                 requiresAction:
                   synchronizedSubscription.latest_invoice?.payment_intent
-                    ?.status ===
-                  "requires_action",
+                    ?.status === "requires_action",
               },
             },
           });
@@ -2169,8 +2221,12 @@ const confirmSubscriptionPayment = async (req, res) => {
     );
 
     if (!paymentIntentId) {
-      const latestPaymentIntent = stripeSubscription?.latest_invoice?.payment_intent;
-      if (latestPaymentIntent?.id && latestPaymentIntent?.status === "requires_confirmation") {
+      const latestPaymentIntent =
+        stripeSubscription?.latest_invoice?.payment_intent;
+      if (
+        latestPaymentIntent?.id &&
+        latestPaymentIntent?.status === "requires_confirmation"
+      ) {
         await stripe.paymentIntents.confirm(latestPaymentIntent.id);
         stripeSubscription = await stripe.subscriptions.retrieve(
           resolvedSubscriptionId,
@@ -2193,9 +2249,8 @@ const confirmSubscriptionPayment = async (req, res) => {
           0,
         );
         if (latestInvoice?.status === "paid" || amountPaid > 0) {
-          fallbackPaymentResult = await recordSubscriptionPaymentFromInvoice(
-            latestInvoice,
-          );
+          fallbackPaymentResult =
+            await recordSubscriptionPaymentFromInvoice(latestInvoice);
         }
       }
     } catch (error) {
@@ -2203,7 +2258,8 @@ const confirmSubscriptionPayment = async (req, res) => {
     }
 
     const stripeStatus = String(stripeSubscription?.status || "").toLowerCase();
-    const latestPaymentIntent = stripeSubscription?.latest_invoice?.payment_intent;
+    const latestPaymentIntent =
+      stripeSubscription?.latest_invoice?.payment_intent;
     if (!isActiveStatus(stripeStatus)) {
       if (
         latestPaymentIntent?.status === "requires_action" &&
@@ -2470,10 +2526,11 @@ const refreshUserSubscription = async (req, res) => {
 
         if (resolvedDefaultPmId) {
           try {
-            const paymentMethod = await stripe.paymentMethods.retrieve(
-              resolvedDefaultPmId,
+            const paymentMethod =
+              await stripe.paymentMethods.retrieve(resolvedDefaultPmId);
+            const pmCustomerId = resolveStripeCustomerId(
+              paymentMethod?.customer,
             );
-            const pmCustomerId = resolveStripeCustomerId(paymentMethod?.customer);
             if (customerId && pmCustomerId && pmCustomerId !== customerId) {
               resolvedDefaultPmId = "";
             }
@@ -2537,11 +2594,14 @@ const refreshUserSubscription = async (req, res) => {
           });
         }
       } catch (error) {
-        logWithTimestamp("refreshUserSubscription payment settings sync failed", {
-          userId: String(user._id),
-          subscriptionId: String(user.subscriptionStripeSubscriptionId || ""),
-          error: error?.message || "unknown",
-        });
+        logWithTimestamp(
+          "refreshUserSubscription payment settings sync failed",
+          {
+            userId: String(user._id),
+            subscriptionId: String(user.subscriptionStripeSubscriptionId || ""),
+            error: error?.message || "unknown",
+          },
+        );
       }
     }
 
@@ -2610,7 +2670,8 @@ const getSubscriptionAdminStats = async (req, res) => {
       membershipAgg.forEach((entry) => {
         const userId = String(entry?._id || "").trim();
         if (!userId) return;
-        const candidateDate = entry?.firstPaidAt || entry?.firstCreatedAt || null;
+        const candidateDate =
+          entry?.firstPaidAt || entry?.firstCreatedAt || null;
         membershipDatesMap.set(userId, candidateDate);
       });
     }
@@ -2648,7 +2709,10 @@ const getSubscriptionAdminStats = async (req, res) => {
         autoRenew: Boolean(user.subscriptionAutoRenew),
         currentPeriodStart: user.subscriptionCurrentPeriodStart || null,
         currentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
-        monthlyPrice: roundMoney(user.subscriptionMonthlyPrice, config.monthlyPrice),
+        monthlyPrice: roundMoney(
+          user.subscriptionMonthlyPrice,
+          config.monthlyPrice,
+        ),
         savingsTotal: roundMoney(user.subscriptionSavingsTotal, 0),
         amountPaidTotal: totalPaid,
         paymentsCount: paymentCount,
@@ -2746,30 +2810,31 @@ const getSubscriptionAdminUserDetails = async (req, res) => {
       });
     }
 
-    const [user, subscriptionRecord, paymentDocs, eventDocs] = await Promise.all([
-      User.findById(userId)
-        .select(
-          "name email phone_number createdAt stripe_id subscriptionStatus subscriptionIsActive subscriptionAutoRenew subscriptionStripeSubscriptionId subscriptionCurrentPeriodStart subscriptionCurrentPeriodEnd subscriptionMonthlyPrice subscriptionAmountPaidTotal subscriptionPaymentsCount subscriptionSavingsTotal subscriptionRenewalFailureStartedAt subscriptionRenewalGraceEndsAt subscriptionRenewalFailureInvoiceId subscriptionSuspendedAt subscriptionSuspensionReason subscriptionSuspensionEmailSentAt",
-        )
-        .lean(),
-      Subscription.findOne({ user: userId })
-        .select(
-          "stripeSubscriptionId status cancelAtPeriodEnd canceledAt currentPeriodStart currentPeriodEnd monthlyPrice currency createdAt updatedAt",
-        )
-        .lean(),
-      SubscriptionPayment.find({ user: userId })
-        .sort({ paidAt: -1, createdAt: -1 })
-        .select(
-          "amount currency paymentType billingReason paidAt stripeInvoiceId stripePaymentIntentId createdAt",
-        )
-        .lean(),
-      SubscriptionEvent.find({ user: userId })
-        .sort({ occurredAt: -1, createdAt: -1 })
-        .select(
-          "eventType occurredAt stripeInvoiceId stripeSubscriptionId reason metadata createdAt",
-        )
-        .lean(),
-    ]);
+    const [user, subscriptionRecord, paymentDocs, eventDocs] =
+      await Promise.all([
+        User.findById(userId)
+          .select(
+            "name email phone_number createdAt stripe_id subscriptionStatus subscriptionIsActive subscriptionAutoRenew subscriptionStripeSubscriptionId subscriptionCurrentPeriodStart subscriptionCurrentPeriodEnd subscriptionMonthlyPrice subscriptionAmountPaidTotal subscriptionPaymentsCount subscriptionSavingsTotal subscriptionRenewalFailureStartedAt subscriptionRenewalGraceEndsAt subscriptionRenewalFailureInvoiceId subscriptionSuspendedAt subscriptionSuspensionReason subscriptionSuspensionEmailSentAt",
+          )
+          .lean(),
+        Subscription.findOne({ user: userId })
+          .select(
+            "stripeSubscriptionId status cancelAtPeriodEnd canceledAt currentPeriodStart currentPeriodEnd monthlyPrice currency createdAt updatedAt",
+          )
+          .lean(),
+        SubscriptionPayment.find({ user: userId })
+          .sort({ paidAt: -1, createdAt: -1 })
+          .select(
+            "amount currency paymentType billingReason paidAt stripeInvoiceId stripePaymentIntentId createdAt",
+          )
+          .lean(),
+        SubscriptionEvent.find({ user: userId })
+          .sort({ occurredAt: -1, createdAt: -1 })
+          .select(
+            "eventType occurredAt stripeInvoiceId stripeSubscriptionId reason metadata createdAt",
+          )
+          .lean(),
+      ]);
 
     if (!user) {
       return res.status(404).json({
@@ -2846,7 +2911,10 @@ const getSubscriptionAdminUserDetails = async (req, res) => {
       });
     }
 
-    if (suspensionHistory.length === 0 && toDateOrNull(user.subscriptionSuspendedAt)) {
+    if (
+      suspensionHistory.length === 0 &&
+      toDateOrNull(user.subscriptionSuspendedAt)
+    ) {
       suspensionHistory.push({
         _id: `current-suspension-${user._id}`,
         occurredAt: user.subscriptionSuspendedAt,
@@ -2858,12 +2926,11 @@ const getSubscriptionAdminUserDetails = async (req, res) => {
       });
     }
 
-    const firstPayment = [...paymentHistory]
-      .sort((a, b) => {
-        const aTime = toDateOrNull(a.paidAt)?.getTime() || 0;
-        const bTime = toDateOrNull(b.paidAt)?.getTime() || 0;
-        return aTime - bTime;
-      })[0];
+    const firstPayment = [...paymentHistory].sort((a, b) => {
+      const aTime = toDateOrNull(a.paidAt)?.getTime() || 0;
+      const bTime = toDateOrNull(b.paidAt)?.getTime() || 0;
+      return aTime - bTime;
+    })[0];
 
     const memberSinceAt =
       activationPaymentsAsc[0]?.paidAt ||
@@ -2889,7 +2956,8 @@ const getSubscriptionAdminUserDetails = async (req, res) => {
             "",
         },
         summary: {
-          status: user.subscriptionStatus || subscriptionRecord?.status || "inactive",
+          status:
+            user.subscriptionStatus || subscriptionRecord?.status || "inactive",
           isActive: isUserSubscriptionActive(user),
           isOpen: isUserSubscriptionOpen(user),
           autoRenew: Boolean(user.subscriptionAutoRenew),
@@ -2903,7 +2971,9 @@ const getSubscriptionAdminUserDetails = async (req, res) => {
             null,
           canceledAt: subscriptionRecord?.canceledAt || null,
           monthlyPrice: roundMoney(
-            user.subscriptionMonthlyPrice || subscriptionRecord?.monthlyPrice || 11.99,
+            user.subscriptionMonthlyPrice ||
+              subscriptionRecord?.monthlyPrice ||
+              11.99,
             11.99,
           ),
           currency: normalizeCurrency(subscriptionRecord?.currency || "cad"),
@@ -2914,7 +2984,8 @@ const getSubscriptionAdminUserDetails = async (req, res) => {
           ),
           savingsTotal: roundMoney(user.subscriptionSavingsTotal, 0),
           memberSinceAt,
-          renewalFailureStartedAt: user.subscriptionRenewalFailureStartedAt || null,
+          renewalFailureStartedAt:
+            user.subscriptionRenewalFailureStartedAt || null,
           renewalGraceEndsAt: user.subscriptionRenewalGraceEndsAt || null,
           suspendedAt: user.subscriptionSuspendedAt || null,
           suspensionReason: user.subscriptionSuspensionReason || "",

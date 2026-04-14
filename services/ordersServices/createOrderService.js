@@ -116,6 +116,21 @@ const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal) => {
   return 0;
 };
 
+const normalizeOrderType = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const isPickupOrderType = (value) => {
+  const normalizedType = normalizeOrderType(value);
+  return normalizedType === "pick up" || normalizedType === "pickup";
+};
+
+const normalizePaymentMethod = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
 const buildAvailabilityErrorMessage = ({
   unavailableItems = [],
   unavailableOffers = [],
@@ -191,6 +206,13 @@ const createOrderService = async (order, options = {}) => {
     const configuredBirthdayFreeItemName = String(
       setting?.birthday?.freeItemMenuItemName || "",
     ).trim();
+    const normalizedOrderTypeValue = normalizeOrderType(order?.type);
+    const normalizedPaymentMethod = normalizePaymentMethod(
+      orderPayload.paymentMethod,
+    );
+    const isPickupCounterPayment =
+      isPickupOrderType(normalizedOrderTypeValue) &&
+      normalizedPaymentMethod === "cash_at_counter";
 
     const totalPrice = roundMoney(orderPayload.total, 0);
     const isZeroTotalOrder = totalPrice <= 0;
@@ -216,89 +238,98 @@ const createOrderService = async (order, options = {}) => {
     }
 
     if (!allowZeroTotalSubscriptionOrder) {
-      if (orderPayload.paymentMethod !== "card") {
+      if (normalizedPaymentMethod !== "card" && !isPickupCounterPayment) {
         return { error: "Payment method not supported" };
       }
 
-      if (!orderPayload.paymentIntentId) {
+      if (isPickupCounterPayment && orderPayload.paymentIntentId) {
+        return {
+          error:
+            "Aucun paiement Stripe ne doit être envoyé pour un paiement au comptoir.",
+        };
+      }
+
+      if (normalizedPaymentMethod === "card" && !orderPayload.paymentIntentId) {
         return {
           error:
             "Un paiement Stripe est requis pour les commandes avec total supérieur à 0.",
         };
       }
 
-      const paymentIntent = await stripe.paymentIntents.retrieve(
-        orderPayload.paymentIntentId,
-      );
-      const expectedAmountCents = Math.round(
-        toSafeNumber(orderPayload.total, 0) * 100,
-      );
-      const paymentIntentAmountCents = Math.round(
-        toSafeNumber(paymentIntent?.amount, 0),
-      );
-      const paymentIntentStatus = String(paymentIntent?.status || "")
-        .toLowerCase()
-        .trim();
-      const allowedStatuses = new Set([
-        "requires_capture",
-        "processing",
-        "succeeded",
-      ]);
+      if (normalizedPaymentMethod === "card") {
+        const paymentIntent = await stripe.paymentIntents.retrieve(
+          orderPayload.paymentIntentId,
+        );
+        const expectedAmountCents = Math.round(
+          toSafeNumber(orderPayload.total, 0) * 100,
+        );
+        const paymentIntentAmountCents = Math.round(
+          toSafeNumber(paymentIntent?.amount, 0),
+        );
+        const paymentIntentStatus = String(paymentIntent?.status || "")
+          .toLowerCase()
+          .trim();
+        const allowedStatuses = new Set([
+          "requires_capture",
+          "processing",
+          "succeeded",
+        ]);
 
-      if (expectedAmountCents <= 0) {
-        return {
-          error:
-            "Le montant de la commande est invalide. Veuillez relancer votre paiement.",
-        };
-      }
+        if (expectedAmountCents <= 0) {
+          return {
+            error:
+              "Le montant de la commande est invalide. Veuillez relancer votre paiement.",
+          };
+        }
 
-      if (paymentIntentAmountCents !== expectedAmountCents) {
-        logWithTimestamp("Payment amount mismatch", {
-          userId: String(user?._id || ""),
-          platform: normalizedPlatform,
-          paymentIntentId: String(paymentIntent?.id || ""),
-          paymentIntentStatus,
-          paymentIntentAmountCents,
-          expectedAmountCents,
-          paymentIntentAmount: roundMoney(paymentIntentAmountCents / 100, 0),
-          expectedOrderTotal: roundMoney(orderPayload.total, 0),
-          rawOrderTotal: orderPayload.total,
-          subTotal: roundMoney(orderPayload.subTotal, 0),
-          subTotalAfterDiscount: roundMoney(
-            orderPayload.subTotalAfterDiscount,
-            0,
-          ),
-          deliveryFee: roundMoney(orderPayload.deliveryFee, 0),
-          tip: roundMoney(orderPayload.tip, 0),
-          orderItemsCount: orderItems.length,
-          offersCount: offers.length,
-          rewardsCount: rewards.length,
-          promoCodeId: normalizeId(orderPayload?.promoCode?.promoCodeId),
-          promoCode: String(orderPayload?.promoCode?.code || ""),
-          scheduled: Boolean(orderPayload?.scheduled?.isScheduled),
-        });
-        return {
-          error:
-            "Le montant du paiement ne correspond plus à la commande. Veuillez relancer le paiement.",
-        };
-      }
+        if (paymentIntentAmountCents !== expectedAmountCents) {
+          logWithTimestamp("Payment amount mismatch", {
+            userId: String(user?._id || ""),
+            platform: normalizedPlatform,
+            paymentIntentId: String(paymentIntent?.id || ""),
+            paymentIntentStatus,
+            paymentIntentAmountCents,
+            expectedAmountCents,
+            paymentIntentAmount: roundMoney(paymentIntentAmountCents / 100, 0),
+            expectedOrderTotal: roundMoney(orderPayload.total, 0),
+            rawOrderTotal: orderPayload.total,
+            subTotal: roundMoney(orderPayload.subTotal, 0),
+            subTotalAfterDiscount: roundMoney(
+              orderPayload.subTotalAfterDiscount,
+              0,
+            ),
+            deliveryFee: roundMoney(orderPayload.deliveryFee, 0),
+            tip: roundMoney(orderPayload.tip, 0),
+            orderItemsCount: orderItems.length,
+            offersCount: offers.length,
+            rewardsCount: rewards.length,
+            promoCodeId: normalizeId(orderPayload?.promoCode?.promoCodeId),
+            promoCode: String(orderPayload?.promoCode?.code || ""),
+            scheduled: Boolean(orderPayload?.scheduled?.isScheduled),
+          });
+          return {
+            error:
+              "Le montant du paiement ne correspond plus à la commande. Veuillez relancer le paiement.",
+          };
+        }
 
-      if (!allowedStatuses.has(paymentIntentStatus)) {
-        return {
-          error:
-            "Le paiement n'est plus valide pour cette commande. Veuillez relancer le paiement.",
-        };
-      }
+        if (!allowedStatuses.has(paymentIntentStatus)) {
+          return {
+            error:
+              "Le paiement n'est plus valide pour cette commande. Veuillez relancer le paiement.",
+          };
+        }
 
-      if (
-        user?.stripe_id &&
-        paymentIntent?.customer &&
-        String(paymentIntent.customer) !== String(user.stripe_id)
-      ) {
-        return {
-          error:
-            "Le paiement ne correspond pas à ce compte utilisateur. Veuillez relancer le paiement.",
-        };
+        if (
+          user?.stripe_id &&
+          paymentIntent?.customer &&
+          String(paymentIntent.customer) !== String(user.stripe_id)
+        ) {
+          return {
+            error:
+              "Le paiement ne correspond pas à ce compte utilisateur. Veuillez relancer le paiement.",
+          };
+        }
       }
     }
 
@@ -770,7 +801,7 @@ const createOrderService = async (order, options = {}) => {
         : orderPayload.paymentIntentId,
       payment_method: allowZeroTotalSubscriptionOrder
         ? "subscription_free_item"
-        : orderPayload.paymentMethod,
+        : normalizedPaymentMethod || "card",
       promoCode: promoCodeId,
       subscriptionBenefits,
       birthdayBenefits,

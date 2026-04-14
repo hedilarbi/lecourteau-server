@@ -51,6 +51,13 @@ const logWebhookError = (message, error, meta = {}) => {
   );
 };
 
+const logUberDirectAutoDeliveryError = (message, meta = {}) => {
+  const timestamp = new Date().toISOString();
+  console.log(
+    `[UberDirectAuto] ${timestamp} - ${message} ${JSON.stringify(meta)}`,
+  );
+};
+
 const getUberDirectAccessToken = async (req, res) => {
   try {
     const scope = req.body?.scope || req.query?.scope;
@@ -869,13 +876,15 @@ const createQuote = async (req, res) => {
   }
 };
 
-const createDelivery = async (req, res) => {
+const createUberDirectDeliveryForOrder = async ({
+  orderId,
+  restaurantId,
+  quoteId: providedQuoteId,
+}) => {
   try {
-    const { orderId, restaurantId } = req.params;
-
     const { order, error } = await getOrderForUber(orderId);
     if (error) {
-      return res.status(400).json({ success: false, message: error });
+      return { success: false, status: 400, message: error };
     }
 
     const {
@@ -884,14 +893,15 @@ const createDelivery = async (req, res) => {
       error: restaurantError,
     } = await getRestaurantCustomerId(restaurantId);
     if (restaurantError) {
-      return res.status(400).json({ success: false, message: restaurantError });
+      return { success: false, status: 400, message: restaurantError };
     }
 
     if (order.restaurant && String(order.restaurant) !== String(restaurantId)) {
-      return res.status(400).json({
+      return {
         success: false,
+        status: 400,
         message: "La commande n'appartient pas au restaurant sélectionné.",
-      });
+      };
     }
 
     let pickup_address = buildPickupAddressFromRestaurant(restaurant);
@@ -914,10 +924,11 @@ const createDelivery = async (req, res) => {
     }
 
     if (isIncompleteAddress(pickup_address)) {
-      return res.status(400).json({
+      return {
         success: false,
+        status: 400,
         message: "Adresse de ramassage incomplète pour le restaurant.",
-      });
+      };
     }
 
     let dropoff_address = buildDropoffAddressFromOrder(order);
@@ -940,10 +951,11 @@ const createDelivery = async (req, res) => {
     }
 
     if (isIncompleteAddress(dropoff_address)) {
-      return res.status(400).json({
+      return {
         success: false,
+        status: 400,
         message: "Adresse de livraison incomplète pour cette commande.",
-      });
+      };
     }
 
     const manifestTotalValue = toCents(
@@ -960,10 +972,7 @@ const createDelivery = async (req, res) => {
       dropoff_phone_number: normalizePhone(order.user?.phone_number),
       manifest_total_value: manifestTotalValue,
     });
-    const requestQuoteId = normalizeText(
-      req.body?.quote_id || req.body?.quoteId,
-    );
-    let quoteId = requestQuoteId || null;
+    let quoteId = normalizeText(providedQuoteId);
 
     if (!quoteId) {
       const quoteBody = stringifyAddressFields(quotePayload);
@@ -990,6 +999,14 @@ const createDelivery = async (req, res) => {
           details: quoteResult.details || null,
           payload: quoteBody,
         });
+        logUberDirectAutoDeliveryError("Error creating quote", {
+          orderId,
+          restaurantId,
+          customerId,
+          status: quoteResult.status || null,
+          error: quoteResult.error || null,
+          details: quoteResult.details || null,
+        });
       }
 
       const quoteResponsePayload =
@@ -999,12 +1016,13 @@ const createDelivery = async (req, res) => {
       quoteId = extractQuoteIdFromPayload(quoteResponsePayload);
 
       if (!quoteId) {
-        return res.status(502).json({
+        return {
           success: false,
+          status: 502,
           message:
             "Impossible de récupérer un quote_id Uber Direct pour la livraison.",
           details: quoteResponsePayload,
-        });
+        };
       }
     } else {
       console.log("[UberDirect][createDelivery] using provided quoteId", {
@@ -1023,7 +1041,6 @@ const createDelivery = async (req, res) => {
       manifest_total_value: manifestTotalValue,
       manifest_items: buildManifestItems(order),
       manifest_reference: order.code || String(order._id),
-
       pickup_latitude: restaurant.location?.latitude,
       pickup_longitude: restaurant.location?.longitude,
       dropoff_latitude: order.coords?.latitude,
@@ -1061,19 +1078,71 @@ const createDelivery = async (req, res) => {
       order.uber_last_event_type = "delivery_created";
       order.uber_last_event_at = new Date();
       await order.save();
-    } else {
-      console.error("Error creating Uber Direct delivery:", {
+
+      return {
+        success: true,
+        status: result.status || 200,
+        data: responsePayload,
+      };
+    }
+
+    console.error("Error creating Uber Direct delivery:", {
+      status: result.status,
+      error: result.error,
+      details: result.details,
+    });
+    logUberDirectAutoDeliveryError("Error creating Uber delivery", {
+      orderId,
+      restaurantId,
+      status: result.status || null,
+      error: result.error || null,
+      details: result.details || null,
+    });
+
+    return {
+      success: false,
+      status: result.status || 500,
+      message: translateUberErrorMessage({
         status: result.status,
         error: result.error,
         details: result.details,
-      });
-    }
-
-    return sendUberResponse(res, result);
+      }),
+      details:
+        result.details && typeof result.details === "object"
+          ? { ...result.details, uber_message: result.error }
+          : result.details,
+    };
   } catch (err) {
     console.error("Error creating Uber Direct delivery:", err);
-    return res.status(500).json({ success: false, message: err.message });
+    logUberDirectAutoDeliveryError("Error creating Uber delivery", {
+      orderId,
+      restaurantId,
+      error: err?.message || String(err),
+    });
+    return { success: false, status: 500, message: err.message };
   }
+};
+
+const createDelivery = async (req, res) => {
+  const { orderId, restaurantId } = req.params;
+  const result = await createUberDirectDeliveryForOrder({
+    orderId,
+    restaurantId,
+    quoteId: req.body?.quote_id || req.body?.quoteId,
+  });
+
+  if (!result.success) {
+    return res.status(result.status || 500).json({
+      success: false,
+      message: result.message,
+      details: result.details,
+    });
+  }
+
+  return res.status(result.status || 200).json({
+    success: true,
+    data: result.data,
+  });
 };
 
 const listDeliveries = async (req, res) => {
@@ -1458,6 +1527,7 @@ module.exports = {
   getUberDirectAccessToken,
   createQuote,
   createDelivery,
+  createUberDirectDeliveryForOrder,
   listDeliveries,
   getDelivery,
   updateDelivery,

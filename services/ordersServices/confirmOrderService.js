@@ -18,6 +18,9 @@ const {
 const {
   applyConfirmedOrderBirthdayBenefits,
 } = require("../birthdayServices/birthdayBenefitsService");
+const {
+  createUberDirectDeliveryForOrder,
+} = require("../../controllers/uberDirect");
 
 const logWithTimestamp = (msg, extra = {}) => {
   const timeStamp = new Date().toISOString();
@@ -141,6 +144,76 @@ async function sendPush(user, orderId, pointsEarned) {
   }
 }
 
+const isDeliveryOrderType = (type) =>
+  ["delivery", "devliery"].includes(
+    String(type || "")
+      .toLowerCase()
+      .trim(),
+  );
+
+const isRetryableUberStatus = (uberStatus) =>
+  ["canceled", "cancelled", "returned", "failed"].includes(
+    String(uberStatus || "")
+      .toLowerCase()
+      .trim(),
+  );
+
+async function maybeCreateUberDeliveryAfterConfirmation(order) {
+  if (!isDeliveryOrderType(order?.type)) {
+    return null;
+  }
+
+  const restaurantId =
+    (typeof order?.restaurant === "object"
+      ? order?.restaurant?._id
+      : order?.restaurant) || null;
+
+  if (!restaurantId) {
+    const warning =
+      "Commande confirmée, mais impossible d'initialiser la livraison Uber: restaurant introuvable.";
+    logWithTimestamp("Auto Uber Direct skipped: missing restaurant", {
+      orderId: order?._id,
+    });
+    return warning;
+  }
+
+  const hasUberDelivery = Boolean(order?.uber_delivery_id);
+  const normalizedProvider = String(order?.delivery_provider || "")
+    .trim()
+    .toLowerCase();
+  const normalizedUberStatus = String(order?.uber_status || "")
+    .trim()
+    .toLowerCase();
+  const isCompletedUberStatus = normalizedUberStatus === "delivered";
+  const shouldCreateUberDelivery =
+    !hasUberDelivery ||
+    normalizedProvider !== "uber_direct" ||
+    isRetryableUberStatus(normalizedUberStatus) ||
+    isCompletedUberStatus;
+
+  if (!shouldCreateUberDelivery) {
+    return null;
+  }
+
+  const uberResult = await createUberDirectDeliveryForOrder({
+    orderId: order._id,
+    restaurantId,
+  });
+
+  if (!uberResult?.success) {
+    const warning = `Commande confirmée, mais la livraison Uber n'a pas pu être créée. Veuillez la passer manuellement.`;
+    logWithTimestamp("Auto Uber Direct creation failed after confirmation", {
+      orderId: order?._id,
+      restaurantId,
+      message: uberResult?.message || null,
+      status: uberResult?.status || null,
+    });
+    return warning;
+  }
+
+  return null;
+}
+
 module.exports = async function confirmOrderService(orderId) {
   // 1) Claim order (idempotent, atomic)
   const order = await claimOrderForCapture(orderId);
@@ -158,23 +231,38 @@ module.exports = async function confirmOrderService(orderId) {
 
   try {
     if (!order.paymentIntentId) {
-      // No card payment (e.g., subscription free-item total 0)
-      order.confirmed = true;
+      const normalizedPaymentMethod = String(order?.payment_method || "")
+        .trim()
+        .toLowerCase();
+      const isCounterPayment = normalizedPaymentMethod === "cash_at_counter";
+      const isSubscriptionFreeItemPayment =
+        normalizedPaymentMethod === "subscription_free_item";
       const totalPrice = Number(order?.total_price || 0);
-      if (
-        totalPrice <= 0 ||
-        String(order?.payment_method || "").trim().toLowerCase() ===
-          "subscription_free_item"
-      ) {
+
+      if (normalizedPaymentMethod === "card" && totalPrice > 0) {
+        return {
+          error:
+            "Cette commande nécessite un paiement en ligne valide avant confirmation.",
+        };
+      }
+
+      order.confirmed = true;
+      if (totalPrice <= 0 || isSubscriptionFreeItemPayment) {
         order.payment_status = true;
       }
       await order.save();
       await finalizeLoyaltyAndPromo(order);
+      const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
       process.nextTick(() =>
         sendPush(order.user, order._id, calculatePoints(order)),
       );
       process.nextTick(() => sendMail(order));
-      return { response: "Order confirmed (no card capture)" };
+      return {
+        response: isCounterPayment
+          ? "Order confirmed (counter payment)"
+          : "Order confirmed (no card capture)",
+        warning,
+      };
     }
 
     // 2) Inspect PI first
@@ -190,11 +278,12 @@ module.exports = async function confirmOrderService(orderId) {
       await order.save();
       // Loyalty + promo bookkeeping (run once; guard via flags if needed)
       await finalizeLoyaltyAndPromo(order);
+      const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
       process.nextTick(() =>
         sendPush(order.user, order._id, calculatePoints(order)),
       );
       process.nextTick(() => sendMail(order));
-      return { response: "Order already captured; confirmed" };
+      return { response: "Order already captured; confirmed", warning };
     }
 
     if (pi.status === "canceled") {
@@ -230,12 +319,13 @@ module.exports = async function confirmOrderService(orderId) {
 
     // 6) Loyalty + promo bookkeeping
     await finalizeLoyaltyAndPromo(order);
+    const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
     process.nextTick(() =>
       sendPush(order.user, order._id, calculatePoints(order)),
     );
     process.nextTick(() => sendMail(order));
 
-    return { response: "Order confirmed" };
+    return { response: "Order confirmed", warning };
   } catch (err) {
     // IMPORTANT: do not auto-cancel on “already captured”
     const msg = (err && err.message) || "Unknown error";

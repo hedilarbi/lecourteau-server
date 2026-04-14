@@ -582,13 +582,17 @@ const confirmOrder = async (req, res) => {
         .json({ success: false, message: "Staff member not found." });
     }
 
-    const { error } = await confirmOrderService(id);
+    const { error, response, warning } = await confirmOrderService(id);
     if (error) {
       logWithTimestamp(`Error confirming order service: ${error}`);
 
       return res.status(400).json({ success: false, error });
     }
-    res.status(200).json({ success: true });
+    res.status(200).json({
+      success: true,
+      message: response || "Commande confirmée.",
+      warning: warning || null,
+    });
     const auditData = {
       detailsModel: "Order",
       userId: staffId,

@@ -132,7 +132,7 @@ const getRestaurantStats = async (req, res) => {
   try {
     const { id } = req.params;
     const orderProjection =
-      "code type total_price createdAt status confirmed scheduled user";
+      "code type total_price createdAt status confirmed scheduled user payment_method";
 
     const [onGoingOrders, nonConfirmedOrders, scheduledOrders] =
       await Promise.all([

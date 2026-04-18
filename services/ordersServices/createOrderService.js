@@ -53,6 +53,12 @@ const buildOrderItemsSubtotal = (items = []) =>
     0,
   );
 
+const buildOrderOffersSubtotal = (offers = []) =>
+  roundMoney(
+    offers.reduce((sum, offer) => sum + toSafeNumber(offer?.price, 0), 0),
+    0,
+  );
+
 const getPromoExcludedCategoryIds = (promoCode) => {
   if (!Array.isArray(promoCode?.excludedCategories)) return [];
 
@@ -68,32 +74,86 @@ const getPromoExcludedCategoryIds = (promoCode) => {
 const getPromoLegacyIncludedCategoryId = (promoCode) =>
   normalizeId(promoCode?.category?._id || promoCode?.category);
 
-const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) => {
+const getOfferCategoryIds = (offerDocument) => {
+  const items = Array.isArray(offerDocument?.items) ? offerDocument.items : [];
+
+  return items
+    .map((entry) =>
+      normalizeId(entry?.item?.category?._id || entry?.item?.category),
+    )
+    .filter(Boolean);
+};
+
+const isOfferEligibleForPromo = ({
+  offerDocument,
+  promoExcludedCategoryIds = [],
+  legacyIncludedCategoryId = "",
+}) => {
+  if (!offerDocument) return false;
+
+  const offerCategoryIds = getOfferCategoryIds(offerDocument);
+
+  if (promoExcludedCategoryIds.length) {
+    return !offerCategoryIds.some((categoryId) =>
+      promoExcludedCategoryIds.includes(categoryId),
+    );
+  }
+
+  if (legacyIncludedCategoryId) {
+    return offerCategoryIds.includes(legacyIncludedCategoryId);
+  }
+
+  return true;
+};
+
+const calculatePromoEligibleSubtotal = (
+  promoCode,
+  orderItems,
+  menuItemsById,
+  offers = [],
+  offerDocumentsById = new Map(),
+) => {
   const promoExcludedCategoryIds = getPromoExcludedCategoryIds(promoCode);
   const legacyIncludedCategoryId = getPromoLegacyIncludedCategoryId(promoCode);
 
   if (!promoExcludedCategoryIds.length && !legacyIncludedCategoryId) {
-    return buildOrderItemsSubtotal(orderItems);
+    return roundMoney(
+      buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers),
+      0,
+    );
   }
 
-  return roundMoney(
-    orderItems.reduce((sum, orderItem) => {
-      const menuItem = menuItemsById.get(normalizeId(orderItem?.item));
-      if (!menuItem) return sum;
+  const itemsEligibleSubtotal = orderItems.reduce((sum, orderItem) => {
+    const menuItem = menuItemsById.get(normalizeId(orderItem?.item));
+    if (!menuItem) return sum;
 
-      const menuItemCategoryId = normalizeId(menuItem?.category);
-      if (promoExcludedCategoryIds.length) {
-        if (promoExcludedCategoryIds.includes(menuItemCategoryId)) {
-          return sum;
-        }
-      } else if (menuItemCategoryId !== legacyIncludedCategoryId) {
+    const menuItemCategoryId = normalizeId(menuItem?.category);
+    if (promoExcludedCategoryIds.length) {
+      if (promoExcludedCategoryIds.includes(menuItemCategoryId)) {
         return sum;
       }
+    } else if (menuItemCategoryId !== legacyIncludedCategoryId) {
+      return sum;
+    }
 
-      return sum + toSafeNumber(orderItem?.price, 0);
-    }, 0),
-    0,
-  );
+    return sum + toSafeNumber(orderItem?.price, 0);
+  }, 0);
+  const offersEligibleSubtotal = offers.reduce((sum, offer) => {
+    const offerDocument = offerDocumentsById.get(normalizeId(offer?.offer));
+    if (
+      !isOfferEligibleForPromo({
+        offerDocument,
+        promoExcludedCategoryIds,
+        legacyIncludedCategoryId,
+      })
+    ) {
+      return sum;
+    }
+
+    return sum + toSafeNumber(offer?.price, 0);
+  }, 0);
+
+  return roundMoney(itemsEligibleSubtotal + offersEligibleSubtotal, 0);
 };
 
 const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal) => {
@@ -130,6 +190,100 @@ const normalizePaymentMethod = (value) =>
   String(value || "")
     .trim()
     .toLowerCase();
+
+const normalizeCoords = (coords) => {
+  const latitude = Number(coords?.latitude);
+  const longitude = Number(coords?.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return { latitude, longitude };
+};
+
+const buildDetailedAddress = (address = {}) => ({
+  street_address:
+    address.street_address || address.streetAddress || address.street || "",
+  city: address.city || "",
+  state: address.state || "",
+  postal_code:
+    address.postal_code || address.postalCode || address.zipCode || "",
+  country: address.country || "",
+});
+
+const normalizeAddressText = (address) =>
+  String(address || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+const resolveOrderAddressSelection = ({ order, user }) => {
+  const requestedAddressId = normalizeId(order?.addressId);
+  const userAddresses = Array.isArray(user?.addresses) ? user.addresses : [];
+
+  if (requestedAddressId) {
+    const savedAddress = userAddresses.find(
+      (address) => String(address?._id || "") === requestedAddressId,
+    );
+
+    if (!savedAddress) {
+      return {
+        error:
+          "Adresse de livraison introuvable. Veuillez sélectionner votre adresse à nouveau.",
+      };
+    }
+
+    return {
+      address: String(savedAddress.address || "").trim(),
+      coords: normalizeCoords(savedAddress.coords),
+      detailedAddress: buildDetailedAddress(savedAddress),
+      fromSavedAddress: true,
+    };
+  }
+
+  return {
+    address: String(order?.address || "").trim(),
+    coords: normalizeCoords(order?.coords),
+    detailedAddress: buildDetailedAddress(
+      order?.detailedAddress || order?.detailed_address || {},
+    ),
+    fromSavedAddress: false,
+  };
+};
+
+const appendDeliveryAddressIfMissing = (user, resolvedOrderAddress) => {
+  if (!user || resolvedOrderAddress?.fromSavedAddress) return false;
+
+  const normalizedOrderAddress = normalizeAddressText(
+    resolvedOrderAddress?.address,
+  );
+  if (!normalizedOrderAddress) return false;
+
+  const alreadyExists = (user.addresses || []).some(
+    (savedAddress) =>
+      normalizeAddressText(savedAddress?.address) === normalizedOrderAddress,
+  );
+
+  if (alreadyExists) return false;
+
+  const detailedAddress = resolvedOrderAddress?.detailedAddress || {};
+  const addressEntry = {
+    address: resolvedOrderAddress.address,
+    street_address: detailedAddress.street_address || "",
+    city: detailedAddress.city || "",
+    state: detailedAddress.state || "",
+    postal_code: detailedAddress.postal_code || "",
+    country: detailedAddress.country || "",
+  };
+
+  if (resolvedOrderAddress?.coords) {
+    addressEntry.coords = resolvedOrderAddress.coords;
+  }
+
+  user.addresses.push(addressEntry);
+  return true;
+};
 
 const buildAvailabilityErrorMessage = ({
   unavailableItems = [],
@@ -213,6 +367,19 @@ const createOrderService = async (order, options = {}) => {
     const isPickupCounterPayment =
       isPickupOrderType(normalizedOrderTypeValue) &&
       normalizedPaymentMethod === "cash_at_counter";
+    const resolvedOrderAddress = resolveOrderAddressSelection({ order, user });
+    if (resolvedOrderAddress.error) {
+      return { error: resolvedOrderAddress.error };
+    }
+    if (
+      !isPickupOrderType(normalizedOrderTypeValue) &&
+      !resolvedOrderAddress.address
+    ) {
+      return {
+        error:
+          "Adresse de livraison invalide. Veuillez sélectionner votre adresse à nouveau.",
+      };
+    }
 
     const totalPrice = roundMoney(orderPayload.total, 0);
     const isZeroTotalOrder = totalPrice <= 0;
@@ -630,6 +797,13 @@ const createOrderService = async (order, options = {}) => {
               .filter((itemId) => Boolean(itemId)),
           ),
         ];
+        const orderOfferIds = [
+          ...new Set(
+            offers
+              .map((offer) => normalizeId(offer?.offer))
+              .filter((offerId) => Boolean(offerId)),
+          ),
+        ];
         const relatedMenuItems = orderMenuItemIds.length
           ? await mongoose.models.MenuItem.find({
               _id: { $in: orderMenuItemIds },
@@ -637,13 +811,26 @@ const createOrderService = async (order, options = {}) => {
               .select("_id category")
               .lean()
           : [];
+        const relatedOffers = orderOfferIds.length
+          ? await mongoose.models.Offer.find({
+              _id: { $in: orderOfferIds },
+            })
+              .select("_id items")
+              .populate({ path: "items.item", select: "category" })
+              .lean()
+          : [];
         const menuItemsById = new Map(
           relatedMenuItems.map((item) => [normalizeId(item?._id), item]),
+        );
+        const offersById = new Map(
+          relatedOffers.map((offer) => [normalizeId(offer?._id), offer]),
         );
         const eligibleSubtotal = calculatePromoEligibleSubtotal(
           promoCodeDocument,
           orderItems,
           menuItemsById,
+          offers,
+          offersById,
         );
 
         if (eligibleSubtotal <= 0) {
@@ -663,10 +850,11 @@ const createOrderService = async (order, options = {}) => {
             orderItemsCount: orderItems.length,
             offersCount: offers.length,
             orderItemIds: orderItems.map((item) => normalizeId(item?.item)),
+            offerIds: offers.map((offer) => normalizeId(offer?.offer)),
           });
           return {
             error:
-              "Ce code promo ne s'applique à aucun article de cette commande.",
+              "Ce code promo ne s'applique à aucun article ou offre de cette commande.",
           };
         }
 
@@ -710,6 +898,7 @@ const createOrderService = async (order, options = {}) => {
             orderItemsCount: orderItems.length,
             offersCount: offers.length,
             orderItemIds: orderItems.map((item) => normalizeId(item?.item)),
+            offerIds: offers.map((offer) => normalizeId(offer?.offer)),
           });
           return {
             error:
@@ -768,8 +957,8 @@ const createOrderService = async (order, options = {}) => {
       }
     }
 
-    let coords = order.coords || {};
-    if (!order.coords?.latitude || !order.coords?.longitude) {
+    let coords = resolvedOrderAddress.coords || {};
+    if (!coords?.latitude || !coords?.longitude) {
       coords = {
         latitude: 0,
         longitude: 0,
@@ -786,7 +975,8 @@ const createOrderService = async (order, options = {}) => {
       platform: normalizedPlatform,
       coords: coords,
       code,
-      address: order.address || "",
+      address: resolvedOrderAddress.address || "",
+      detailed_address: resolvedOrderAddress.detailedAddress,
       instructions: orderPayload.instructions,
       status: orderPayload.scheduled?.isScheduled ? SCHEDULED : ON_GOING,
       offers: orderPayload.offers,
@@ -838,6 +1028,9 @@ const createOrderService = async (order, options = {}) => {
     }
 
     const response = await newOrder.save();
+    if (!isPickupOrderType(normalizedOrderTypeValue)) {
+      appendDeliveryAddressIfMissing(user, resolvedOrderAddress);
+    }
     user.orders.push(response._id);
     await user.save();
     const restaurant = await mongoose.models.Restaurant.findById(

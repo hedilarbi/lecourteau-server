@@ -38,7 +38,26 @@ const withMenuItemAvailability = (menuItem, unavailableIdsSet) => ({
     !unavailableIdsSet.has(normalizeId(menuItem?._id)),
 });
 
-const getRestaurantItemsAvailabilityList = async (restaurantId) => {
+const normalizeAvailabilityFilter = (value) => {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim();
+
+  if (["available", "disponible", "true"].includes(normalized)) {
+    return "available";
+  }
+
+  if (["unavailable", "indisponible", "false"].includes(normalized)) {
+    return "unavailable";
+  }
+
+  return "all";
+};
+
+const getRestaurantItemsAvailabilityList = async (
+  restaurantId,
+  options = {},
+) => {
   const restaurant = await ensureRestaurantExists(restaurantId);
   if (!restaurant) {
     return { error: "Restaurant not found" };
@@ -53,12 +72,22 @@ const getRestaurantItemsAvailabilityList = async (restaurantId) => {
     restaurantId,
     menuItems.map((item) => item._id),
   );
+  const availabilityFilter = normalizeAvailabilityFilter(options?.availability);
+  const menuItemsWithAvailability = menuItems.map((menuItem) =>
+    withMenuItemAvailability(menuItem, unavailableIdsSet),
+  );
 
   return {
     response: {
-      menu_items: menuItems.map((menuItem) =>
-        withMenuItemAvailability(menuItem, unavailableIdsSet),
-      ),
+      menu_items: menuItemsWithAvailability.filter((entry) => {
+        if (availabilityFilter === "available") {
+          return entry.availability === true;
+        }
+        if (availabilityFilter === "unavailable") {
+          return entry.availability === false;
+        }
+        return true;
+      }),
     },
   };
 };

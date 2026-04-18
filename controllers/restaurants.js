@@ -176,9 +176,12 @@ const updateRestaurant = async (req, res) => {
 
 const getRestaurantItems = async (req, res) => {
   const { id } = req.params;
+  const { availability } = req.query;
 
   try {
-    const { error, response } = await getRestaurantItemsService(id);
+    const { error, response } = await getRestaurantItemsService(id, {
+      availability,
+    });
 
     if (error) {
       if (String(error?.message || error) === "Restaurant not found") {
@@ -190,14 +193,6 @@ const getRestaurantItems = async (req, res) => {
       return res.status(500).json({
         success: false,
         message: error?.message || error,
-      });
-    }
-
-    // Check if response is empty or null
-    if (!response || response.menu_items.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No menu items found for this restaurant.",
       });
     }
 

@@ -219,6 +219,27 @@ const buildDropoffAddressFromOrder = (order) => {
   });
 };
 
+const getValidCoordinatePair = (coords) => {
+  const latitude = Number(coords?.latitude);
+  const longitude = Number(coords?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  // Older orders can store 0,0 as a placeholder when no coordinates exist.
+  if (latitude === 0 && longitude === 0) return null;
+
+  return { latitude, longitude };
+};
+
+const buildCoordinateFields = (prefix, coords) => {
+  const pair = getValidCoordinatePair(coords);
+  if (!pair) return {};
+
+  return {
+    [`${prefix}_latitude`]: pair.latitude,
+    [`${prefix}_longitude`]: pair.longitude,
+  };
+};
+
 const buildManifestItems = (order) => {
   const items = [];
 
@@ -264,13 +285,10 @@ const compactObject = (obj) =>
 
 const isIncompleteAddress = (address) => {
   if (!address) return true;
-  return (
-    !address.street_address ||
-    !address.city ||
-    !address.state ||
-    !address.zip_code ||
-    !address.country
-  );
+  if (Array.isArray(address.street_address)) {
+    return !address.street_address.some((line) => normalizeText(line));
+  }
+  return !normalizeText(address.street_address);
 };
 
 const stringifyAddressFields = (payload = {}) => {
@@ -798,22 +816,25 @@ const createQuote = async (req, res) => {
 
     let pickup_address = buildPickupAddressFromRestaurant(restaurant);
     if (isIncompleteAddress(pickup_address)) {
-      const { response, error: pickupError } = await getAddressFromCoords(
-        restaurant.location?.latitude,
-        restaurant.location?.longitude,
-      );
-      console.log("Geocoding response for pickup address:", {
-        response,
-        pickupError,
-      });
-      if (!pickupError && response?.streetAddress) {
-        pickup_address = buildAddress({
-          street: response.streetAddress,
-          city: response.city,
-          state: response.state,
-          postal_code: response.zipCode,
-          country: response.country,
+      const pickupCoords = getValidCoordinatePair(restaurant.location);
+      if (pickupCoords) {
+        const { response, error: pickupError } = await getAddressFromCoords(
+          pickupCoords.latitude,
+          pickupCoords.longitude,
+        );
+        console.log("Geocoding response for pickup address:", {
+          response,
+          pickupError,
         });
+        if (!pickupError && response?.streetAddress) {
+          pickup_address = buildAddress({
+            street: response.streetAddress,
+            city: response.city,
+            state: response.state,
+            postal_code: response.zipCode,
+            country: response.country,
+          });
+        }
       }
     }
 
@@ -826,18 +847,21 @@ const createQuote = async (req, res) => {
 
     let dropoff_address = buildDropoffAddressFromOrder(order);
     if (isIncompleteAddress(dropoff_address)) {
-      const { response, error: dropoffError } = await getAddressFromCoords(
-        order.coords?.latitude,
-        order.coords?.longitude,
-      );
-      if (!dropoffError && response?.streetAddress) {
-        dropoff_address = buildAddress({
-          street: response.streetAddress,
-          city: response.city,
-          state: response.state,
-          postal_code: response.zipCode,
-          country: response.country,
-        });
+      const dropoffCoords = getValidCoordinatePair(order.coords);
+      if (dropoffCoords) {
+        const { response, error: dropoffError } = await getAddressFromCoords(
+          dropoffCoords.latitude,
+          dropoffCoords.longitude,
+        );
+        if (!dropoffError && response?.streetAddress) {
+          dropoff_address = buildAddress({
+            street: response.streetAddress,
+            city: response.city,
+            state: response.state,
+            postal_code: response.zipCode,
+            country: response.country,
+          });
+        }
       }
     }
 
@@ -851,10 +875,8 @@ const createQuote = async (req, res) => {
     const basePayload = compactObject({
       pickup_address,
       dropoff_address,
-      pickup_latitude: restaurant.location?.latitude,
-      pickup_longitude: restaurant.location?.longitude,
-      dropoff_latitude: order.coords?.latitude,
-      dropoff_longitude: order.coords?.longitude,
+      ...buildCoordinateFields("pickup", restaurant.location),
+      ...buildCoordinateFields("dropoff", order.coords),
       pickup_phone_number: normalizePhone(restaurant.phone_number),
       dropoff_phone_number: normalizePhone(order.user?.phone_number),
       manifest_total_value: toCents(
@@ -907,19 +929,22 @@ const createUberDirectDeliveryForOrder = async ({
     let pickup_address = buildPickupAddressFromRestaurant(restaurant);
 
     if (isIncompleteAddress(pickup_address)) {
-      const { response, error: pickupError } = await getAddressFromCoords(
-        restaurant.location?.latitude,
-        restaurant.location?.longitude,
-      );
+      const pickupCoords = getValidCoordinatePair(restaurant.location);
+      if (pickupCoords) {
+        const { response, error: pickupError } = await getAddressFromCoords(
+          pickupCoords.latitude,
+          pickupCoords.longitude,
+        );
 
-      if (!pickupError && response?.streetAddress) {
-        pickup_address = buildAddress({
-          street: response.streetAddress,
-          city: response.city,
-          state: response.state,
-          postal_code: response.zipCode,
-          country: response.country,
-        });
+        if (!pickupError && response?.streetAddress) {
+          pickup_address = buildAddress({
+            street: response.streetAddress,
+            city: response.city,
+            state: response.state,
+            postal_code: response.zipCode,
+            country: response.country,
+          });
+        }
       }
     }
 
@@ -934,19 +959,22 @@ const createUberDirectDeliveryForOrder = async ({
     let dropoff_address = buildDropoffAddressFromOrder(order);
 
     if (isIncompleteAddress(dropoff_address)) {
-      const { response, error: dropoffError } = await getAddressFromCoords(
-        order.coords?.latitude,
-        order.coords?.longitude,
-      );
+      const dropoffCoords = getValidCoordinatePair(order.coords);
+      if (dropoffCoords) {
+        const { response, error: dropoffError } = await getAddressFromCoords(
+          dropoffCoords.latitude,
+          dropoffCoords.longitude,
+        );
 
-      if (!dropoffError && response?.streetAddress) {
-        dropoff_address = buildAddress({
-          street: response.streetAddress,
-          city: response.city,
-          state: response.state,
-          postal_code: response.zipCode,
-          country: response.country,
-        });
+        if (!dropoffError && response?.streetAddress) {
+          dropoff_address = buildAddress({
+            street: response.streetAddress,
+            city: response.city,
+            state: response.state,
+            postal_code: response.zipCode,
+            country: response.country,
+          });
+        }
       }
     }
 
@@ -964,10 +992,8 @@ const createUberDirectDeliveryForOrder = async ({
     const quotePayload = compactObject({
       pickup_address,
       dropoff_address,
-      pickup_latitude: restaurant.location?.latitude,
-      pickup_longitude: restaurant.location?.longitude,
-      dropoff_latitude: order.coords?.latitude,
-      dropoff_longitude: order.coords?.longitude,
+      ...buildCoordinateFields("pickup", restaurant.location),
+      ...buildCoordinateFields("dropoff", order.coords),
       pickup_phone_number: normalizePhone(restaurant.phone_number),
       dropoff_phone_number: normalizePhone(order.user?.phone_number),
       manifest_total_value: manifestTotalValue,
@@ -1041,10 +1067,8 @@ const createUberDirectDeliveryForOrder = async ({
       manifest_total_value: manifestTotalValue,
       manifest_items: buildManifestItems(order),
       manifest_reference: order.code || String(order._id),
-      pickup_latitude: restaurant.location?.latitude,
-      pickup_longitude: restaurant.location?.longitude,
-      dropoff_latitude: order.coords?.latitude,
-      dropoff_longitude: order.coords?.longitude,
+      ...buildCoordinateFields("pickup", restaurant.location),
+      ...buildCoordinateFields("dropoff", order.coords),
       dropoff_notes: order.instructions,
     });
 

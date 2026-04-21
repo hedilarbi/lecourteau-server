@@ -113,6 +113,13 @@ const orderSchema = new Schema({
   uber_dropoff_deadline: Date,
   uber_last_event_type: String,
   uber_last_event_at: Date,
+  uber_creation_failed: {
+    type: Boolean,
+    default: false,
+  },
+  uber_creation_error: String,
+  uber_creation_failed_at: Date,
+  uber_creation_last_attempt_at: Date,
   delivery_by: {
     type: Schema.Types.ObjectId,
     ref: "Staff",

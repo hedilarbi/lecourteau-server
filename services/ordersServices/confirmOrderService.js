@@ -163,6 +163,14 @@ async function maybeCreateUberDeliveryAfterConfirmation(order) {
     return null;
   }
 
+  if (order?.scheduled?.isScheduled === true) {
+    logWithTimestamp("Auto Uber Direct skipped: scheduled order", {
+      orderId: order?._id,
+      scheduledFor: order?.scheduled?.scheduledFor || null,
+    });
+    return null;
+  }
+
   const restaurantId =
     (typeof order?.restaurant === "object"
       ? order?.restaurant?._id

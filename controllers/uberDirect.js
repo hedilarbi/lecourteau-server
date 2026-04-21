@@ -132,12 +132,87 @@ const getOrderForUber = async (orderId) => {
 };
 
 const normalizePhone = (value) => {
-  if (!value) return value;
-  const trimmed = String(value).trim();
-  if (!trimmed) return trimmed;
-  if (trimmed.startsWith("+")) return trimmed;
-  if (/^\d+$/.test(trimmed)) return `+${trimmed}`;
-  return trimmed;
+  if (!value) return "";
+  const digits = String(value).replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) return `+1${digits}`;
+  return `+${digits}`;
+};
+
+const isValidUberPhoneNumber = (value) => {
+  const phone = normalizePhone(value);
+  if (!/^\+[1-9]\d{7,14}$/.test(phone)) return false;
+
+  if (phone.startsWith("+1")) {
+    return /^\+1[2-9]\d{2}[2-9]\d{6}$/.test(phone);
+  }
+
+  return true;
+};
+
+const validateUberPhoneNumber = ({ value, field, label }) => {
+  const phone = normalizePhone(value);
+
+  if (!phone) {
+    return {
+      error: `${label} manquant pour Uber Direct.`,
+      details: {
+        source: "uber_direct",
+        phase: "local_validation",
+        code: "missing_phone_number",
+        field,
+        field_label: label,
+        retryable: false,
+        action: "Ajoutez le numero de telephone, puis relancez.",
+      },
+    };
+  }
+
+  if (!isValidUberPhoneNumber(phone)) {
+    return {
+      error: `${label} invalide pour Uber Direct. Corrigez le numero avant de creer la livraison.`,
+      details: {
+        source: "uber_direct",
+        phase: "local_validation",
+        code: "invalid_phone_number",
+        field,
+        field_label: label,
+        field_message: "Le numero doit etre un numero E.164 valide.",
+        phone_number: phone,
+        retryable: false,
+        action: "Corrigez le numero de telephone, puis relancez.",
+      },
+    };
+  }
+
+  return { phone };
+};
+
+const getValidatedUberPhoneNumbers = ({ restaurant, order }) => {
+  const pickupPhone = validateUberPhoneNumber({
+    value: restaurant.phone_number,
+    field: "pickup_phone_number",
+    label: "Numero de telephone du restaurant",
+  });
+
+  if (pickupPhone.error) {
+    return { error: pickupPhone.error, details: pickupPhone.details };
+  }
+
+  const dropoffPhone = validateUberPhoneNumber({
+    value: order.user?.phone_number,
+    field: "dropoff_phone_number",
+    label: "Numero de telephone du client",
+  });
+
+  if (dropoffPhone.error) {
+    return { error: dropoffPhone.error, details: dropoffPhone.details };
+  }
+
+  return {
+    pickupPhoneNumber: pickupPhone.phone,
+    dropoffPhoneNumber: dropoffPhone.phone,
+  };
 };
 
 const normalizeText = (value) => {
@@ -283,6 +358,221 @@ const compactObject = (obj) =>
     ),
   );
 
+const buildUberCreationFailureMessage = ({ message, details } = {}) => {
+  const fallback = "Création de la livraison Uber Direct échouée.";
+  const baseMessage = normalizeText(message) || fallback;
+  const detailCandidates = [
+    details?.field_message,
+    details?.message,
+    details?.error,
+    details?.code,
+  ];
+  const detailMessage = detailCandidates.map(normalizeText).find(Boolean);
+  const fullMessage =
+    detailMessage && detailMessage !== baseMessage
+      ? `${baseMessage} (${detailMessage})`
+      : baseMessage;
+
+  return fullMessage.slice(0, 1000);
+};
+
+const markOrderUberCreationFailed = async (order, failure = {}) => {
+  if (!order) return;
+
+  const now = new Date();
+  order.uber_creation_failed = true;
+  order.uber_creation_error = buildUberCreationFailureMessage(failure);
+  order.uber_creation_failed_at = now;
+  order.uber_creation_last_attempt_at = now;
+
+  try {
+    await order.save();
+  } catch (error) {
+    logUberDirectAutoDeliveryError("Error storing Uber creation failure", {
+      orderId: order?._id,
+      error: error?.message || String(error),
+    });
+  }
+};
+
+const clearOrderUberCreationFailure = (order) => {
+  if (!order) return;
+  order.uber_creation_failed = false;
+  order.uber_creation_error = "";
+  order.uber_creation_failed_at = null;
+  order.uber_creation_last_attempt_at = new Date();
+};
+
+const UBER_DIRECT_ERROR_CATALOG = {
+  invalid_params: {
+    message: "Les informations envoyees a Uber Direct sont invalides.",
+    action: "Corrigez le champ indique, puis relancez la livraison.",
+    retryable: false,
+  },
+  duplicate_delivery: {
+    message: "Une livraison Uber Direct active existe deja pour cette commande.",
+    action: "Rafraichissez la commande avant de creer une nouvelle livraison.",
+    retryable: false,
+  },
+  unknown_location: {
+    message: "Uber Direct ne comprend pas l'adresse indiquee.",
+    action: "Verifiez l'adresse et les coordonnees GPS, puis relancez.",
+    retryable: false,
+  },
+  address_undeliverable: {
+    message: "Uber Direct ne livre pas cette adresse.",
+    action: "Utilisez une autre adresse ou un autre mode de livraison.",
+    retryable: false,
+  },
+  address_undeliverable_limited_couriers: {
+    message:
+      "Aucun livreur Uber n'est disponible pour cette adresse pour le moment.",
+    action: "Reessayez dans quelques minutes ou utilisez la livraison interne.",
+    retryable: true,
+  },
+  pickup_window_too_small: {
+    message:
+      "La fenetre de ramassage Uber doit durer au moins 10 minutes.",
+    action: "Elargissez la fenetre de ramassage.",
+    retryable: false,
+  },
+  dropoff_deadline_too_early: {
+    message:
+      "L'heure limite de livraison doit etre au moins 20 minutes apres le debut de livraison.",
+    action: "Corrigez la fenetre de livraison.",
+    retryable: false,
+  },
+  dropoff_deadline_before_pickup_deadline: {
+    message:
+      "L'heure limite de livraison doit etre apres l'heure limite de ramassage.",
+    action: "Corrigez les horaires de ramassage/livraison.",
+    retryable: false,
+  },
+  dropoff_ready_after_pickup_deadline: {
+    message:
+      "Le debut de livraison doit etre avant ou egal a la limite de ramassage.",
+    action: "Corrigez les horaires Uber Direct.",
+    retryable: false,
+  },
+  pickup_ready_too_early: {
+    message: "L'heure de ramassage ne peut pas etre dans le passe.",
+    action: "Utilisez une heure de ramassage future.",
+    retryable: false,
+  },
+  pickup_deadline_too_early: {
+    message:
+      "La limite de ramassage doit etre au moins 20 minutes dans le futur.",
+    action: "Utilisez une limite de ramassage plus tardive.",
+    retryable: false,
+  },
+  pickup_ready_too_late: {
+    message:
+      "L'heure de ramassage doit etre dans les 30 prochains jours.",
+    action: "Utilisez une heure de ramassage plus proche.",
+    retryable: false,
+  },
+  expired_quote: {
+    message: "Le devis Uber Direct a expire.",
+    action: "Generez un nouveau devis Uber Direct.",
+    retryable: true,
+  },
+  used_quote: {
+    message: "Le devis Uber Direct a deja ete utilise.",
+    action: "Generez un nouveau devis Uber Direct.",
+    retryable: true,
+  },
+  mismatched_price_quote: {
+    message:
+      "Le devis Uber Direct ne correspond pas aux informations de livraison.",
+    action: "Generez un nouveau devis avec les memes informations.",
+    retryable: true,
+  },
+  missing_payment: {
+    message:
+      "Le compte Uber Direct du restaurant n'a pas de moyen de paiement configure.",
+    action: "Ajoutez ou corrigez la facturation dans Uber Direct.",
+    retryable: false,
+  },
+  pickup_ready_time_not_specified: {
+    message:
+      "L'heure de debut de ramassage est requise avec les fenetres horaires.",
+    action: "Ajoutez l'heure de debut de ramassage.",
+    retryable: false,
+  },
+  customer_not_found: {
+    message: "Le customer_id Uber Direct du restaurant est introuvable.",
+    action: "Verifiez la configuration Uber Direct du restaurant.",
+    retryable: false,
+  },
+  customer_suspended: {
+    message:
+      "Le compte Uber Direct du restaurant est suspendu pour paiement.",
+    action: "Reglez le probleme de facturation Uber Direct.",
+    retryable: false,
+  },
+  customer_blocked: {
+    message:
+      "Le compte Uber Direct du restaurant n'est pas autorise a creer des livraisons.",
+    action: "Contactez Uber Direct ou verifiez l'activation du compte.",
+    retryable: false,
+  },
+  customer_limited: {
+    message: "La limite du compte Uber Direct du restaurant est atteinte.",
+    action: "Reessayez plus tard ou contactez Uber Direct.",
+    retryable: true,
+  },
+  request_timeout: {
+    message: "Uber Direct n'a pas repondu a temps.",
+    action: "Reessayez dans quelques instants.",
+    retryable: true,
+  },
+  unknown_error: {
+    message: "Uber Direct a retourne une erreur inconnue.",
+    action: "Reessayez plus tard. Si le probleme persiste, contactez Uber.",
+    retryable: true,
+  },
+  noncancelable_delivery: {
+    message: "Cette livraison Uber Direct ne peut plus etre annulee.",
+    action: "Verifiez son statut dans Uber Direct.",
+    retryable: false,
+  },
+  delivery_not_found: {
+    message: "La livraison Uber Direct est introuvable.",
+    action: "Rafraichissez la commande et verifiez l'identifiant de livraison.",
+    retryable: false,
+  },
+  customer_not_cound: {
+    message: "Le customer_id Uber Direct du restaurant est introuvable.",
+    action: "Verifiez la configuration Uber Direct du restaurant.",
+    retryable: false,
+  },
+  service_unavailable: {
+    message: "Service Uber Direct temporairement indisponible.",
+    action: "Reessayez plus tard.",
+    retryable: true,
+  },
+};
+
+const UBER_DIRECT_FIELD_LABELS = {
+  pickup_address: "adresse du restaurant",
+  dropoff_address: "adresse du client",
+  pickup_phone_number: "numero de telephone du restaurant",
+  dropoff_phone_number: "numero de telephone du client",
+  pickup_latitude: "latitude du restaurant",
+  pickup_longitude: "longitude du restaurant",
+  dropoff_latitude: "latitude du client",
+  dropoff_longitude: "longitude du client",
+  pickup_ready_dt: "heure de debut de ramassage",
+  pickup_deadline_dt: "heure limite de ramassage",
+  dropoff_ready_dt: "heure de debut de livraison",
+  dropoff_deadline_dt: "heure limite de livraison",
+  manifest_total_value: "montant de la commande",
+  manifest_items: "articles de la commande",
+  quote_id: "devis Uber Direct",
+  customer_id: "customer_id Uber Direct",
+  external_store_id: "identifiant externe du restaurant",
+};
+
 const isIncompleteAddress = (address) => {
   if (!address) return true;
   if (Array.isArray(address.street_address)) {
@@ -303,6 +593,17 @@ const stringifyAddressFields = (payload = {}) => {
 
 const toLowerText = (value) => String(value || "").toLowerCase();
 
+const getUberErrorMetadata = (details) => {
+  if (!details || typeof details !== "object") return {};
+  const metadata =
+    details.metadata ||
+    details?.error?.metadata ||
+    details?.details?.metadata ||
+    {};
+
+  return metadata && typeof metadata === "object" ? metadata : {};
+};
+
 const getUberErrorCode = (details) => {
   if (!details || typeof details !== "object") return null;
   return (
@@ -314,85 +615,215 @@ const getUberErrorCode = (details) => {
   );
 };
 
-const translateUberErrorMessage = ({ status, error, details }) => {
-  const code = toLowerText(getUberErrorCode(details));
-  const text = toLowerText(
-    [error, details?.message, details?.error, details?.description]
-      .filter(Boolean)
-      .join(" | "),
+const getUberErrorKind = (details) => {
+  if (!details || typeof details !== "object") return null;
+  return details.kind || details?.error?.kind || details?.details?.kind || null;
+};
+
+const getUberRawMessage = ({ error, details }) =>
+  [
+    details?.message,
+    details?.error,
+    details?.description,
+    details?.error?.message,
+    details?.details?.message,
+    error,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim())
+    .find(Boolean) || "";
+
+const getUberMetadataEntries = (metadata = {}) =>
+  Object.entries(metadata)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([field, value]) => ({
+      field,
+      message:
+        typeof value === "string" ? value : JSON.stringify(value),
+    }));
+
+const getPrimaryUberMetadataEntry = (metadata = {}) => {
+  const entries = getUberMetadataEntries(metadata);
+  return (
+    entries.find((entry) => UBER_DIRECT_FIELD_LABELS[entry.field]) ||
+    entries[0] ||
+    null
   );
+};
 
-  if (code === "address_undeliverable_limited_couriers") {
-    return "Aucun livreur Uber n'est disponible pour cette adresse pour le moment.";
+const getUberStatusFallback = (status) => {
+  if (status === 400) {
+    return {
+      message: "Les informations envoyees a Uber Direct sont invalides.",
+      action: "Corrigez les informations de livraison, puis relancez.",
+      retryable: false,
+    };
   }
-  if (code === "customer_limited") {
-    return "Le compte Uber Direct du restaurant est temporairement limité.";
+  if (status === 401) {
+    return {
+      message: "Authentification Uber Direct invalide.",
+      action: "Reessayez. Si le probleme persiste, regenerez le token Uber.",
+      retryable: true,
+    };
+  }
+  if (status === 402) {
+    return UBER_DIRECT_ERROR_CATALOG.customer_suspended;
+  }
+  if (status === 403) {
+    return UBER_DIRECT_ERROR_CATALOG.customer_blocked;
+  }
+  if (status === 404) {
+    return {
+      message: "Ressource Uber Direct introuvable.",
+      action: "Verifiez les identifiants Uber Direct configures.",
+      retryable: false,
+    };
+  }
+  if (status === 408) {
+    return UBER_DIRECT_ERROR_CATALOG.request_timeout;
+  }
+  if (status === 409) {
+    return {
+      message: "Conflit Uber Direct sur cette livraison.",
+      action: "Rafraichissez la commande, puis relancez si necessaire.",
+      retryable: true,
+    };
+  }
+  if (status === 429) {
+    return UBER_DIRECT_ERROR_CATALOG.customer_limited;
+  }
+  if (status >= 500) {
+    return {
+      message: "Service Uber Direct temporairement indisponible.",
+      action: "Reessayez plus tard.",
+      retryable: true,
+    };
   }
 
+  return UBER_DIRECT_ERROR_CATALOG.unknown_error;
+};
+
+const inferUberErrorFromText = (text) => {
+  if (!text) return null;
+  if (text.includes("phone")) {
+    return {
+      message: "Numero de telephone invalide pour Uber Direct.",
+      action: "Corrigez le numero de telephone, puis relancez.",
+      retryable: false,
+    };
+  }
   if (
     text.includes("location was not understood") ||
     text.includes("invalid address") ||
     text.includes("address")
   ) {
-    return "Adresse de ramassage ou de livraison invalide.";
-  }
-  if (text.includes("phone")) {
-    return "Numéro de téléphone invalide pour la livraison.";
+    return {
+      message: "Adresse de ramassage ou de livraison invalide.",
+      action: "Corrigez l'adresse, puis relancez.",
+      retryable: false,
+    };
   }
   if (text.includes("quote")) {
-    return "Le devis Uber Direct est invalide ou expiré.";
+    return {
+      message: "Le devis Uber Direct est invalide ou expire.",
+      action: "Generez un nouveau devis Uber Direct.",
+      retryable: true,
+    };
   }
   if (text.includes("manifest")) {
-    return "Le détail de la commande est invalide pour Uber Direct.";
+    return {
+      message: "Le detail de la commande est invalide pour Uber Direct.",
+      action: "Verifiez les articles et le montant de la commande.",
+      retryable: false,
+    };
   }
   if (text.includes("customer")) {
-    return "Identifiant client Uber Direct invalide pour ce restaurant.";
+    return {
+      message: "Configuration Uber Direct du restaurant invalide.",
+      action: "Verifiez le customer_id et le compte Uber Direct.",
+      retryable: false,
+    };
   }
 
-  if (status === 400) {
-    return "Les informations envoyées à Uber Direct sont invalides.";
-  }
-  if (status === 401) {
-    return "Authentification Uber Direct invalide. Veuillez réessayer.";
-  }
-  if (status === 403) {
-    return "Accès refusé par Uber Direct.";
-  }
-  if (status === 404) {
-    return "Ressource Uber Direct introuvable.";
-  }
-  if (status === 409) {
-    return "Conflit Uber Direct: cette livraison ne peut pas être créée ou mise à jour.";
-  }
-  if (status === 422) {
-    return "Impossible de créer la livraison Uber: données de livraison invalides.";
-  }
-  if (status === 429) {
-    return "Trop de requêtes vers Uber Direct. Veuillez réessayer dans quelques secondes.";
-  }
-  if (status >= 500) {
-    return "Service Uber Direct temporairement indisponible.";
-  }
-
-  return "Erreur Uber Direct. Veuillez réessayer.";
+  return null;
 };
 
-const sendUberResponse = (res, result) => {
+const buildUberDirectErrorPayload = ({
+  status,
+  error,
+  details,
+  phase = "uber_direct",
+}) => {
+  const code = toLowerText(getUberErrorCode(details) || "");
+  const kind = getUberErrorKind(details);
+  const metadata = getUberErrorMetadata(details);
+  const metadataEntry = getPrimaryUberMetadataEntry(metadata);
+  const field = metadataEntry?.field || null;
+  const fieldLabel = field ? UBER_DIRECT_FIELD_LABELS[field] || field : null;
+  const rawMessage = getUberRawMessage({ error, details });
+  const metadataText = getUberMetadataEntries(metadata)
+    .map((entry) => `${entry.field}: ${entry.message}`)
+    .join(" | ");
+  const text = toLowerText([rawMessage, metadataText].filter(Boolean).join(" | "));
+  const catalogError =
+    UBER_DIRECT_ERROR_CATALOG[code] ||
+    inferUberErrorFromText(text) ||
+    getUberStatusFallback(status);
+
+  const messageParts = [catalogError.message];
+  if (fieldLabel && metadataEntry?.message) {
+    messageParts.push(`Champ ${fieldLabel}: ${metadataEntry.message}`);
+  } else if (metadataEntry?.message) {
+    messageParts.push(`Detail Uber: ${metadataEntry.message}`);
+  } else if (
+    rawMessage &&
+    rawMessage !== catalogError.message &&
+    !toLowerText(catalogError.message).includes(toLowerText(rawMessage))
+  ) {
+    messageParts.push(`Detail Uber: ${rawMessage}`);
+  }
+
+  if (catalogError.action) {
+    messageParts.push(catalogError.action);
+  }
+
+  return {
+    message: messageParts.filter(Boolean).join(" "),
+    details: {
+      source: "uber_direct",
+      phase,
+      status: status || null,
+      code: code || null,
+      kind: kind || null,
+      retryable: Boolean(catalogError.retryable),
+      action: catalogError.action || null,
+      field,
+      field_label: fieldLabel,
+      field_message: metadataEntry?.message || null,
+      uber_message: rawMessage || error || null,
+      metadata,
+      raw: details || null,
+    },
+  };
+};
+
+const translateUberErrorMessage = ({ status, error, details }) => {
+  return buildUberDirectErrorPayload({ status, error, details }).message;
+};
+
+const sendUberResponse = (res, result, phase = "uber_direct") => {
   if (result.error) {
-    const translatedMessage = translateUberErrorMessage({
+    const errorPayload = buildUberDirectErrorPayload({
       status: result.status,
       error: result.error,
       details: result.details,
+      phase,
     });
-    const details =
-      result.details && typeof result.details === "object"
-        ? { ...result.details, uber_message: result.error }
-        : result.details;
 
     return res.status(result.status || 500).json({
       success: false,
-      message: translatedMessage,
-      details,
+      message: errorPayload.message,
+      details: errorPayload.details,
     });
   }
   return res.status(result.status || 200).json({
@@ -872,13 +1303,22 @@ const createQuote = async (req, res) => {
       });
     }
 
+    const phoneNumbers = getValidatedUberPhoneNumbers({ restaurant, order });
+    if (phoneNumbers.error) {
+      return res.status(400).json({
+        success: false,
+        message: phoneNumbers.error,
+        details: phoneNumbers.details,
+      });
+    }
+
     const basePayload = compactObject({
       pickup_address,
       dropoff_address,
       ...buildCoordinateFields("pickup", restaurant.location),
       ...buildCoordinateFields("dropoff", order.coords),
-      pickup_phone_number: normalizePhone(restaurant.phone_number),
-      dropoff_phone_number: normalizePhone(order.user?.phone_number),
+      pickup_phone_number: phoneNumbers.pickupPhoneNumber,
+      dropoff_phone_number: phoneNumbers.dropoffPhoneNumber,
       manifest_total_value: toCents(
         order.sub_total_after_discount ?? order.sub_total ?? order.total_price,
       ),
@@ -892,7 +1332,7 @@ const createQuote = async (req, res) => {
       body,
     });
 
-    return sendUberResponse(res, result);
+    return sendUberResponse(res, result, "create_quote");
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -903,11 +1343,25 @@ const createUberDirectDeliveryForOrder = async ({
   restaurantId,
   quoteId: providedQuoteId,
 }) => {
+  let order = null;
+  const failWithStoredError = async (payload) => {
+    await markOrderUberCreationFailed(order, {
+      message: payload?.message,
+      details: payload?.details,
+    });
+    return {
+      success: false,
+      ...payload,
+    };
+  };
+
   try {
-    const { order, error } = await getOrderForUber(orderId);
+    const orderResult = await getOrderForUber(orderId);
+    const { error } = orderResult;
     if (error) {
       return { success: false, status: 400, message: error };
     }
+    order = orderResult.order;
 
     const {
       restaurant,
@@ -915,15 +1369,14 @@ const createUberDirectDeliveryForOrder = async ({
       error: restaurantError,
     } = await getRestaurantCustomerId(restaurantId);
     if (restaurantError) {
-      return { success: false, status: 400, message: restaurantError };
+      return failWithStoredError({ status: 400, message: restaurantError });
     }
 
     if (order.restaurant && String(order.restaurant) !== String(restaurantId)) {
-      return {
-        success: false,
+      return failWithStoredError({
         status: 400,
         message: "La commande n'appartient pas au restaurant sélectionné.",
-      };
+      });
     }
 
     let pickup_address = buildPickupAddressFromRestaurant(restaurant);
@@ -949,11 +1402,10 @@ const createUberDirectDeliveryForOrder = async ({
     }
 
     if (isIncompleteAddress(pickup_address)) {
-      return {
-        success: false,
+      return failWithStoredError({
         status: 400,
         message: "Adresse de ramassage incomplète pour le restaurant.",
-      };
+      });
     }
 
     let dropoff_address = buildDropoffAddressFromOrder(order);
@@ -979,11 +1431,19 @@ const createUberDirectDeliveryForOrder = async ({
     }
 
     if (isIncompleteAddress(dropoff_address)) {
-      return {
-        success: false,
+      return failWithStoredError({
         status: 400,
         message: "Adresse de livraison incomplète pour cette commande.",
-      };
+      });
+    }
+
+    const phoneNumbers = getValidatedUberPhoneNumbers({ restaurant, order });
+    if (phoneNumbers.error) {
+      return failWithStoredError({
+        status: 400,
+        message: phoneNumbers.error,
+        details: phoneNumbers.details,
+      });
     }
 
     const manifestTotalValue = toCents(
@@ -994,8 +1454,8 @@ const createUberDirectDeliveryForOrder = async ({
       dropoff_address,
       ...buildCoordinateFields("pickup", restaurant.location),
       ...buildCoordinateFields("dropoff", order.coords),
-      pickup_phone_number: normalizePhone(restaurant.phone_number),
-      dropoff_phone_number: normalizePhone(order.user?.phone_number),
+      pickup_phone_number: phoneNumbers.pickupPhoneNumber,
+      dropoff_phone_number: phoneNumbers.dropoffPhoneNumber,
       manifest_total_value: manifestTotalValue,
     });
     let quoteId = normalizeText(providedQuoteId);
@@ -1033,6 +1493,19 @@ const createUberDirectDeliveryForOrder = async ({
           error: quoteResult.error || null,
           details: quoteResult.details || null,
         });
+
+        const errorPayload = buildUberDirectErrorPayload({
+          status: quoteResult.status,
+          error: quoteResult.error,
+          details: quoteResult.details,
+          phase: "create_delivery_quote",
+        });
+
+        return failWithStoredError({
+          status: quoteResult.status || 500,
+          message: errorPayload.message,
+          details: errorPayload.details,
+        });
       }
 
       const quoteResponsePayload =
@@ -1042,13 +1515,12 @@ const createUberDirectDeliveryForOrder = async ({
       quoteId = extractQuoteIdFromPayload(quoteResponsePayload);
 
       if (!quoteId) {
-        return {
-          success: false,
+        return failWithStoredError({
           status: 502,
           message:
             "Impossible de récupérer un quote_id Uber Direct pour la livraison.",
           details: quoteResponsePayload,
-        };
+        });
       }
     } else {
       console.log("[UberDirect][createDelivery] using provided quoteId", {
@@ -1059,10 +1531,10 @@ const createUberDirectDeliveryForOrder = async ({
     const basePayload = compactObject({
       pickup_name: restaurant.name || "Pickup",
       pickup_address,
-      pickup_phone_number: normalizePhone(restaurant.phone_number),
+      pickup_phone_number: phoneNumbers.pickupPhoneNumber,
       dropoff_name: order.user?.name || "Customer",
       dropoff_address,
-      dropoff_phone_number: normalizePhone(order.user?.phone_number),
+      dropoff_phone_number: phoneNumbers.dropoffPhoneNumber,
       quote_id: quoteId,
       manifest_total_value: manifestTotalValue,
       manifest_items: buildManifestItems(order),
@@ -1101,6 +1573,7 @@ const createUberDirectDeliveryForOrder = async ({
       Object.assign(order, etaFields);
       order.uber_last_event_type = "delivery_created";
       order.uber_last_event_at = new Date();
+      clearOrderUberCreationFailure(order);
       await order.save();
 
       return {
@@ -1123,25 +1596,27 @@ const createUberDirectDeliveryForOrder = async ({
       details: result.details || null,
     });
 
-    return {
-      success: false,
+    const errorPayload = buildUberDirectErrorPayload({
+      status: result.status,
+      error: result.error,
+      details: result.details,
+      phase: "create_delivery",
+    });
+
+    return failWithStoredError({
       status: result.status || 500,
-      message: translateUberErrorMessage({
-        status: result.status,
-        error: result.error,
-        details: result.details,
-      }),
-      details:
-        result.details && typeof result.details === "object"
-          ? { ...result.details, uber_message: result.error }
-          : result.details,
-    };
+      message: errorPayload.message,
+      details: errorPayload.details,
+    });
   } catch (err) {
     console.error("Error creating Uber Direct delivery:", err);
     logUberDirectAutoDeliveryError("Error creating Uber delivery", {
       orderId,
       restaurantId,
       error: err?.message || String(err),
+    });
+    await markOrderUberCreationFailed(order, {
+      message: err?.message || String(err),
     });
     return { success: false, status: 500, message: err.message };
   }
@@ -1183,7 +1658,7 @@ const listDeliveries = async (req, res) => {
       query: req.query,
     });
 
-    return sendUberResponse(res, result);
+    return sendUberResponse(res, result, "list_deliveries");
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -1202,7 +1677,7 @@ const getDelivery = async (req, res) => {
       path: `/customers/${customerId}/deliveries/${deliveryId}`,
     });
 
-    return sendUberResponse(res, result);
+    return sendUberResponse(res, result, "get_delivery");
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -1222,7 +1697,7 @@ const updateDelivery = async (req, res) => {
       body: req.body,
     });
 
-    return sendUberResponse(res, result);
+    return sendUberResponse(res, result, "update_delivery");
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -1307,7 +1782,7 @@ const cancelDelivery = async (req, res) => {
       });
     }
 
-    return sendUberResponse(res, result);
+    return sendUberResponse(res, result, "cancel_delivery");
   } catch (err) {
     logWebhookError("Erreur annulation livraison", err, {
       restaurant_id: req.params?.restaurantId,
@@ -1331,7 +1806,7 @@ const getProofOfDelivery = async (req, res) => {
       body: req.body,
     });
 
-    return sendUberResponse(res, result);
+    return sendUberResponse(res, result, "proof_of_delivery");
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -1541,7 +2016,7 @@ const findStores = async (req, res) => {
       scope: ORG_SCOPE,
     });
 
-    return sendUberResponse(res, result);
+    return sendUberResponse(res, result, "find_stores");
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }

@@ -13,12 +13,15 @@ const updateOrderPaymentStatusService = require("../services/ordersServices/upda
 const Order = require("../models/Order");
 const User = require("../models/User");
 const { default: mongoose } = require("mongoose");
-const { ON_GOING, SCHEDULED } = require("../utils/constants");
+const { ON_GOING } = require("../utils/constants");
 const Audit = require("../models/Audit");
 const { Expo } = require("expo-server-sdk");
 const {
   cancelCheckoutPaymentIntentIfPossible,
 } = require("../services/paymentServices/paymentIntentHelpers");
+const {
+  promoteScheduledOrdersService,
+} = require("../services/ordersServices/promoteScheduledOrdersService");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -829,34 +832,8 @@ const orderChecker = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const now = new Date();
-    const in45Min = new Date(now.getTime() + 45 * 60 * 1000);
-    const in30Min = new Date(now.getTime() + 30 * 60 * 1000);
-
     // Fallback promotion path to keep behavior consistent even if cron is delayed.
-    await Order.updateMany(
-      {
-        restaurant: id,
-        confirmed: true,
-        status: SCHEDULED,
-        "scheduled.isScheduled": true,
-        "scheduled.processed": false,
-        "scheduled.scheduledFor": { $ne: null },
-        $or: [
-          { type: "delivery", "scheduled.scheduledFor": { $lte: in45Min } },
-          {
-            type: { $ne: "delivery" },
-            "scheduled.scheduledFor": { $lte: in30Min },
-          },
-        ],
-      },
-      {
-        $set: {
-          status: ON_GOING,
-          "scheduled.processed": true,
-        },
-      },
-    );
+    await promoteScheduledOrdersService({ restaurantId: id });
 
     const tenMinutesAgo = new Date();
     tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 20);

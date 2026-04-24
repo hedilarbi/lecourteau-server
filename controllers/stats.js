@@ -291,9 +291,75 @@ const testNotif = async (req, res) => {
   }
 };
 
+const getPaymentSummaryReport = async (req, res) => {
+  try {
+    const startDate = new Date("2026-04-13T00:00:00.000Z");
+    const endDate = new Date("2026-04-19T23:59:59.999Z");
+
+    const stats = await mongoose.models.Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
+          confirmed: true,
+          status: { $ne: "Annulé" },
+        },
+      },
+      {
+        $group: {
+          _id: "$restaurant",
+          totalCounter: {
+            $sum: {
+              $cond: [
+                { $eq: ["$payment_method", "cash_at_counter"] },
+                "$total_price",
+                0,
+              ],
+            },
+          },
+          totalOnline: {
+            $sum: {
+              $cond: [
+                { $ne: ["$payment_method", "cash_at_counter"] },
+                "$total_price",
+                0,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "restaurants",
+          localField: "_id",
+          foreignField: "_id",
+          as: "restaurantInfo",
+        },
+      },
+      {
+        $unwind: "$restaurantInfo",
+      },
+      {
+        $project: {
+          _id: 0,
+          restaurantId: "$_id",
+          restaurantName: "$restaurantInfo.name",
+          totalCounter: { $round: ["$totalCounter", 2] },
+          totalOnline: { $round: ["$totalOnline", 2] },
+        },
+      },
+    ]);
+
+    res.status(200).json({ success: true, data: stats });
+  } catch (err) {
+    console.error("Error generating payment summary report:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   getInititalStats,
   getRestaurantStats,
   getAnalyticsStats,
+  getPaymentSummaryReport,
   testNotif,
 };

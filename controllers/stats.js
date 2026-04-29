@@ -293,8 +293,8 @@ const testNotif = async (req, res) => {
 
 const getPaymentSummaryReport = async (req, res) => {
   try {
-    const startDate = new Date("2026-04-13T00:00:00.000Z");
-    const endDate = new Date("2026-04-19T23:59:59.999Z");
+    const startDate = new Date("2026-04-20T00:00:00.000Z");
+    const endDate = new Date("2026-04-27T23:59:59.999Z");
 
     const stats = await mongoose.models.Order.aggregate([
       {

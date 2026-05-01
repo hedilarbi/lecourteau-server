@@ -83,13 +83,6 @@ const updateHomeSettingService = async (
       return { error: "Select either a menu item or an offer" };
     }
 
-    if (
-      normalizedCodePromoId &&
-      typeof updateData.codePromoTitle !== "undefined" &&
-      !updateData.codePromoTitle
-    ) {
-      return { error: "Promo code title is required when promo code is selected" };
-    }
 
     const response = await HomeSetting.findByIdAndUpdate(id, updateData, {
       new: true,

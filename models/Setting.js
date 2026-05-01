@@ -60,6 +60,16 @@ const settingSchema = new Schema({
       default: "",
     },
   },
+  referral: {
+    threshold: {
+      type: Number,
+      default: 2,
+    },
+    rewardAmount: {
+      type: Number,
+      default: 10,
+    },
+  },
 });
 
 module.exports = model("Setting", settingSchema);

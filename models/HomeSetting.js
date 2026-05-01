@@ -4,17 +4,17 @@ const homeSettingSchema = new Schema(
   {
     title: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
     subTitle: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
     image: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
     menuItemId: {

@@ -40,6 +40,7 @@ const {
   addToFavoritesService,
 } = require("../services/usersServices/addToFavoritesService");
 const User = require("../models/User");
+const generateRandomCode = require("../utils/generateOrderCode");
 const {
   resolveDateRange,
   buildOrdersAnalytics,
@@ -92,7 +93,7 @@ const updateUser = async (req, res) => {
   }
 };
 const setUserInfo = async (req, res) => {
-  const { address, email, name, coords, date_of_birth } = req.body;
+  const { address, email, name, coords, date_of_birth, referralCode } = req.body;
   const { id } = req.params;
 
   try {
@@ -103,6 +104,7 @@ const setUserInfo = async (req, res) => {
       name,
       coords,
       date_of_birth,
+      referralCode,
     );
 
     if (error) {
@@ -490,6 +492,46 @@ const nullifyDefaultBirthdates = async (req, res) => {
   }
 };
 
+const seedReferralCodes = async (req, res) => {
+  try {
+    const usersWithoutCode = await User.find({
+      $or: [
+        { referralCode: { $exists: false } },
+        { referralCode: null },
+        { referralCode: "" },
+      ],
+    });
+
+    let count = 0;
+    for (const user of usersWithoutCode) {
+      let referralCode;
+      let isUnique = false;
+      let attempts = 0;
+      while (!isUnique && attempts < 10) {
+        referralCode = generateRandomCode(6).toUpperCase();
+        const existing = await User.findOne({ referralCode });
+        if (!existing) {
+          isUnique = true;
+        }
+        attempts++;
+      }
+
+      if (isUnique) {
+        user.referralCode = referralCode;
+        await user.save();
+        count++;
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `${count} utilisateurs mis à jour avec des codes de parrainage.`,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -513,4 +555,5 @@ module.exports = {
   getUsersPagination,
   banUser,
   nullifyDefaultBirthdates,
+  seedReferralCodes,
 };

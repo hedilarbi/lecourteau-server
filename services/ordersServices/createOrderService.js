@@ -524,6 +524,12 @@ const createOrderService = async (order, options = {}) => {
 
     const subscriptionActive = isSubscriptionCurrentlyActive(user);
     const firstOrderDiscountEligible = !Boolean(user?.firstOrderDiscountApplied);
+    const requestedPromoCodeId = orderPayload.promoCode
+      ? normalizeId(orderPayload.promoCode.promoCodeId)
+      : null;
+    const promoCodeRequested = Boolean(requestedPromoCodeId);
+    const firstOrderDiscountApplies =
+      firstOrderDiscountEligible && !(subscriptionActive && promoCodeRequested);
     const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
       subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
@@ -554,7 +560,9 @@ const createOrderService = async (order, options = {}) => {
       freeItemRemaining > 0;
 
     const appliedSubscriptionDiscountPercent =
-      shouldApplySubscriptionBenefits && !firstOrderDiscountEligible
+      shouldApplySubscriptionBenefits &&
+      !firstOrderDiscountApplies &&
+      !promoCodeRequested
         ? SUBSCRIPTION_DISCOUNT_PERCENT
         : 0;
     const appliedSubscriptionDiscountAmount =
@@ -732,17 +740,12 @@ const createOrderService = async (order, options = {}) => {
           cycleYear: birthdaySummary.cycleYear,
       };
 
-    let promoCodeId = orderPayload.promoCode
-      ? normalizeId(orderPayload.promoCode.promoCodeId)
-      : null;
-    if (subscriptionActive) {
-      promoCodeId = null;
-    }
+    let promoCodeId = requestedPromoCodeId;
 
     let promoCodeDocument = null;
     let promoDiscountAmount = 0;
 
-    if (promoCodeId && firstOrderDiscountEligible) {
+    if (promoCodeId && firstOrderDiscountEligible && !subscriptionActive) {
       return {
         error:
           "Une autre réduction est déjà appliquée à cette commande. Le code promo ne peut pas être utilisé.",
@@ -909,7 +912,7 @@ const createOrderService = async (order, options = {}) => {
     }
 
     const requestedDiscount = toSafeNumber(orderPayload.discount, 0);
-    const normalizedDiscount = firstOrderDiscountEligible
+    const normalizedDiscount = firstOrderDiscountApplies
       ? 20
       : subscriptionBenefits.isApplied &&
           toSafeNumber(subscriptionBenefits?.discountPercent, 0) > 0
@@ -965,6 +968,20 @@ const createOrderService = async (order, options = {}) => {
       };
     }
 
+    const referralDiscountApplied = toSafeNumber(
+      orderPayload.referralDiscountApplied,
+      0,
+    );
+    if (referralDiscountApplied > 0) {
+      const availableBalance = toSafeNumber(user.referralBalance, 0);
+      if (referralDiscountApplied > availableBalance + 0.01) {
+        return {
+          error: "Solde de parrainage insuffisant.",
+        };
+      }
+      user.referralBalance = Math.max(0, roundMoney(availableBalance - referralDiscountApplied, 0));
+    }
+
     const newOrder = new Order({
       user: orderPayload.user_id,
       orderItems: orderPayload.orderItems,
@@ -999,6 +1016,7 @@ const createOrderService = async (order, options = {}) => {
         isScheduled: orderPayload.scheduled?.isScheduled || false,
         scheduledFor: orderPayload.scheduled?.scheduledFor || null,
       },
+      referralDiscountApplied,
     });
 
     if (user.orders.length > 0) {

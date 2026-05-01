@@ -247,6 +247,10 @@ const orderSchema = new Schema({
       default: false, // passe à true quand la commande a été envoyée au resto / prise en charge
     },
   },
+  referralDiscountApplied: {
+    type: Number,
+    default: 0,
+  },
 });
 
 module.exports = model("Order", orderSchema);

@@ -40,8 +40,12 @@ const setUserInfoService = async (
   name,
   coords,
   date_of_birth,
+  referralCode,
 ) => {
   try {
+    const user = await User.findById(id);
+    if (!user) return { error: "Utilisateur introuvable" };
+
     const hasAddress =
       typeof address === "string" &&
       address.trim().length > 0 &&
@@ -66,11 +70,16 @@ const setUserInfoService = async (
       };
     }
 
-    await User.findOneAndUpdate(
-      { _id: id },
-      updateQuery,
-      { new: true },
-    );
+    if (referralCode && !user.referredBy) {
+      const referrer = await User.findOne({
+        referralCode: referralCode.trim().toUpperCase(),
+      });
+      if (referrer && referrer._id.toString() !== id) {
+        updateQuery.$set.referredBy = referrer._id;
+      }
+    }
+
+    await User.findOneAndUpdate({ _id: id }, updateQuery, { new: true });
 
     const { response, error } = await getUserService(id);
     if (error) return { error };

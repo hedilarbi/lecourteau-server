@@ -159,6 +159,23 @@ const userSchema = new Schema({
     type: Date,
     default: null,
   },
+  referralCode: {
+    type: String,
+    unique: true,
+    sparse: true,
+  },
+  referredBy: {
+    type: Schema.Types.ObjectId,
+    ref: "User",
+  },
+  referralOrdersCount: {
+    type: Number,
+    default: 0,
+  },
+  referralBalance: {
+    type: Number,
+    default: 0,
+  },
 });
 
 module.exports = model("User", userSchema);

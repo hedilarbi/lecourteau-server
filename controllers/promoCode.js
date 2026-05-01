@@ -3,9 +3,6 @@ const Category = require("../models/Category");
 const User = require("../models/User");
 const { default: Expo } = require("expo-server-sdk");
 const { default: mongoose } = require("mongoose");
-const {
-  isSubscriptionCurrentlyActive,
-} = require("../services/subscriptionServices/subscriptionHelpers");
 const logWithTimestamp = (message) => {
   const timestamp = new Date().toISOString();
   console.error(`${timestamp} - ${message}`);
@@ -311,15 +308,6 @@ const verifyPromoCode = async (req, res) => {
       return res.status(404).json({
         success: false,
         error: "Utilisateur non trouvé.",
-      });
-    }
-
-    const hasActiveSubscription = isSubscriptionCurrentlyActive(user);
-    if (hasActiveSubscription) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Un abonnement actif est déjà appliqué à votre compte. Les codes promo ne sont pas cumulables.",
       });
     }
 

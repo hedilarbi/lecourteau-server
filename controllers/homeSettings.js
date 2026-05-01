@@ -8,20 +8,6 @@ const createHomeSetting = async (req, res) => {
   const { title, subTitle, menuItemId, offerId, codePromoId, codePromoTitle } =
     req.body;
 
-  if (!title || !subTitle) {
-    return res.status(400).json({
-      success: false,
-      message: "Title and subTitle are required",
-    });
-  }
-
-  if (!firebaseUrl) {
-    return res.status(400).json({
-      success: false,
-      message: "Image is required",
-    });
-  }
-
   try {
     const { error, response } = await createHomeSettingService(
       title,

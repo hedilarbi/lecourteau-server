@@ -340,6 +340,7 @@ const fillRevenueByDay = (series, startDate, endDate, timezone = DEFAULT_TIMEZON
             day: dayKey,
             revenue: roundMoney(entry.revenue, 0),
             orders: Math.max(0, Math.floor(safeNumber(entry.orders, 0))),
+            referralOrders: Math.max(0, Math.floor(safeNumber(entry.referralOrders, 0))),
           },
         ];
       })
@@ -376,11 +377,13 @@ const fillRevenueByDay = (series, startDate, endDate, timezone = DEFAULT_TIMEZON
             day: displayDay,
             revenue: roundMoney(existing.revenue, 0),
             orders: Math.max(0, Math.floor(safeNumber(existing.orders, 0))),
+            referralOrders: Math.max(0, Math.floor(safeNumber(existing.referralOrders, 0))),
           }
         : {
             day: displayDay,
             revenue: 0,
             orders: 0,
+            referralOrders: 0,
           },
     );
   }
@@ -469,6 +472,14 @@ const buildOrdersAnalytics = async ({
               $cond: [{ $ne: ["$promoCode", null] }, 1, 0],
             },
           },
+          referralOrders: {
+            $sum: {
+              $cond: [{ $gt: [{ $ifNull: ["$referralDiscountApplied", 0] }, 0] }, 1, 0],
+            },
+          },
+          referralDiscountAmount: {
+            $sum: { $ifNull: ["$referralDiscountApplied", 0] },
+          },
           deliveryOrders: {
             $sum: {
               $cond: [isDeliveryExpr, 1, 0],
@@ -494,6 +505,24 @@ const buildOrdersAnalytics = async ({
               $cond: [isUnknownPlatformExpr, 1, 0],
             },
           },
+          totalCounter: {
+            $sum: {
+              $cond: [
+                { $eq: ["$payment_method", "cash_at_counter"] },
+                totalPriceExpr,
+                0,
+              ],
+            },
+          },
+          totalOnline: {
+            $sum: {
+              $cond: [
+                { $ne: ["$payment_method", "cash_at_counter"] },
+                totalPriceExpr,
+                0,
+              ],
+            },
+          },
           firstOrderAt: { $min: "$createdAt" },
           lastOrderAt: { $max: "$createdAt" },
         },
@@ -514,6 +543,11 @@ const buildOrdersAnalytics = async ({
           },
           revenue: { $sum: { $ifNull: ["$total_price", 0] } },
           orders: { $sum: 1 },
+          referralOrders: {
+            $sum: {
+              $cond: [{ $gt: [{ $ifNull: ["$referralDiscountApplied", 0] }, 0] }, 1, 0],
+            },
+          },
         },
       },
       { $sort: { "_id.day": 1 } },
@@ -523,6 +557,7 @@ const buildOrdersAnalytics = async ({
           day: "$_id.day",
           revenue: { $round: ["$revenue", 2] },
           orders: 1,
+          referralOrders: 1,
         },
       },
     ]),
@@ -678,6 +713,8 @@ const buildOrdersAnalytics = async ({
   const totalDeliveryFee = roundMoney(summary.totalDeliveryFee, 0);
   const totalOrders = Math.max(0, Math.floor(safeNumber(summary.totalOrders, 0)));
   const promoOrders = Math.max(0, Math.floor(safeNumber(summary.promoOrders, 0)));
+  const referralOrders = Math.max(0, Math.floor(safeNumber(summary.referralOrders, 0)));
+  const referralDiscountAmount = roundMoney(summary.referralDiscountAmount, 0);
   const deliveryOrders = Math.max(
     0,
     Math.floor(safeNumber(summary.deliveryOrders, 0)),
@@ -696,6 +733,7 @@ const buildOrdersAnalytics = async ({
     Math.floor(safeNumber(summary.unknownPlatformOrders, 0)),
   );
   const noPromoOrders = Math.max(0, totalOrders - promoOrders);
+  const noReferralOrders = Math.max(0, totalOrders - referralOrders);
   const otherTypeOrders = Math.max(0, totalOrders - deliveryOrders - pickupOrders);
   const averageBasket = totalOrders > 0 ? roundMoney(totalRevenue / totalOrders, 0) : 0;
 
@@ -724,6 +762,7 @@ const buildOrdersAnalytics = async ({
           day: entry.day,
           revenue: roundMoney(entry.revenue, 0),
           orders: Math.max(0, Math.floor(safeNumber(entry.orders, 0))),
+          referralOrders: Math.max(0, Math.floor(safeNumber(entry.referralOrders, 0))),
         }));
 
   const ordersByHourMap = new Map(
@@ -797,6 +836,8 @@ const buildOrdersAnalytics = async ({
       averageDaysBetweenOrders,
       promoOrders,
       noPromoOrders,
+      referralOrders,
+      referralDiscountAmount,
       promoUsageRate: totalOrders > 0 ? roundMoney((promoOrders / totalOrders) * 100, 0) : 0,
       deliveryOrders,
       pickupOrders,
@@ -839,6 +880,10 @@ const buildOrdersAnalytics = async ({
         { label: "Non défini", value: unknownPlatformOrders },
       ],
       topProducts,
+      paymentBreakdown: [
+        { label: "Comptoir", value: roundMoney(summary.totalCounter, 2) },
+        { label: "En ligne", value: roundMoney(summary.totalOnline, 2) },
+      ],
     },
   };
 };

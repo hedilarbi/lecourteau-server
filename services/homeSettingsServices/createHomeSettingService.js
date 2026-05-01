@@ -52,9 +52,6 @@ const createHomeSettingService = async (
       return { error: "Invalid promo code id" };
     }
 
-    if (normalizedCodePromoId && !normalizedCodePromoTitle) {
-      return { error: "Promo code title is required when promo code is selected" };
-    }
 
     const newHomeSetting = new HomeSetting({
       title,

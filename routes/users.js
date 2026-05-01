@@ -23,9 +23,11 @@ const {
   getUsersPagination,
   banUser,
   nullifyDefaultBirthdates,
+  seedReferralCodes,
 } = require("../controllers/users");
 const router = express.Router();
 
+router.get("/seed/referral-codes", seedReferralCodes);
 router.get("/", getUsers);
 router.get("/pagination", getUsersPagination);
 router.get("/userByToken", getUserByToken);

@@ -410,4 +410,55 @@ async function finalizeLoyaltyAndPromo(order) {
   await user.save();
   await applyConfirmedOrderSubscriptionBenefits(order);
   await applyConfirmedOrderBirthdayBenefits(order);
+  await handleReferralReward(user);
+}
+
+async function handleReferralReward(user) {
+  try {
+    if (!user.referredBy) return;
+
+    // Check if this is truly the first confirmed order of the user
+    const confirmedOrdersCount = await Order.countDocuments({
+      user: user._id,
+      confirmed: true,
+    });
+
+    if (confirmedOrdersCount !== 1) return;
+
+    const referrer = await mongoose.models.User.findById(user.referredBy);
+    if (!referrer) return;
+
+    const { getOrCreateSettingDocument } = require("../subscriptionServices/subscriptionHelpers");
+    const setting = await getOrCreateSettingDocument();
+    const threshold = setting?.referral?.threshold || 2;
+    const rewardAmount = setting?.referral?.rewardAmount || 10;
+
+    referrer.referralOrdersCount = (referrer.referralOrdersCount || 0) + 1;
+
+    if (referrer.referralOrdersCount % threshold === 0) {
+      referrer.referralBalance = (referrer.referralBalance || 0) + rewardAmount;
+      
+      // Notify referrer
+      if (referrer.expo_token) {
+        const expo = new Expo({ useFcmV1: true });
+        try {
+          await expo.sendPushNotificationsAsync([
+            {
+              to: referrer.expo_token,
+              sound: "default",
+              title: "Récompense de parrainage !",
+              body: `Félicitations ! 2 de vos amis ont commandé. Vous avez reçu ${rewardAmount}$ de crédit sur votre compte.`,
+              priority: "high",
+            },
+          ]);
+        } catch (pushErr) {
+          logWithTimestamp("Error sending referral push", { err: pushErr.message });
+        }
+      }
+    }
+    
+    await referrer.save();
+  } catch (err) {
+    logWithTimestamp("Error handling referral reward", { err: err.message });
+  }
 }

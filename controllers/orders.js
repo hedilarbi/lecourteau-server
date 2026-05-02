@@ -180,6 +180,28 @@ const createZeroTotalSubscriptionOrder = async (req, res) => {
   }
 };
 
+const createZeroTotalReferralOrder = async (req, res) => {
+  const { order } = req.body;
+
+  try {
+    const { error, response } = await createOrderService(order, {
+      allowZeroTotalReferralOrder: true,
+    });
+
+    if (error) {
+      logWithTimestamp(
+        `Error creating zero-total referral order: userId ${order?.order?.user_id || "-"}, error: ${error}`,
+      );
+      return res.status(400).json({ success: false, message: error });
+    }
+
+    return res.status(201).json({ success: true, orderId: response._id });
+  } catch (err) {
+    logWithTimestamp(`Error creating zero-total referral order: ${err}`);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const getOrders = async (req, res) => {
   try {
     const { response, error } = await getOrdersService();
@@ -901,6 +923,7 @@ const getTotalRevenue = async (req, res) => {
 module.exports = {
   createOrder,
   createZeroTotalSubscriptionOrder,
+  createZeroTotalReferralOrder,
   getOrders,
   getOrder,
   deleteOrder,

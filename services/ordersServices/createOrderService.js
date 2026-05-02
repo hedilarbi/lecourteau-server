@@ -326,6 +326,11 @@ const createOrderService = async (order, options = {}) => {
     const allowZeroTotalSubscriptionOrder = Boolean(
       options?.allowZeroTotalSubscriptionOrder,
     );
+    const allowZeroTotalReferralOrder = Boolean(
+      options?.allowZeroTotalReferralOrder,
+    );
+    const allowAnyZeroTotalOrder =
+      allowZeroTotalSubscriptionOrder || allowZeroTotalReferralOrder;
     const orderItems = Array.isArray(orderPayload.orderItems)
       ? orderPayload.orderItems
       : [];
@@ -384,27 +389,27 @@ const createOrderService = async (order, options = {}) => {
     const totalPrice = roundMoney(orderPayload.total, 0);
     const isZeroTotalOrder = totalPrice <= 0;
 
-    if (allowZeroTotalSubscriptionOrder && !isZeroTotalOrder) {
+    if (allowAnyZeroTotalOrder && !isZeroTotalOrder) {
       return {
         error:
-          "Cette route est réservée aux commandes total 0 avec article gratuit éligible (abonnement ou anniversaire).",
+          "Cette route est réservée aux commandes avec total 0.",
       };
     }
 
-    if (!allowZeroTotalSubscriptionOrder && isZeroTotalOrder) {
+    if (!allowAnyZeroTotalOrder && isZeroTotalOrder) {
       return {
         error:
-          "Les commandes avec total 0 doivent utiliser la route dédiée article gratuit.",
+          "Les commandes avec total 0 doivent utiliser la route dédiée.",
       };
     }
 
-    if (allowZeroTotalSubscriptionOrder && orderPayload.paymentIntentId) {
+    if (allowAnyZeroTotalOrder && orderPayload.paymentIntentId) {
       return {
         error: "Aucun paiement Stripe ne doit être envoyé pour une commande à 0.",
       };
     }
 
-    if (!allowZeroTotalSubscriptionOrder) {
+    if (!allowAnyZeroTotalOrder) {
       if (normalizedPaymentMethod !== "card" && !isPickupCounterPayment) {
         return { error: "Payment method not supported" };
       }
@@ -960,6 +965,25 @@ const createOrderService = async (order, options = {}) => {
       }
     }
 
+    if (allowZeroTotalReferralOrder) {
+      const referralBalanceForValidation = toSafeNumber(user.referralBalance, 0);
+      const requestedReferralDiscount = toSafeNumber(
+        orderPayload.referralDiscountApplied,
+        0,
+      );
+      if (requestedReferralDiscount <= 0) {
+        return {
+          error:
+            "Un crédit de parrainage est requis pour passer une commande à total 0 via cette route.",
+        };
+      }
+      if (requestedReferralDiscount > referralBalanceForValidation + 0.01) {
+        return {
+          error: "Solde de parrainage insuffisant pour couvrir le total de la commande.",
+        };
+      }
+    }
+
     let coords = resolvedOrderAddress.coords || {};
     if (!coords?.latitude || !coords?.longitude) {
       coords = {
@@ -1003,12 +1027,14 @@ const createOrderService = async (order, options = {}) => {
       discount: normalizedDiscount,
       sub_total_after_discount: parseFloat(orderPayload.subTotalAfterDiscount),
       tip: parseFloat(orderPayload.tip),
-      paymentIntentId: allowZeroTotalSubscriptionOrder
+      paymentIntentId: allowAnyZeroTotalOrder
         ? null
         : orderPayload.paymentIntentId,
       payment_method: allowZeroTotalSubscriptionOrder
         ? "subscription_free_item"
-        : normalizedPaymentMethod || "card",
+        : allowZeroTotalReferralOrder
+          ? "referral_credit"
+          : normalizedPaymentMethod || "card",
       promoCode: promoCodeId,
       subscriptionBenefits,
       birthdayBenefits,

@@ -494,32 +494,64 @@ const nullifyDefaultBirthdates = async (req, res) => {
 
 const seedReferralCodes = async (req, res) => {
   try {
-    const usersWithoutCode = await User.find({
-      $or: [
-        { referralCode: { $exists: false } },
-        { referralCode: null },
-        { referralCode: "" },
-      ],
-    });
-
+    const batchSize = 500;
     let count = 0;
-    for (const user of usersWithoutCode) {
-      let referralCode;
-      let isUnique = false;
-      let attempts = 0;
-      while (!isUnique && attempts < 10) {
-        referralCode = generateRandomCode(6).toUpperCase();
-        const existing = await User.findOne({ referralCode });
-        if (!existing) {
-          isUnique = true;
-        }
-        attempts++;
+
+    while (true) {
+      const usersBatch = await User.find({
+        $or: [
+          { referralCode: { $exists: false } },
+          { referralCode: null },
+          { referralCode: "" },
+        ],
+      }).limit(batchSize);
+
+      if (usersBatch.length === 0) {
+        break;
       }
 
-      if (isUnique) {
-        user.referralCode = referralCode;
-        await user.save();
-        count++;
+      const operations = [];
+      const codesInBatch = new Set();
+
+      for (const user of usersBatch) {
+        let code;
+        let attempts = 0;
+        let isUniqueInBatch = false;
+
+        while (!isUniqueInBatch && attempts < 10) {
+          code = generateRandomCode(6).toUpperCase();
+          if (!codesInBatch.has(code)) {
+            isUniqueInBatch = true;
+            codesInBatch.add(code);
+          }
+          attempts++;
+        }
+
+        if (isUniqueInBatch) {
+          operations.push({
+            updateOne: {
+              filter: { _id: user._id },
+              update: { $set: { referralCode: code } },
+            },
+          });
+        }
+      }
+
+      // Vérifier les codes par rapport à la base de données
+      const existingUsers = await User.find({
+        referralCode: { $in: Array.from(codesInBatch) },
+      }).select("referralCode");
+
+      const existingCodes = new Set(existingUsers.map((u) => u.referralCode));
+
+      // Filtrer les opérations qui ont des codes en collision
+      const finalOperations = operations.filter(
+        (op) => !existingCodes.has(op.updateOne.update.$set.referralCode)
+      );
+
+      if (finalOperations.length > 0) {
+        await User.bulkWrite(finalOperations);
+        count += finalOperations.length;
       }
     }
 

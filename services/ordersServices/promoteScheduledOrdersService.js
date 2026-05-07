@@ -16,23 +16,6 @@ const getRestaurantIdFromOrder = (order) =>
     ? order?.restaurant?._id || order.restaurant
     : order?.restaurant) || null;
 
-const noUberDeliveryQuery = {
-  $or: [
-    { uber_delivery_id: { $exists: false } },
-    { uber_delivery_id: null },
-    { uber_delivery_id: "" },
-  ],
-};
-
-const notStaffDeliveryProviderQuery = {
-  $or: [
-    { delivery_provider: { $exists: false } },
-    { delivery_provider: null },
-    { delivery_provider: "" },
-    { delivery_provider: "uber_direct" },
-  ],
-};
-
 const buildDueScheduledOrdersQuery = ({ restaurantId } = {}) => {
   const now = new Date();
   const in45Min = new Date(now.getTime() + 45 * 60 * 1000);
@@ -54,29 +37,6 @@ const buildDueScheduledOrdersQuery = ({ restaurantId } = {}) => {
         "scheduled.scheduledFor": { $lte: in30Min },
       },
     ],
-  };
-
-  if (restaurantId) {
-    query.restaurant = restaurantId;
-  }
-
-  return query;
-};
-
-const buildPromotedScheduledDeliveryOrdersMissingUberQuery = ({
-  restaurantId,
-} = {}) => {
-  const now = new Date();
-  const in45Min = new Date(now.getTime() + 45 * 60 * 1000);
-
-  const query = {
-    confirmed: true,
-    status: ON_GOING,
-    type: { $in: ["delivery", "devliery"] },
-    "scheduled.isScheduled": true,
-    "scheduled.scheduledFor": { $ne: null, $lte: in45Min },
-    uber_creation_failed: { $ne: true },
-    $and: [noUberDeliveryQuery, notStaffDeliveryProviderQuery],
   };
 
   if (restaurantId) {
@@ -132,48 +92,12 @@ const createUberDeliveryForScheduledOrder = async (order, source) => {
   };
 };
 
-const createMissingUberDeliveriesForAlreadyPromotedOrders = async ({
-  restaurantId,
-} = {}) => {
-  const query = buildPromotedScheduledDeliveryOrdersMissingUberQuery({
-    restaurantId,
-  });
-  const candidates = await Order.find(query).select("_id type restaurant").lean();
-  const uberFailures = [];
-  let attemptedCount = 0;
-
-  for (const candidate of candidates) {
-    await Order.updateOne(
-      { _id: candidate._id, "scheduled.isScheduled": true },
-      { $set: { "scheduled.processed": true } },
-    );
-
-    attemptedCount += 1;
-    const failure = await createUberDeliveryForScheduledOrder(
-      candidate,
-      "already_promoted",
-    );
-
-    if (failure) {
-      uberFailures.push(failure);
-    }
-  }
-
-  return {
-    attemptedCount,
-    uberFailures,
-  };
-};
-
 const promoteScheduledOrdersService = async ({ restaurantId } = {}) => {
-  const existingResult = await createMissingUberDeliveriesForAlreadyPromotedOrders(
-    { restaurantId },
-  );
   const query = buildDueScheduledOrdersQuery({ restaurantId });
   const candidates = await Order.find(query).select("_id").lean();
-  const uberFailures = [...existingResult.uberFailures];
+  const uberFailures = [];
   let promotedCount = 0;
-  let uberCreationAttempts = existingResult.attemptedCount;
+  let uberCreationAttempts = 0;
 
   for (const candidate of candidates) {
     const promotedOrder = await Order.findOneAndUpdate(

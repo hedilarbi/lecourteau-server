@@ -7,9 +7,6 @@ const {
   toObjectId,
   DEFAULT_TIMEZONE,
 } = require("../services/statsServices/analyticsHelpers");
-const {
-  promoteScheduledOrdersService,
-} = require("../services/ordersServices/promoteScheduledOrdersService");
 const getInititalStats = async (req, res) => {
   try {
     const { date, from, to, restaurantId } = req.query;
@@ -134,7 +131,6 @@ const getInititalStats = async (req, res) => {
 const getRestaurantStats = async (req, res) => {
   try {
     const { id } = req.params;
-    await promoteScheduledOrdersService({ restaurantId: id });
 
     const orderProjection =
       "code type total_price createdAt status confirmed scheduled user payment_method delivery_provider uber_delivery_id uber_status uber_creation_failed uber_creation_error uber_creation_failed_at uber_creation_last_attempt_at";

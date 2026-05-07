@@ -19,9 +19,6 @@ const { Expo } = require("expo-server-sdk");
 const {
   cancelCheckoutPaymentIntentIfPossible,
 } = require("../services/paymentServices/paymentIntentHelpers");
-const {
-  promoteScheduledOrdersService,
-} = require("../services/ordersServices/promoteScheduledOrdersService");
 require("dotenv").config();
 
 const logWithTimestamp = (message) => {
@@ -854,9 +851,6 @@ const orderChecker = async (req, res) => {
   const { id } = req.params;
 
   try {
-    // Fallback promotion path to keep behavior consistent even if cron is delayed.
-    await promoteScheduledOrdersService({ restaurantId: id });
-
     const tenMinutesAgo = new Date();
     tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 20);
 

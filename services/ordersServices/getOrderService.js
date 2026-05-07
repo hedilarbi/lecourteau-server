@@ -26,7 +26,7 @@ const getOrderService = async (id) => {
         populate: [
           {
             path: "offer",
-            select: "name",
+
           },
           {
             path: "items.item",

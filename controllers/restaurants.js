@@ -247,9 +247,10 @@ const getRestaurantMenuItem = async (req, res) => {
 };
 const getRestaurantToppings = async (req, res) => {
   const { id } = req.params;
+  const options = { availability: req.query.availability };
 
   try {
-    const { error, response } = await getRestaurantToppingsService(id);
+    const { error, response } = await getRestaurantToppingsService(id, options);
 
     if (error) {
       return res.status(500).json({ success: false, message: error.message });
@@ -438,7 +439,7 @@ const updateRestaurantToppingAvailability = async (req, res) => {
   const { id, toppingId } = req.params;
 
   try {
-    const { error, status } = await updateRestaurantToppingAvailabilityService(
+    const { error, status, availability } = await updateRestaurantToppingAvailabilityService(
       id,
       toppingId,
     );
@@ -449,7 +450,7 @@ const updateRestaurantToppingAvailability = async (req, res) => {
 
     res
       .status(200)
-      .json({ success: true, message: "Topping availability updated" });
+      .json({ success: true, message: "Topping availability updated", availability });
   } catch (error) {
     console.error("Error updating topping availability:", error);
     res.status(500).json({ success: false, message: error.message });

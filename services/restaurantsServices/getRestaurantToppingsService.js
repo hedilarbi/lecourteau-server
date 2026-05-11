@@ -1,20 +1,10 @@
-const Restaurant = require("../../models/Restaurant");
+const {
+  getRestaurantToppingsAvailabilityList,
+} = require("./restaurantToppingAvailabilityService");
 
-const getRestaurantToppingsService = async (id) => {
+const getRestaurantToppingsService = async (id, options = {}) => {
   try {
-    const response = await Restaurant.findById(id)
-      .select("toppings")
-      .populate({
-        path: "toppings",
-        populate: { path: "topping", populate: "category" },
-      });
-
-    // Check if the restaurant exists
-    if (!response) {
-      return { error: new Error("Restaurant not found") };
-    }
-
-    return { response: response.toppings }; // Return only the toppings
+    return await getRestaurantToppingsAvailabilityList(id, options);
   } catch (error) {
     return { error: error.message };
   }

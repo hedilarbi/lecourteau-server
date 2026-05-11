@@ -1,6 +1,7 @@
 const Restaurant = require("../../models/Restaurant");
 const MenuItem = require("../../models/MenuItem");
 const RestaurantMenuItemAvailability = require("../../models/RestaurantMenuItemAvailability");
+const RestaurantToppingAvailability = require("../../models/RestaurantToppingAvailability");
 
 const normalizeId = (value) => String(value || "").trim();
 
@@ -100,7 +101,6 @@ const getRestaurantSingleMenuItemAvailability = async (restaurantId, menuItemId)
 
   const menuItem = await MenuItem.findById(menuItemId)
     .populate("category")
-    .populate("customization", "name price image category")
     .populate({
       path: "customization",
       populate: { path: "category" },
@@ -118,10 +118,66 @@ const getRestaurantSingleMenuItemAvailability = async (restaurantId, menuItemId)
     menuItemId,
   ]);
 
+  // Build the set of unavailable topping IDs for this restaurant
+  const collectToppingIds = () => {
+    const ids = [];
+
+    for (const topping of (menuItem.customization || [])) {
+      const id = normalizeId(topping?._id);
+      if (id) ids.push(id);
+    }
+
+    for (const group of (menuItem.customization_group || [])) {
+      for (const topping of (group.toppings || [])) {
+        const id = normalizeId(topping?._id);
+        if (id) ids.push(id);
+      }
+    }
+
+    return [...new Set(ids)];
+  };
+
+  const toppingIds = collectToppingIds();
+  let unavailableToppingIdsSet = new Set();
+
+  if (toppingIds.length > 0) {
+    const overrides = await RestaurantToppingAvailability.find({
+      restaurant: restaurantId,
+      topping: { $in: toppingIds },
+      isAvailable: false,
+    })
+      .select("topping")
+      .lean();
+    unavailableToppingIdsSet = new Set(overrides.map((e) => normalizeId(e?.topping)));
+  }
+
+  const enrichToppingWithAvailability = (topping) => ({
+    ...topping.toObject ? topping.toObject() : topping,
+    availability: !unavailableToppingIdsSet.has(normalizeId(topping?._id)),
+  });
+
+  const enrichedCustomization = (menuItem.customization || []).map(
+    enrichToppingWithAvailability,
+  );
+
+  const enrichedCustomizationGroup = (menuItem.customization_group || []).map(
+    (group) => ({
+      ...(group.toObject ? group.toObject() : group),
+      toppings: (group.toppings || []).map(enrichToppingWithAvailability),
+    }),
+  );
+
+  const enrichedMenuItem = {
+    ...(menuItem.toObject ? menuItem.toObject() : menuItem),
+    customization: enrichedCustomization,
+    customization_group: enrichedCustomizationGroup,
+  };
+
   return {
-    response: withMenuItemAvailability(menuItem, unavailableIdsSet),
+    response: withMenuItemAvailability(enrichedMenuItem, unavailableIdsSet),
   };
 };
+
 
 const toggleRestaurantMenuItemAvailability = async (restaurantId, menuItemId) => {
   const restaurant = await ensureRestaurantExists(restaurantId);

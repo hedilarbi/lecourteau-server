@@ -29,6 +29,7 @@ const uberDirectRoutes = require("./routes/uberDirect");
 const homeSettingsRoutes = require("./routes/homeSettings");
 const homeRoutes = require("./routes/home");
 const subscriptionsRoutes = require("./routes/subscriptions");
+const recipesRoutes = require("./routes/recipes");
 const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
 const {
   startBirthdayNotificationsJob,
@@ -86,6 +87,7 @@ app.use("/api/homeSettings", homeSettingsRoutes);
 app.use("/api/home-settings", homeSettingsRoutes);
 app.use("/api/home", homeRoutes);
 app.use("/api/subscriptions", subscriptionsRoutes);
+app.use("/api/recipes", recipesRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,

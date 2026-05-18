@@ -193,13 +193,19 @@ async function maybeCreateUberDeliveryAfterConfirmation(order) {
     .trim()
     .toLowerCase();
   const isCompletedUberStatus = normalizedUberStatus === "delivered";
+  // Ne pas créer une nouvelle livraison si :
+  // - une livraison Uber existe déjà (uber_delivery_id présent)
+  // - ET le provider est uber_direct
+  // - ET le statut n'est PAS annulé/retourné/échoué (pas retryable)
+  // - ET la livraison n'est pas "delivered" (déjà terminée → ne pas recréer)
   const shouldCreateUberDelivery =
     !hasUberDelivery ||
     normalizedProvider !== "uber_direct" ||
-    isRetryableUberStatus(normalizedUberStatus) ||
-    isCompletedUberStatus;
+    isRetryableUberStatus(normalizedUberStatus);
+  // Note: isCompletedUberStatus ("delivered") est intentionnellement exclu:
+  // une commande déjà livrée ne doit jamais déclencher une nouvelle création.
 
-  if (!shouldCreateUberDelivery) {
+  if (!shouldCreateUberDelivery || isCompletedUberStatus) {
     return null;
   }
 

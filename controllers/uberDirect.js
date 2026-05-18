@@ -1113,9 +1113,9 @@ const sanitizeCustomerTrackingUrl = (rawUrl) => {
 const extractEventTimestamp = (payload = {}) =>
   parseIsoDateOrNull(
     payload?.created ||
-      payload?.meta?.created ||
-      payload?.event_data?.created ||
-      payload?.data?.created,
+    payload?.meta?.created ||
+    payload?.event_data?.created ||
+    payload?.data?.created,
   ) || new Date();
 
 const isWebhookEventStale = (order, incomingTimestamp) => {
@@ -1157,33 +1157,33 @@ const extractEtaFieldsFromPayload = (payload = {}) =>
   compactObject({
     uber_pickup_eta: parseIsoDateOrNull(
       payload?.pickup_eta ||
-        payload?.data?.pickup_eta ||
-        payload?.meta?.pickup_eta,
+      payload?.data?.pickup_eta ||
+      payload?.meta?.pickup_eta,
     ),
     uber_dropoff_eta: parseIsoDateOrNull(
       payload?.dropoff_eta ||
-        payload?.data?.dropoff_eta ||
-        payload?.meta?.dropoff_eta,
+      payload?.data?.dropoff_eta ||
+      payload?.meta?.dropoff_eta,
     ),
     uber_pickup_ready: parseIsoDateOrNull(
       payload?.pickup_ready ||
-        payload?.data?.pickup_ready ||
-        payload?.meta?.pickup_ready,
+      payload?.data?.pickup_ready ||
+      payload?.meta?.pickup_ready,
     ),
     uber_pickup_deadline: parseIsoDateOrNull(
       payload?.pickup_deadline ||
-        payload?.data?.pickup_deadline ||
-        payload?.meta?.pickup_deadline,
+      payload?.data?.pickup_deadline ||
+      payload?.meta?.pickup_deadline,
     ),
     uber_dropoff_ready: parseIsoDateOrNull(
       payload?.dropoff_ready ||
-        payload?.data?.dropoff_ready ||
-        payload?.meta?.dropoff_ready,
+      payload?.data?.dropoff_ready ||
+      payload?.meta?.dropoff_ready,
     ),
     uber_dropoff_deadline: parseIsoDateOrNull(
       payload?.dropoff_deadline ||
-        payload?.data?.dropoff_deadline ||
-        payload?.meta?.dropoff_deadline,
+      payload?.data?.dropoff_deadline ||
+      payload?.meta?.dropoff_deadline,
     ),
   });
 
@@ -1816,7 +1816,7 @@ const handleUberDirectWebhook = async (req, res) => {
   try {
     const payload = req.body || {};
     const webhookMeta = buildWebhookLogMeta(payload);
-    logWebhook("Webhook recu", webhookMeta);
+
 
     const rawPayload =
       typeof req.rawBody === "string" && req.rawBody.length
@@ -1825,16 +1825,13 @@ const handleUberDirectWebhook = async (req, res) => {
 
     const signatureValidation = verifyWebhookSignature(req, rawPayload);
     if (!signatureValidation.ok) {
-      logWebhook("Signature webhook invalide", {
-        ...webhookMeta,
-        reason: signatureValidation.message,
-      });
+
       return res.status(signatureValidation.status || 401).json({
         success: false,
         message: signatureValidation.message,
       });
     }
-    logWebhook("Signature webhook valide", webhookMeta);
+
 
     const deliveryId = extractDeliveryIdFromPayload(payload);
     const uberStatus = extractUberStatusFromPayload(payload);
@@ -1862,32 +1859,18 @@ const handleUberDirectWebhook = async (req, res) => {
     }
 
     if (!order) {
-      logWebhook("Webhook sans commande correspondante", webhookMeta);
+
       return res.status(200).json({
         success: true,
         message: "Webhook received. No matching order found.",
       });
     }
-    logWebhook("Commande trouvee pour webhook", {
-      ...webhookMeta,
-      order_id: order._id,
-      current_order_status: order.status,
-      current_uber_status: order.uber_status || null,
-      current_courier_imminent:
-        order.uber_courier_imminent === undefined
-          ? null
-          : Boolean(order.uber_courier_imminent),
-    });
+
 
     const resolvedEventTimestamp = extractEventTimestamp(payload);
 
     if (isWebhookEventStale(order, resolvedEventTimestamp)) {
-      logWebhook("Webhook ignore (event ancien)", {
-        ...webhookMeta,
-        order_id: order._id,
-        incoming_event_at: resolvedEventTimestamp,
-        current_event_at: order.uber_last_event_at || null,
-      });
+
       return res.status(200).json({
         success: true,
         message: "Webhook ignored: older event.",
@@ -1903,10 +1886,7 @@ const handleUberDirectWebhook = async (req, res) => {
         courierImminent,
       )
     ) {
-      logWebhook("Webhook ignore (event duplique)", {
-        ...webhookMeta,
-        order_id: order._id,
-      });
+
       return res.status(200).json({
         success: true,
         message: "Webhook ignored: duplicate event.",
@@ -1916,11 +1896,7 @@ const handleUberDirectWebhook = async (req, res) => {
     const isDetachedFromUber =
       !order?.uber_delivery_id && order?.delivery_provider !== "uber_direct";
     if (isDetachedFromUber) {
-      logWebhook("Webhook ignore (commande non liee a Uber)", {
-        ...webhookMeta,
-        order_id: order._id,
-        delivery_provider: order?.delivery_provider || null,
-      });
+
       return res.status(200).json({
         success: true,
         message: "Webhook ignored: order is not linked to Uber Direct.",
@@ -1941,49 +1917,30 @@ const handleUberDirectWebhook = async (req, res) => {
         Boolean(order?.uber_delivery_id))
     ) {
       webhookUpdates.uber_delivery_id = deliveryId;
+      // S'assurer que delivery_provider est toujours correctement défini
+      // quand on met à jour via un delivery_id Uber valide
+      webhookUpdates.delivery_provider = "uber_direct";
     }
     if (courierImminent !== undefined) {
       webhookUpdates.uber_courier_imminent = courierImminent;
     }
     await Order.findByIdAndUpdate(order._id, webhookUpdates);
-    logWebhook("Commande mise a jour depuis webhook", {
-      ...webhookMeta,
-      order_id: order._id,
-      mapped_order_status: mappedStatus,
-      delivery_provider: order?.delivery_provider ?? null,
-      courier_imminent:
-        webhookUpdates.uber_courier_imminent === undefined
-          ? null
-          : Boolean(webhookUpdates.uber_courier_imminent),
-      updated_fields: Object.keys(webhookUpdates),
-    });
+
 
     if (mappedStatus && mappedStatus !== order.status) {
       const { error } = await updateStatusService(order._id, mappedStatus);
       if (error) {
-        logWebhook("Echec mise a jour du statut commande", {
-          ...webhookMeta,
-          order_id: order._id,
-          mapped_order_status: mappedStatus,
-          error,
-        });
+
         return res.status(500).json({
           success: false,
           message: error,
         });
       }
-      logWebhook("Statut commande synchronise avec Uber", {
-        ...webhookMeta,
-        order_id: order._id,
-        old_order_status: order.status,
-        new_order_status: mappedStatus,
-      });
+
+
     }
 
-    logWebhook("Webhook traite avec succes", {
-      ...webhookMeta,
-      order_id: order._id,
-    });
+
     return res.status(200).json({
       success: true,
       message: "Webhook processed successfully.",

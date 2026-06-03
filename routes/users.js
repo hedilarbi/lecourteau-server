@@ -27,6 +27,7 @@ const {
   getDuplicatePhoneAccounts,
   normalizePhoneNumbers,
   cleanupDuplicatePhones,
+  forceMergeAccounts,
 } = require("../controllers/users");
 const router = express.Router();
 
@@ -34,6 +35,7 @@ router.get("/seed/referral-codes", seedReferralCodes);
 router.get("/admin/duplicate-phones", getDuplicatePhoneAccounts);
 router.put("/admin/normalize-phones", normalizePhoneNumbers);
 router.put("/admin/cleanup-duplicate-phones", cleanupDuplicatePhones);
+router.put("/admin/force-merge-accounts", forceMergeAccounts);
 router.get("/", getUsers);
 router.get("/pagination", getUsersPagination);
 router.get("/userByToken", getUserByToken);

@@ -41,6 +41,8 @@ const {
 } = require("../services/usersServices/addToFavoritesService");
 const User = require("../models/User");
 const Order = require("../models/Order");
+const Stripe = require("stripe");
+const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, { apiVersion: "2023-08-16" });
 const generateRandomCode = require("../utils/generateOrderCode");
 const {
   resolveDateRange,
@@ -740,6 +742,99 @@ const normalizePhoneNumbers = async (req, res) => {
   }
 };
 
+const forceMergeAccounts = async (req, res) => {
+  const { masterId, duplicateId } = req.body;
+  const dryRun = req.query.dry !== "false";
+
+  if (!masterId || !duplicateId) {
+    return res.status(400).json({ success: false, error: "masterId et duplicateId sont requis." });
+  }
+  if (String(masterId) === String(duplicateId)) {
+    return res.status(400).json({ success: false, error: "masterId et duplicateId doivent être différents." });
+  }
+
+  try {
+    const [master, duplicate] = await Promise.all([
+      User.findById(masterId).lean(),
+      User.findById(duplicateId).lean(),
+    ]);
+
+    if (!master) return res.status(404).json({ success: false, error: "Compte master introuvable." });
+    if (!duplicate) return res.status(404).json({ success: false, error: "Compte doublon introuvable." });
+
+    const duplicateOrdersCount = Array.isArray(duplicate.orders) ? duplicate.orders.length : 0;
+    const duplicateFidelityPoints = Number(duplicate.fidelity_points) || 0;
+    const duplicateSubId = duplicate.subscriptionStripeSubscriptionId || null;
+
+    const isActiveSubscription = (user) => {
+      const status = String(user.subscriptionStatus || "").toLowerCase().trim();
+      const statusActive = status === "active" || status === "trialing";
+      if (!statusActive) return false;
+      const periodEnd = user.subscriptionCurrentPeriodEnd
+        ? new Date(user.subscriptionCurrentPeriodEnd)
+        : null;
+      if (!periodEnd || isNaN(periodEnd.getTime())) return true;
+      return periodEnd.getTime() > Date.now();
+    };
+
+    const duplicateHasActiveSub = isActiveSubscription(duplicate);
+
+    let stripeCancelResult = null;
+    if (duplicateHasActiveSub && duplicateSubId) {
+      if (!dryRun) {
+        try {
+          const canceled = await stripe.subscriptions.cancel(duplicateSubId);
+          stripeCancelResult = { canceled: true, subscriptionId: duplicateSubId, status: canceled.status };
+        } catch (stripeErr) {
+          return res.status(500).json({
+            success: false,
+            error: `Échec annulation Stripe (${duplicateSubId}): ${stripeErr.message}`,
+          });
+        }
+      } else {
+        stripeCancelResult = { canceled: false, dryRun: true, subscriptionId: duplicateSubId };
+      }
+    }
+
+    const preview = {
+      dryRun,
+      master: { _id: master._id, phone_number: master.phone_number, ordersCount: Array.isArray(master.orders) ? master.orders.length : 0 },
+      duplicate: { _id: duplicate._id, phone_number: duplicate.phone_number, ordersCount: duplicateOrdersCount, subscriptionCanceled: duplicateHasActiveSub },
+      ordersToReassign: duplicateOrdersCount,
+      fidelityPointsToTransfer: duplicateFidelityPoints,
+      stripeSubscriptionCanceled: stripeCancelResult,
+    };
+
+    if (!dryRun) {
+      // 1. Réassigner les commandes
+      if (duplicateOrdersCount > 0) {
+        await Order.updateMany({ user: duplicate._id }, { $set: { user: master._id } });
+      }
+
+      // 2. Fusionner les points de fidélité + normaliser le téléphone
+      const normalizePhone = (raw) => {
+        const digits = String(raw || "").replace(/\D/g, "");
+        if (digits.startsWith("11") && digits.length === 12) return "+" + digits.slice(1);
+        if (digits.startsWith("1") && digits.length === 11) return "+" + digits;
+        if (digits.length === 10) return "+1" + digits;
+        return digits ? "+" + digits : master.phone_number;
+      };
+
+      await User.findByIdAndUpdate(master._id, {
+        $inc: { fidelity_points: duplicateFidelityPoints },
+        $set: { phone_number: normalizePhone(master.phone_number) },
+      });
+
+      // 3. Supprimer le doublon
+      await User.findByIdAndDelete(duplicate._id);
+    }
+
+    res.status(200).json({ success: true, ...preview });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 const cleanupDuplicatePhones = async (req, res) => {
   const dryRun = req.query.dry !== "false";
 
@@ -952,4 +1047,5 @@ module.exports = {
   getDuplicatePhoneAccounts,
   normalizePhoneNumbers,
   cleanupDuplicatePhones,
+  forceMergeAccounts,
 };

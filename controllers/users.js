@@ -40,6 +40,7 @@ const {
   addToFavoritesService,
 } = require("../services/usersServices/addToFavoritesService");
 const User = require("../models/User");
+const Order = require("../models/Order");
 const generateRandomCode = require("../utils/generateOrderCode");
 const {
   resolveDateRange,
@@ -739,6 +740,191 @@ const normalizePhoneNumbers = async (req, res) => {
   }
 };
 
+const cleanupDuplicatePhones = async (req, res) => {
+  const dryRun = req.query.dry !== "false";
+
+  const normalizePhone = (raw) => {
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (digits.startsWith("11") && digits.length === 12) return "+" + digits.slice(1);
+    if (digits.startsWith("1") && digits.length === 11) return "+" + digits;
+    if (digits.length === 10) return "+1" + digits;
+    return digits ? "+" + digits : null;
+  };
+
+  const isActiveSubscription = (user) => {
+    const status = String(user.subscriptionStatus || "").toLowerCase().trim();
+    const statusActive = status === "active" || status === "trialing";
+    if (!statusActive) return false;
+    const periodEnd = user.subscriptionCurrentPeriodEnd
+      ? new Date(user.subscriptionCurrentPeriodEnd)
+      : null;
+    if (!periodEnd || isNaN(periodEnd.getTime())) return true;
+    return periodEnd.getTime() > Date.now();
+  };
+
+  try {
+    const users = await User.find({}, {
+      _id: 1, phone_number: 1, name: 1, email: 1, createdAt: 1,
+      is_profile_setup: 1, stripe_id: 1, fidelity_points: 1,
+      subscriptionStatus: 1, subscriptionIsActive: 1,
+      subscriptionStripeSubscriptionId: 1, subscriptionCurrentPeriodEnd: 1,
+      orders: 1,
+    }).lean();
+
+    // Group by normalized phone
+    const groups = new Map();
+    for (const user of users) {
+      const normalized = normalizePhone(user.phone_number);
+      if (!normalized) continue;
+      if (!groups.has(normalized)) groups.set(normalized, []);
+      groups.get(normalized).push(user);
+    }
+
+    const results = {
+      skipped_multi_subscriptions: [],
+      merged: [],
+      nothing_to_do: [],
+    };
+
+    const bulkOrderUpdates = [];
+    const userIdsToDelete = [];
+    const userUpdates = [];
+
+    for (const [normalizedPhone, accounts] of groups) {
+      if (accounts.length < 2) continue;
+
+      const ordersCount = (u) => Array.isArray(u.orders) ? u.orders.length : 0;
+
+      // Separate accounts with orders vs ghost accounts (0 orders)
+      const withOrders = accounts.filter((u) => ordersCount(u) > 0);
+      const ghosts = accounts.filter((u) => ordersCount(u) === 0);
+
+      // Check how many accounts with active subscription
+      const withActiveSub = withOrders.filter((u) => isActiveSubscription(u));
+      if (withActiveSub.length >= 2) {
+        results.skipped_multi_subscriptions.push({
+          normalizedPhone,
+          accounts: accounts.map((u) => ({
+            _id: u._id,
+            phone_number_raw: u.phone_number,
+            ordersCount: ordersCount(u),
+            subscriptionStatus: u.subscriptionStatus,
+            subscriptionStripeSubscriptionId: u.subscriptionStripeSubscriptionId,
+          })),
+        });
+        continue;
+      }
+
+      // Choose master
+      let master;
+      if (withOrders.length === 0) {
+        // All are ghosts — keep the oldest, delete the rest
+        const sorted = [...accounts].sort(
+          (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+        );
+        master = sorted[0];
+      } else if (withOrders.length === 1) {
+        master = withOrders[0];
+      } else {
+        // Multiple accounts with orders
+        // Prefer active subscription first
+        if (withActiveSub.length === 1) {
+          master = withActiveSub[0];
+        } else {
+          // No active subscription — pick highest ordersCount
+          master = withOrders.reduce((best, u) =>
+            ordersCount(u) > ordersCount(best) ? u : best,
+          withOrders[0]);
+        }
+      }
+
+      const toDelete = accounts.filter(
+        (u) => String(u._id) !== String(master._id)
+      );
+
+      // Accumulate fidelity points to transfer
+      const totalExtraPoints = toDelete.reduce(
+        (sum, u) => sum + (Number(u.fidelity_points) || 0),
+        0
+      );
+
+      const mergeEntry = {
+        normalizedPhone,
+        master: {
+          _id: master._id,
+          phone_number_raw: master.phone_number,
+          phone_number_normalized: normalizedPhone,
+          ordersCount: ordersCount(master),
+          subscriptionStatus: master.subscriptionStatus,
+          fidelity_points_before: Number(master.fidelity_points) || 0,
+          fidelity_points_after: (Number(master.fidelity_points) || 0) + totalExtraPoints,
+        },
+        deleted: toDelete.map((u) => ({
+          _id: u._id,
+          phone_number_raw: u.phone_number,
+          ordersCount: ordersCount(u),
+          fidelity_points_transferred: Number(u.fidelity_points) || 0,
+        })),
+      };
+      results.merged.push(mergeEntry);
+
+      if (!dryRun) {
+        // 1. Update orders: replace toDelete user IDs with master ID
+        for (const deleted of toDelete) {
+          if (ordersCount(deleted) > 0) {
+            bulkOrderUpdates.push({
+              updateMany: {
+                filter: { user: deleted._id },
+                update: { $set: { user: master._id } },
+              },
+            });
+          }
+          userIdsToDelete.push(deleted._id);
+        }
+
+        // 2. Update master: normalize phone + merge fidelity points
+        userUpdates.push({
+          updateOne: {
+            filter: { _id: master._id },
+            update: {
+              $set: { phone_number: normalizedPhone },
+              $inc: { fidelity_points: totalExtraPoints },
+            },
+          },
+        });
+      }
+    }
+
+    if (!dryRun) {
+      if (bulkOrderUpdates.length > 0) {
+        await Order.bulkWrite(bulkOrderUpdates);
+      }
+      if (userUpdates.length > 0) {
+        await User.bulkWrite(userUpdates);
+      }
+      if (userIdsToDelete.length > 0) {
+        await User.deleteMany({ _id: { $in: userIdsToDelete } });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      dryRun,
+      summary: {
+        groupsProcessed: results.merged.length,
+        groupsSkipped_multiSubscriptions: results.skipped_multi_subscriptions.length,
+        accountsDeleted: dryRun ? 0 : userIdsToDelete.length,
+        accountsWouldDelete: results.merged.reduce((sum, g) => sum + g.deleted.length, 0),
+        ordersReassigned: dryRun ? 0 : bulkOrderUpdates.length,
+      },
+      skipped_multi_subscriptions: results.skipped_multi_subscriptions,
+      merged: results.merged,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -765,4 +951,5 @@ module.exports = {
   seedReferralCodes,
   getDuplicatePhoneAccounts,
   normalizePhoneNumbers,
+  cleanupDuplicatePhones,
 };

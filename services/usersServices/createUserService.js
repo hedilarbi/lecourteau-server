@@ -2,9 +2,18 @@ const User = require("../../models/User");
 const generateToken = require("../../utils/generateToken");
 const generateRandomCode = require("../../utils/generateOrderCode");
 
+const normalizePhone = (raw) => {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.startsWith("11") && digits.length === 12) return "+" + digits.slice(1);
+  if (digits.startsWith("1") && digits.length === 11) return "+" + digits;
+  if (digits.length === 10) return "+1" + digits;
+  return "+" + digits;
+};
+
 const createUserService = async (phone_number) => {
   try {
-    const verifyPhone = await User.findOne({ phone_number });
+    const normalized = normalizePhone(phone_number);
+    const verifyPhone = await User.findOne({ phone_number: normalized });
 
     if (verifyPhone) {
       const token = generateToken(verifyPhone._id, verifyPhone.phone_number);
@@ -24,7 +33,7 @@ const createUserService = async (phone_number) => {
     }
 
     const newUser = new User({
-      phone_number,
+      phone_number: normalized,
       createdAt: new Date().toISOString(),
       is_profile_setup: false,
       referralCode,

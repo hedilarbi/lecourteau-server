@@ -84,8 +84,11 @@ const updateUser = async (req, res) => {
       date_of_birth,
       hasDateOfBirthField,
     );
+    if (error === "EMAIL_TAKEN") {
+      return res.status(409).json({ success: false, error: "EMAIL_TAKEN", message: "Cette adresse courriel est déjà utilisée." });
+    }
     if (error) {
-      return res.status(400).json(error);
+      return res.status(400).json({ success: false, error });
     }
     res.status(200).json(response);
   } catch (err) {
@@ -107,8 +110,11 @@ const setUserInfo = async (req, res) => {
       referralCode,
     );
 
+    if (error === "EMAIL_TAKEN") {
+      return res.status(409).json({ success: false, error: "EMAIL_TAKEN", message: "Cette adresse courriel est déjà utilisée." });
+    }
     if (error) {
-      return res.status(400).json(error);
+      return res.status(400).json({ success: false, error });
     }
     res.status(200).json(response);
   } catch (err) {
@@ -564,6 +570,175 @@ const seedReferralCodes = async (req, res) => {
   }
 };
 
+const getDuplicatePhoneAccounts = async (req, res) => {
+  try {
+    const users = await User.find({}, {
+      _id: 1,
+      phone_number: 1,
+      name: 1,
+      email: 1,
+      createdAt: 1,
+      is_profile_setup: 1,
+      subscriptionStatus: 1,
+      subscriptionStripeSubscriptionId: 1,
+      subscriptionCurrentPeriodEnd: 1,
+      stripe_id: 1,
+      orders: 1,
+    }).lean();
+
+    const normalizePhone = (raw) => {
+      const digits = String(raw || "").replace(/\D/g, "");
+      if (digits.startsWith("11") && digits.length === 12) return "+" + digits.slice(1);
+      if (digits.startsWith("1") && digits.length === 11) return "+" + digits;
+      if (digits.length === 10) return "+1" + digits;
+      return digits ? "+" + digits : null;
+    };
+
+    const groups = new Map();
+
+    for (const user of users) {
+      const normalized = normalizePhone(user.phone_number);
+      if (!normalized) continue;
+      if (!groups.has(normalized)) groups.set(normalized, []);
+      groups.get(normalized).push({ ...user, normalizedPhone: normalized });
+    }
+
+    const duplicates = [];
+    for (const [normalizedPhone, accounts] of groups) {
+      if (accounts.length < 2) continue;
+      accounts.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      duplicates.push({
+        normalizedPhone,
+        count: accounts.length,
+        accounts: accounts.map((u) => ({
+          _id: u._id,
+          phone_number_raw: u.phone_number,
+          name: u.name || null,
+          email: u.email || null,
+          createdAt: u.createdAt,
+          is_profile_setup: Boolean(u.is_profile_setup),
+          stripe_id: u.stripe_id || null,
+          subscriptionStatus: u.subscriptionStatus || null,
+          subscriptionStripeSubscriptionId: u.subscriptionStripeSubscriptionId || null,
+          subscriptionCurrentPeriodEnd: u.subscriptionCurrentPeriodEnd || null,
+          ordersCount: Array.isArray(u.orders) ? u.orders.length : 0,
+        })),
+      });
+    }
+
+    duplicates.sort((a, b) => b.count - a.count);
+
+    res.status(200).json({
+      success: true,
+      duplicateGroupsCount: duplicates.length,
+      duplicates,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const normalizePhoneNumbers = async (req, res) => {
+  const dryRun = req.query.dry !== "false";
+
+  try {
+    const users = await User.find({}, {
+      _id: 1,
+      phone_number: 1,
+      name: 1,
+      email: 1,
+      createdAt: 1,
+      is_profile_setup: 1,
+      subscriptionStatus: 1,
+      stripe_id: 1,
+      orders: 1,
+    }).lean();
+
+    const normalizePhone = (raw) => {
+      const digits = String(raw || "").replace(/\D/g, "");
+      if (digits.startsWith("11") && digits.length === 12) return "+" + digits.slice(1);
+      if (digits.startsWith("1") && digits.length === 11) return "+" + digits;
+      if (digits.length === 10) return "+1" + digits;
+      return digits ? "+" + digits : null;
+    };
+
+    const normalizedMap = new Map();
+    for (const user of users) {
+      const normalized = normalizePhone(user.phone_number);
+      if (!normalized) continue;
+      if (!normalizedMap.has(normalized)) normalizedMap.set(normalized, []);
+      normalizedMap.get(normalized).push(user);
+    }
+
+    const toUpdate = [];
+    const collisions = [];
+    const alreadyClean = [];
+
+    for (const user of users) {
+      const normalized = normalizePhone(user.phone_number);
+      if (!normalized) continue;
+
+      if (user.phone_number === normalized) {
+        alreadyClean.push({ _id: user._id, phone_number: user.phone_number });
+        continue;
+      }
+
+      const group = normalizedMap.get(normalized) || [];
+      const otherUsersWithSameNormalized = group.filter(
+        (u) => String(u._id) !== String(user._id),
+      );
+
+      const entry = {
+        _id: user._id,
+        phone_number_before: user.phone_number,
+        phone_number_after: normalized,
+        name: user.name || null,
+        email: user.email || null,
+        createdAt: user.createdAt,
+        is_profile_setup: Boolean(user.is_profile_setup),
+        subscriptionStatus: user.subscriptionStatus || null,
+        stripe_id: user.stripe_id || null,
+        ordersCount: Array.isArray(user.orders) ? user.orders.length : 0,
+      };
+
+      if (otherUsersWithSameNormalized.length > 0) {
+        collisions.push({
+          ...entry,
+          collidesWithIds: otherUsersWithSameNormalized.map((u) => String(u._id)),
+        });
+      } else {
+        toUpdate.push(entry);
+      }
+    }
+
+    if (!dryRun && toUpdate.length > 0) {
+      const bulkOps = toUpdate.map((u) => ({
+        updateOne: {
+          filter: { _id: u._id },
+          update: { $set: { phone_number: u.phone_number_after } },
+        },
+      }));
+      await User.bulkWrite(bulkOps);
+    }
+
+    res.status(200).json({
+      success: true,
+      dryRun,
+      summary: {
+        total: users.length,
+        alreadyClean: alreadyClean.length,
+        updated: dryRun ? 0 : toUpdate.length,
+        wouldUpdate: toUpdate.length,
+        collisions: collisions.length,
+      },
+      updated: toUpdate,
+      collisions,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -588,4 +763,6 @@ module.exports = {
   banUser,
   nullifyDefaultBirthdates,
   seedReferralCodes,
+  getDuplicatePhoneAccounts,
+  normalizePhoneNumbers,
 };

@@ -41,9 +41,18 @@ const updateUserService = async (
   hasDateOfBirthField = false,
 ) => {
   try {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (normalizedEmail) {
+      const emailTaken = await User.findOne({
+        email: normalizedEmail,
+        _id: { $ne: id },
+      }).select("_id").lean();
+      if (emailTaken) return { error: "EMAIL_TAKEN" };
+    }
+
     const updateData = {
       name,
-      email,
+      email: normalizedEmail || email,
     };
 
     if (hasDateOfBirthField) {

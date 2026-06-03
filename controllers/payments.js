@@ -285,6 +285,115 @@ const verifyPayment = async (req, res) => {
   }
 };
 
+const updatePaymentMethod = async (req, res) => {
+  const { paymentMethodId } = req.params;
+  const { exp_month, exp_year } = req.body;
+
+  if (!paymentMethodId || !exp_month || !exp_year) {
+    return res.status(400).json({ success: false, error: "paymentMethodId, exp_month et exp_year sont requis." });
+  }
+
+  const month = parseInt(exp_month, 10);
+  const year = parseInt(exp_year, 10);
+
+  if (month < 1 || month > 12 || year < new Date().getFullYear()) {
+    return res.status(400).json({ success: false, error: "Date d'expiration invalide." });
+  }
+
+  try {
+    const updated = await stripe.paymentMethods.update(paymentMethodId, {
+      card: { exp_month: month, exp_year: year },
+    });
+    res.status(200).json({ success: true, data: updated });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || "An error occurred while updating the payment method." });
+  }
+};
+
+const deletePaymentMethod = async (req, res) => {
+  const { paymentMethodId } = req.params;
+
+  if (!paymentMethodId) {
+    return res.status(400).json({ success: false, error: "paymentMethodId is required." });
+  }
+
+  try {
+    await stripe.paymentMethods.detach(paymentMethodId);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || "An error occurred while deleting the payment method." });
+  }
+};
+
+const attachPaymentMethod = async (req, res) => {
+  const { paymentMethodId, userId } = req.body;
+
+  if (!paymentMethodId || !userId) {
+    return res.status(400).json({ success: false, error: "paymentMethodId and userId are required." });
+  }
+
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found." });
+    }
+
+    let customerId = user.stripe_id;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({ email: user.email });
+      customerId = customer.id;
+      await User.findByIdAndUpdate(userId, { stripe_id: customerId });
+    }
+
+    const newPM = await stripe.paymentMethods.retrieve(paymentMethodId);
+    if (newPM.type !== "card" || !newPM.card) {
+      return res.status(400).json({ success: false, error: "Méthode de paiement invalide." });
+    }
+
+    const fp = newPM.card.fingerprint || null;
+    let existingPMToReuse = null;
+    let startingAfter = undefined;
+
+    do {
+      const list = await stripe.paymentMethods.list({
+        customer: customerId,
+        type: "card",
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+
+      for (const pm of list.data) {
+        const sameFingerprint = fp && pm.card && pm.card.fingerprint === fp;
+        const sameFallback =
+          !fp &&
+          pm.card &&
+          pm.card.last4 === newPM.card.last4 &&
+          pm.card.brand === newPM.card.brand &&
+          pm.card.exp_month === newPM.card.exp_month &&
+          pm.card.exp_year === newPM.card.exp_year;
+
+        if (sameFingerprint || sameFallback) {
+          existingPMToReuse = pm;
+          break;
+        }
+      }
+
+      if (existingPMToReuse || !list.has_more) break;
+      startingAfter = list.data[list.data.length - 1].id;
+    } while (true);
+
+    if (existingPMToReuse) {
+      return res.status(200).json({ success: true, data: existingPMToReuse });
+    }
+
+    const attached = await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+    res.status(200).json({ success: true, data: attached });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || "An error occurred while attaching the payment method." });
+  }
+};
+
 const catchError = (req, res) => {
   try {
     const { error, userId, source } = req.body;
@@ -319,4 +428,7 @@ module.exports = {
   catchError,
   confirmPayment,
   cancelPayment,
+  deletePaymentMethod,
+  attachPaymentMethod,
+  updatePaymentMethod,
 };

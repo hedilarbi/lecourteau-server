@@ -46,6 +46,15 @@ const setUserInfoService = async (
     const user = await User.findById(id);
     if (!user) return { error: "Utilisateur introuvable" };
 
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (normalizedEmail) {
+      const emailTaken = await User.findOne({
+        email: normalizedEmail,
+        _id: { $ne: id },
+      }).select("_id").lean();
+      if (emailTaken) return { error: "EMAIL_TAKEN" };
+    }
+
     const hasAddress =
       typeof address === "string" &&
       address.trim().length > 0 &&
@@ -55,7 +64,7 @@ const setUserInfoService = async (
     const updateQuery = {
       $set: {
         name: name,
-        email: email,
+        email: normalizedEmail || email,
         is_profile_setup: true,
         date_of_birth: normalizeDateOfBirth(date_of_birth),
       },

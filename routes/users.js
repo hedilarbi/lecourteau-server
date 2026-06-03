@@ -24,10 +24,14 @@ const {
   banUser,
   nullifyDefaultBirthdates,
   seedReferralCodes,
+  getDuplicatePhoneAccounts,
+  normalizePhoneNumbers,
 } = require("../controllers/users");
 const router = express.Router();
 
 router.get("/seed/referral-codes", seedReferralCodes);
+router.get("/admin/duplicate-phones", getDuplicatePhoneAccounts);
+router.put("/admin/normalize-phones", normalizePhoneNumbers);
 router.get("/", getUsers);
 router.get("/pagination", getUsersPagination);
 router.get("/userByToken", getUserByToken);

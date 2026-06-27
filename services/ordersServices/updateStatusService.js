@@ -1,20 +1,26 @@
 const { default: Expo } = require("expo-server-sdk");
 const { default: mongoose } = require("mongoose");
-const { IN_DELIVERY, DELIVERED, READY } = require("../../utils/constants");
+const {
+  IN_DELIVERY,
+  DELIVERED,
+  READY,
+  SCHEDULED,
+} = require("../../utils/constants");
 const Order = require("../../models/Order");
 
 const updateStatusService = async (id, status) => {
   try {
-    const response = await Order.findByIdAndUpdate(
-      id,
-      { status },
-      { new: true }
-    );
-
-    // Check if the order was found
-    if (!response) {
+    const existingOrder = await Order.findById(id).select("scheduled user");
+    if (!existingOrder) {
       return { error: "Order not found" };
     }
+
+    const update = { status };
+    if (existingOrder?.scheduled?.isScheduled) {
+      update["scheduled.processed"] = status !== SCHEDULED;
+    }
+
+    const response = await Order.findByIdAndUpdate(id, update, { new: true });
 
     const user = await mongoose.models.User.findById(response.user);
 

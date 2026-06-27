@@ -25,7 +25,7 @@ const buildDueScheduledOrdersQuery = ({ restaurantId } = {}) => {
     confirmed: true,
     status: SCHEDULED,
     "scheduled.isScheduled": true,
-    "scheduled.processed": false,
+    "scheduled.processed": { $ne: true },
     "scheduled.scheduledFor": { $ne: null },
     $or: [
       {

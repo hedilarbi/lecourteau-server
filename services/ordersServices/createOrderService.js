@@ -47,17 +47,11 @@ const roundMoney = (value, fallback = 0) => {
 
 const normalizeId = (value) => String(value || "").trim();
 
-const buildOrderItemsSubtotal = (items = []) =>
-  roundMoney(
-    items.reduce((sum, item) => sum + toSafeNumber(item?.price, 0), 0),
-    0,
-  );
+const PROMO_ALWAYS_EXCLUDED_CATEGORY_NAME = "promos";
 
-const buildOrderOffersSubtotal = (offers = []) =>
-  roundMoney(
-    offers.reduce((sum, offer) => sum + toSafeNumber(offer?.price, 0), 0),
-    0,
-  );
+const isPromosCategory = (category) =>
+  String(category?.name || "").trim().toLowerCase() ===
+  PROMO_ALWAYS_EXCLUDED_CATEGORY_NAME;
 
 const getPromoExcludedCategoryIds = (promoCode) => {
   if (!Array.isArray(promoCode?.excludedCategories)) return [];
@@ -74,86 +68,35 @@ const getPromoExcludedCategoryIds = (promoCode) => {
 const getPromoLegacyIncludedCategoryId = (promoCode) =>
   normalizeId(promoCode?.category?._id || promoCode?.category);
 
-const getOfferCategoryIds = (offerDocument) => {
-  const items = Array.isArray(offerDocument?.items) ? offerDocument.items : [];
-
-  return items
-    .map((entry) =>
-      normalizeId(entry?.item?.category?._id || entry?.item?.category),
-    )
-    .filter(Boolean);
-};
-
-const isOfferEligibleForPromo = ({
-  offerDocument,
-  promoExcludedCategoryIds = [],
-  legacyIncludedCategoryId = "",
-}) => {
-  if (!offerDocument) return false;
-
-  const offerCategoryIds = getOfferCategoryIds(offerDocument);
-
-  if (promoExcludedCategoryIds.length) {
-    return !offerCategoryIds.some((categoryId) =>
-      promoExcludedCategoryIds.includes(categoryId),
-    );
-  }
-
-  if (legacyIncludedCategoryId) {
-    return offerCategoryIds.includes(legacyIncludedCategoryId);
-  }
-
-  return true;
-};
-
-const calculatePromoEligibleSubtotal = (
-  promoCode,
-  orderItems,
-  menuItemsById,
-  offers = [],
-  offerDocumentsById = new Map(),
-) => {
+// Offers and menu items in the "Promos" category are never eligible for a
+// promo code discount, regardless of how the promo code itself is configured.
+const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) => {
   const promoExcludedCategoryIds = getPromoExcludedCategoryIds(promoCode);
   const legacyIncludedCategoryId = getPromoLegacyIncludedCategoryId(promoCode);
-
-  if (!promoExcludedCategoryIds.length && !legacyIncludedCategoryId) {
-    return roundMoney(
-      buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers),
-      0,
-    );
-  }
 
   const itemsEligibleSubtotal = orderItems.reduce((sum, orderItem) => {
     const menuItem = menuItemsById.get(normalizeId(orderItem?.item));
     if (!menuItem) return sum;
+    if (isPromosCategory(menuItem?.category)) return sum;
 
-    const menuItemCategoryId = normalizeId(menuItem?.category);
+    const menuItemCategoryId = normalizeId(
+      menuItem?.category?._id || menuItem?.category,
+    );
     if (promoExcludedCategoryIds.length) {
       if (promoExcludedCategoryIds.includes(menuItemCategoryId)) {
         return sum;
       }
-    } else if (menuItemCategoryId !== legacyIncludedCategoryId) {
+    } else if (
+      legacyIncludedCategoryId &&
+      menuItemCategoryId !== legacyIncludedCategoryId
+    ) {
       return sum;
     }
 
     return sum + toSafeNumber(orderItem?.price, 0);
   }, 0);
-  const offersEligibleSubtotal = offers.reduce((sum, offer) => {
-    const offerDocument = offerDocumentsById.get(normalizeId(offer?.offer));
-    if (
-      !isOfferEligibleForPromo({
-        offerDocument,
-        promoExcludedCategoryIds,
-        legacyIncludedCategoryId,
-      })
-    ) {
-      return sum;
-    }
 
-    return sum + toSafeNumber(offer?.price, 0);
-  }, 0);
-
-  return roundMoney(itemsEligibleSubtotal + offersEligibleSubtotal, 0);
+  return roundMoney(itemsEligibleSubtotal, 0);
 };
 
 const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal) => {
@@ -805,40 +748,21 @@ const createOrderService = async (order, options = {}) => {
               .filter((itemId) => Boolean(itemId)),
           ),
         ];
-        const orderOfferIds = [
-          ...new Set(
-            offers
-              .map((offer) => normalizeId(offer?.offer))
-              .filter((offerId) => Boolean(offerId)),
-          ),
-        ];
         const relatedMenuItems = orderMenuItemIds.length
           ? await mongoose.models.MenuItem.find({
               _id: { $in: orderMenuItemIds },
             })
               .select("_id category")
-              .lean()
-          : [];
-        const relatedOffers = orderOfferIds.length
-          ? await mongoose.models.Offer.find({
-              _id: { $in: orderOfferIds },
-            })
-              .select("_id items")
-              .populate({ path: "items.item", select: "category" })
+              .populate({ path: "category", select: "name" })
               .lean()
           : [];
         const menuItemsById = new Map(
           relatedMenuItems.map((item) => [normalizeId(item?._id), item]),
         );
-        const offersById = new Map(
-          relatedOffers.map((offer) => [normalizeId(offer?._id), offer]),
-        );
         const eligibleSubtotal = calculatePromoEligibleSubtotal(
           promoCodeDocument,
           orderItems,
           menuItemsById,
-          offers,
-          offersById,
         );
 
         if (eligibleSubtotal <= 0) {

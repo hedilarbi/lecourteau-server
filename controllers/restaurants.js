@@ -1,5 +1,6 @@
 const e = require("cors");
 const Restaurant = require("../models/Restaurant");
+const App = require("../models/App");
 const {
   createRestaurantService,
 } = require("../services/restaurantsServices/createRestaurantService");
@@ -344,17 +345,49 @@ const getRestaurantOrders = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+// source "desktop" is never gated: only ios/android builds carry the appVersion check.
+// A missing/unrecognized source means the request comes from a build that predates
+// this check entirely, so it's treated the same as an outdated version.
+const isAppVersionAllowed = async ({ source, appVersion }) => {
+  if (source === "desktop") return true;
+
+  if (source !== "ios" && source !== "android") {
+    return false;
+  }
+
+  if (!appVersion) {
+    return false;
+  }
+
+  const app = await App.findOne();
+  const requiredVersion =
+    source === "android" ? app?.appVersion : app?.iosAppVersion;
+
+  return Boolean(requiredVersion) && appVersion === requiredVersion;
+};
+
 const checkRestaurantOrderAvailability = async (req, res) => {
   const { id } = req.params;
 
   try {
+    const versionAllowed = await isAppVersionAllowed(req.body || {});
+    if (!versionAllowed) {
+      return res.status(426).json({
+        success: false,
+        message:
+          "Impossible de passer la commande. Veuillez mettre à jour votre application.",
+      });
+    }
+
     const { response, error } = await checkRestaurantOrderAvailabilityService(
       id,
       req.body || {},
     );
 
     if (error) {
-      if (String(error?.message || error) === "Restaurant not found") {
+      const errorCode = String(error?.message || error);
+
+      if (errorCode === "Restaurant not found") {
         return res
           .status(404)
           .json({ success: false, message: "Restaurant not found." });

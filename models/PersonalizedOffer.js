@@ -44,6 +44,18 @@ const personalizedOfferSchema = new Schema({
     ref: "MenuItem",
     default: null,
   },
+  freeItems: [
+    {
+      item: {
+        type: Schema.Types.ObjectId,
+        ref: "MenuItem",
+      },
+      size: {
+        type: String,
+        required: true,
+      },
+    },
+  ],
   scheduledNotifyAt: {
     type: Date,
     required: true,

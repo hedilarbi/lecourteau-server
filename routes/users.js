@@ -23,13 +23,15 @@ const {
   getUsersPagination,
   banUser,
   nullifyDefaultBirthdates,
-
+  populateAppInstalledFields,
 } = require("../controllers/users");
 const router = express.Router();
 
 router.get("/", getUsers);
 router.get("/pagination", getUsersPagination);
 router.get("/userByToken", getUserByToken);
+router.get("/admin/populate-app-installed", populateAppInstalledFields);
+
 router.put("/admin/nullify-default-birthdates", nullifyDefaultBirthdates);
 router.put("/update/discount", updateUserDiscount);
 router.post("/create", createUser);

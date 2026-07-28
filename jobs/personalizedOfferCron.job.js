@@ -131,30 +131,17 @@ const findItemFromCategoryKeyword = async (keyword, allCategories, allMenuItems)
 // ─── 1. Nightly Scan: prepareDailyOffersJob (00:00 every day) ────────────────
 const STRATEGIES_DEFAULTS = [
   {
-    strategyId: 1,
-    segment: "normal",
-    group: "ACQUISITION",
-    priority: 100,
-    cooldownDays: 9999, // Unique
-    validityHours: 72,
-    offerType: "discount_order",
-    discountValue: 20,
-    bonusThreshold: 20,
-    notificationTitle: "🍔 Une petite faim ? Profite de 20% sur ta première commande !",
-    notificationBody: "Profite de 20% de rabais sur ta première commande dès 20$ (max 8$ de rabais)."
-  },
-  {
     strategyId: 2,
     segment: "normal",
     group: "HABITUDE",
     priority: 98,
     cooldownDays: 9999,
     validityHours: 72,
-    offerType: "free_delivery",
-    discountValue: 0,
+    offerType: "discount_order",
+    discountValue: 15,
     bonusThreshold: 20,
-    notificationTitle: "🚗 On remet ça ? Livraison offerte pour 72 h !",
-    notificationBody: "Livraison offerte sur ta deuxième commande dès 20$ d'achat."
+    notificationTitle: "🎁 On remet ça ? 15% de rabais sur ta 2e commande !",
+    notificationBody: "Profite de 15% de rabais sur ta deuxième commande dès 20$ d'achat."
   },
   {
     strategyId: 3,
@@ -228,11 +215,11 @@ const STRATEGIES_DEFAULTS = [
     priority: 68,
     cooldownDays: 10,
     validityHours: 48,
-    offerType: "free_delivery",
-    discountValue: 0,
+    offerType: "discount_order",
+    discountValue: 10,
     bonusThreshold: 25,
-    notificationTitle: "👀 Ça fait un petit bout ! Livraison offerte pour ton retour.",
-    notificationBody: "Livraison gratuite sur ta prochaine commande dès 25$."
+    notificationTitle: "👀 Ça fait un petit bout ! 10% de rabais pour ton retour.",
+    notificationBody: "Profite de 10% de rabais sur ta prochaine commande dès 25$."
   },
   {
     strategyId: 9,
@@ -258,7 +245,7 @@ const STRATEGIES_DEFAULTS = [
     discountValue: 20,
     bonusThreshold: 25,
     notificationTitle: "🔥 Reviens nous voir : 20% de rabais pour 48 h !",
-    notificationBody: "Profite de 20% de rabais sur ta commande dès 25$ (max 10$ de rabais)."
+    notificationBody: "Profite de 20% de rabais sur ta commande dès 25$."
   },
   {
     strategyId: 11,
@@ -271,7 +258,7 @@ const STRATEGIES_DEFAULTS = [
     discountValue: 25,
     bonusThreshold: 25,
     notificationTitle: "😋 Ça fait longtemps ! 25% pour ton retour chez Courteau.",
-    notificationBody: "Bénéficie de 25% de rabais sur ta commande dès 25$ (max 12$ de rabais)."
+    notificationBody: "Bénéficie de 25% de rabais sur ta commande dès 25$."
   },
   {
     strategyId: 12,
@@ -349,7 +336,7 @@ const STRATEGIES_DEFAULTS = [
     discountValue: 10,
     bonusThreshold: 25,
     notificationTitle: "🍽️ On connaît ton faible… une offre {category} t'attend !",
-    notificationBody: "Profite de 10% de réduction sur ta catégorie préférée dès 25$ (max 6$ de rabais)."
+    notificationBody: "Profite de 10% de réduction sur ta catégorie préférée dès 25$."
   },
   {
     strategyId: 18,
@@ -366,11 +353,19 @@ const STRATEGIES_DEFAULTS = [
   }
 ];
 
-const prepareDailyOffersJob = async () => {
-  console.log("[prepareDailyOffersJob] Starting nightly Smart Offers job...");
+const prepareDailyOffersJob = async (isManualTrigger = false) => {
+  console.log("[prepareDailyOffersJob] Starting Smart Offers scan job...");
   const jobStart = Date.now();
 
   try {
+    if (!isManualTrigger) {
+      const cronStat = await SystemStat.findOne({ key: "smartOfferCronEnabled" }).lean();
+      const cronEnabled = cronStat?.value !== undefined ? Boolean(cronStat.value) : true;
+      if (!cronEnabled) {
+        console.log("[prepareDailyOffersJob] ⏸️ Smart Offer Cron is currently DISABLED in settings. Skipping nightly scan.");
+        return;
+      }
+    }
     // Drop the old segment unique index if it exists in MongoDB
     try {
       await mongoose.connection.db.collection("smartofferrules").dropIndex("segment_1");
@@ -424,6 +419,45 @@ const prepareDailyOffersJob = async () => {
         { upsert: true }
       );
       console.log(`[prepareDailyOffersJob] Top category computed: ${topCategoryDoc.name}`);
+    }
+
+    // Purge obsolete strategyId 1 (S01 - Bienvenue 1re commande) if present
+    await SmartOfferRule.deleteMany({ strategyId: 1 });
+    await PersonalizedOffer.deleteMany({ strategyId: 1, status: { $in: ["prepared", "active", "viewed", "clicked"] } });
+
+    // Update S02 if present with old free_delivery offerType
+    await SmartOfferRule.updateOne(
+      { strategyId: 2, offerType: "free_delivery" },
+      {
+        $set: {
+          offerType: "discount_order",
+          discountValue: 15,
+          bonusThreshold: 20,
+          notificationTitle: "🎁 On remet ça ? 15% de rabais sur ta 2e commande !",
+          notificationBody: "Profite de 15% de rabais sur ta deuxième commande dès 20$ d'achat."
+        }
+      }
+    );
+
+    // Sync all prepared/active PersonalizedOffers with latest DB SmartOfferRule values
+    const activeDbRules = await SmartOfferRule.find().lean();
+    for (const ruleDoc of activeDbRules) {
+      await PersonalizedOffer.updateMany(
+        { strategyId: ruleDoc.strategyId, status: { $in: ["prepared", "active", "viewed", "clicked"] } },
+        {
+          $set: {
+            discountValue: ruleDoc.discountValue,
+            bonusThreshold: ruleDoc.bonusThreshold,
+            offerType: ruleDoc.offerType,
+            targetCategory: ruleDoc.targetCategory || null,
+            targetMenuItem: ruleDoc.targetMenuItem || null,
+            freeItem: ruleDoc.freeItems?.length > 0 ? null : ruleDoc.freeItem || null,
+            freeItems: ruleDoc.freeItems || [],
+            notificationTitle: ruleDoc.notificationTitle,
+            notificationBody: ruleDoc.notificationBody
+          }
+        }
+      );
     }
 
     // Seed rules if missing
@@ -525,7 +559,16 @@ const prepareDailyOffersJob = async () => {
       // ── R15: Cancel/expire obsolete prepared/active offers if they ordered ──
       const activeOffers = await PersonalizedOffer.find({
         user: { $in: userIds },
-        status: { $in: ["prepared", "active", "viewed", "clicked"] }
+        $or: [
+          { status: "prepared" },
+          {
+            status: { $in: ["active", "viewed", "clicked"] },
+            $or: [
+              { validUntil: { $gt: now } },
+              { validUntil: null },
+            ],
+          },
+        ],
       }).lean();
 
       const usersWithActiveOffer = new Set();
@@ -688,11 +731,54 @@ const prepareDailyOffersJob = async () => {
             if (stratOffers.length === 0) return true;
             stratOffers.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             const last = stratOffers[0];
-            if (["applied", "expired"].includes(last.status)) {
-              const diffDays = (Date.now() - new Date(last.updatedAt).getTime()) / 86400000;
+            const hasValidityExpired =
+              last.validUntil && new Date(last.validUntil).getTime() <= now.getTime();
+            const effectiveStatus = hasValidityExpired ? "expired" : last.status;
+
+            if (["applied", "expired"].includes(effectiveStatus)) {
+              // For an expired offer, the cooldown starts when the offer actually
+              // stopped being valid, not when a later cron happened to update its
+              // status (and therefore updatedAt).
+              const cooldownStartedAt = effectiveStatus === "expired" && last.validUntil
+                ? last.validUntil
+                : last.updatedAt;
+              const diffDays = (now.getTime() - new Date(cooldownStartedAt).getTime()) / 86400000;
               return diffDays >= cooldownDays;
             }
             return false;
+          };
+
+          const getStrategyConfig = (strategyId) => {
+            const defaultStrat = STRATEGIES_DEFAULTS.find(d => d.strategyId === strategyId) || {};
+            const dbRule = ruleByStrategyId[strategyId];
+
+            if (dbRule && dbRule.isActive === false) {
+              return null;
+            }
+
+            if (dbRule) {
+              return {
+                ...defaultStrat,
+                ...dbRule,
+                strategyId,
+                offerType: dbRule.offerType || defaultStrat.offerType,
+                discountValue: dbRule.discountValue !== undefined ? dbRule.discountValue : defaultStrat.discountValue,
+                bonusThreshold: dbRule.bonusThreshold !== undefined ? dbRule.bonusThreshold : defaultStrat.bonusThreshold,
+                cooldownDays: dbRule.cooldownDays !== undefined ? dbRule.cooldownDays : defaultStrat.cooldownDays,
+                validityHours: dbRule.validityHours !== undefined ? dbRule.validityHours : defaultStrat.validityHours,
+                notificationTitle: dbRule.notificationTitle || defaultStrat.notificationTitle,
+                notificationBody: dbRule.notificationBody || defaultStrat.notificationBody,
+                priority: dbRule.priority !== undefined ? dbRule.priority : defaultStrat.priority,
+                freeItem: dbRule.freeItems?.length > 0
+                  ? null
+                  : dbRule.freeItem || defaultStrat.freeItem,
+                freeItems: dbRule.freeItems?.length > 0 ? dbRule.freeItems : (defaultStrat.freeItems || []),
+                targetCategory: dbRule.targetCategory || defaultStrat.targetCategory,
+                targetMenuItem: dbRule.targetMenuItem || defaultStrat.targetMenuItem,
+              };
+            }
+
+            return defaultStrat;
           };
 
           // S18 — Découverte: check if user has never ordered in the top restaurant category
@@ -705,116 +791,124 @@ const prepareDailyOffersJob = async () => {
             );
           }
 
-          // S01
-          if (orderCount === 0 && accountAgeDays >= 1) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 1);
-            if (getStrategyCooldownPassed(1, strat.cooldownDays)) {
-              candidates.push({ ...strat, score: strat.priority });
-            }
-          }
           // S02
           if (orderCount === 1 && recencyDays >= 4) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 2);
-            if (getStrategyCooldownPassed(2, strat.cooldownDays)) {
+            const strat = getStrategyConfig(2);
+            if (strat && getStrategyCooldownPassed(2, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S03
           if (orderCount === 2 && recencyDays >= 7) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 3);
-            if (getStrategyCooldownPassed(3, strat.cooldownDays)) {
+            const strat = getStrategyConfig(3);
+            if (strat && getStrategyCooldownPassed(3, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S04
-          if (ordersLast30d === 3 && cachedDessertItem) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 4);
-            if (getStrategyCooldownPassed(4, strat.cooldownDays)) {
-              candidates.push({ ...strat, freeItem: cachedDessertItem._id, targetCategory: cachedDessertItem.category, score: strat.priority });
+          if (ordersLast30d === 3) {
+            const strat = getStrategyConfig(4);
+            if (strat && getStrategyCooldownPassed(4, strat.cooldownDays)) {
+              const freeItem = strat.freeItem || cachedDessertItem?._id;
+              const targetCat = strat.targetCategory || cachedDessertItem?.category;
+              if (freeItem) {
+                candidates.push({ ...strat, freeItem, targetCategory: targetCat, score: strat.priority });
+              }
             }
           }
           // S05
           if (ordersLast30d === 4) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 5);
-            if (getStrategyCooldownPassed(5, strat.cooldownDays)) {
+            const strat = getStrategyConfig(5);
+            if (strat && getStrategyCooldownPassed(5, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S06
-          if (ordersLast30d >= 5 && ordersLast30d <= 7 && (cachedDessertItem || cachedDrinkItem)) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 6);
-            if (getStrategyCooldownPassed(6, strat.cooldownDays)) {
-              const item = cachedDessertItem || cachedDrinkItem;
-              candidates.push({ ...strat, freeItem: item._id, targetCategory: item.category, score: strat.priority });
+          if (ordersLast30d >= 5 && ordersLast30d <= 7) {
+            const strat = getStrategyConfig(6);
+            if (strat && getStrategyCooldownPassed(6, strat.cooldownDays)) {
+              const item = strat.freeItem || cachedDessertItem?._id || cachedDrinkItem?._id;
+              const cat = strat.targetCategory || cachedDessertItem?.category || cachedDrinkItem?.category;
+              if (item) {
+                candidates.push({ ...strat, freeItem: item, targetCategory: cat, score: strat.priority });
+              }
             }
           }
           // S07
-          if (ordersLast30d >= 8 && cachedDessertItem) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 7);
-            if (getStrategyCooldownPassed(7, strat.cooldownDays)) {
-              candidates.push({ ...strat, freeItem: cachedDessertItem._id, targetCategory: cachedDessertItem.category, score: strat.priority });
+          if (ordersLast30d >= 8) {
+            const strat = getStrategyConfig(7);
+            if (strat && getStrategyCooldownPassed(7, strat.cooldownDays)) {
+              const freeItem = strat.freeItem || cachedDessertItem?._id;
+              const targetCat = strat.targetCategory || cachedDessertItem?.category;
+              if (freeItem) {
+                candidates.push({ ...strat, freeItem, targetCategory: targetCat, score: strat.priority });
+              }
             }
           }
           // S08
           if (recencyDays >= 10 && recencyDays <= 17 && orderCount >= 2) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 8);
-            if (getStrategyCooldownPassed(8, strat.cooldownDays)) {
+            const strat = getStrategyConfig(8);
+            if (strat && getStrategyCooldownPassed(8, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S09
           if (recencyDays >= 18 && recencyDays <= 29 && orderCount >= 1) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 9);
-            if (getStrategyCooldownPassed(9, strat.cooldownDays)) {
+            const strat = getStrategyConfig(9);
+            if (strat && getStrategyCooldownPassed(9, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S10
           if (recencyDays >= 30 && recencyDays <= 59 && orderCount >= 1) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 10);
-            if (getStrategyCooldownPassed(10, strat.cooldownDays)) {
+            const strat = getStrategyConfig(10);
+            if (strat && getStrategyCooldownPassed(10, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S11
           if (recencyDays >= 60 && recencyDays <= 89 && orderCount >= 1) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 11);
-            if (getStrategyCooldownPassed(11, strat.cooldownDays)) {
+            const strat = getStrategyConfig(11);
+            if (strat && getStrategyCooldownPassed(11, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S12
           if (recencyDays >= 90 && orderCount >= 1) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 12);
-            if (getStrategyCooldownPassed(12, strat.cooldownDays)) {
+            const strat = getStrategyConfig(12);
+            if (strat && getStrategyCooldownPassed(12, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S13
           if (ordersLast90d >= 3 && avgBasket90d < 20) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 13);
-            if (getStrategyCooldownPassed(13, strat.cooldownDays)) {
+            const strat = getStrategyConfig(13);
+            if (strat && getStrategyCooldownPassed(13, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S14
-          if (ordersLast90d >= 3 && avgBasket90d >= 20 && avgBasket90d < 35 && cachedDessertItem) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 14);
-            if (getStrategyCooldownPassed(14, strat.cooldownDays)) {
-              candidates.push({ ...strat, freeItem: cachedDessertItem._id, targetCategory: cachedDessertItem.category, score: strat.priority });
+          if (ordersLast90d >= 3 && avgBasket90d >= 20 && avgBasket90d < 35) {
+            const strat = getStrategyConfig(14);
+            if (strat && getStrategyCooldownPassed(14, strat.cooldownDays)) {
+              const freeItem = strat.freeItem || cachedDessertItem?._id;
+              const targetCat = strat.targetCategory || cachedDessertItem?.category;
+              if (freeItem) {
+                candidates.push({ ...strat, freeItem, targetCategory: targetCat, score: strat.priority });
+              }
             }
           }
           // S15
           if (ordersLast90d >= 3 && avgBasket90d >= 35 && avgBasket90d <= 50) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 15);
-            if (getStrategyCooldownPassed(15, strat.cooldownDays)) {
+            const strat = getStrategyConfig(15);
+            if (strat && getStrategyCooldownPassed(15, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
           // S16
           if (ordersLast90d >= 3 && avgBasket90d > 50) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 16);
-            if (getStrategyCooldownPassed(16, strat.cooldownDays)) {
+            const strat = getStrategyConfig(16);
+            if (strat && getStrategyCooldownPassed(16, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
@@ -830,11 +924,11 @@ const prepareDailyOffersJob = async () => {
             }
             if (dominantCatId) {
               const dominantCat = allCategories.find(c => String(c._id) === dominantCatId);
-              const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 17);
-              if (dominantCat && getStrategyCooldownPassed(17, strat.cooldownDays)) {
+              const strat = getStrategyConfig(17);
+              if (strat && dominantCat && getStrategyCooldownPassed(17, strat.cooldownDays)) {
                 candidates.push({
                   ...strat,
-                  targetCategory: dominantCat._id,
+                  targetCategory: strat.targetCategory || dominantCat._id,
                   categoryName: dominantCat.name,
                   score: strat.priority
                 });
@@ -843,11 +937,11 @@ const prepareDailyOffersJob = async () => {
           }
           // S18 — Discovery: user never ordered in restaurant's top category
           if (orderCount >= 3 && topCategoryForDiscovery && !userHasOrderedTopCat) {
-            const strat = STRATEGIES_DEFAULTS.find(d => d.strategyId === 18);
+            const strat = getStrategyConfig(18);
             if (strat && getStrategyCooldownPassed(18, strat.cooldownDays)) {
               candidates.push({
                 ...strat,
-                targetCategory: topCategoryForDiscovery._id,
+                targetCategory: strat.targetCategory || topCategoryForDiscovery._id,
                 categoryName: topCategoryForDiscovery.name,
                 score: strat.priority
               });
@@ -897,22 +991,6 @@ const prepareDailyOffersJob = async () => {
             const limit = [1, 2, 3, 4].includes(c.strategyId) ? 3 : 2;
             return redeemedCount30d < limit;
           });
-
-          // ── R13/R14: Push Notification Fatigue (Max 1/48h, Max 3/7d) ──────────
-          const pushOffers48h = userOffers.filter(o => {
-            if (!o.scheduledNotifyAt) return false;
-            const diffDays = (Date.now() - new Date(o.scheduledNotifyAt).getTime()) / 86400000;
-            return diffDays >= 0 && diffDays <= 2;
-          });
-          const pushOffers7d = userOffers.filter(o => {
-            if (!o.scheduledNotifyAt) return false;
-            const diffDays = (Date.now() - new Date(o.scheduledNotifyAt).getTime()) / 86400000;
-            return diffDays >= 0 && diffDays <= 7;
-          });
-
-          if (pushOffers48h.length > 0 || pushOffers7d.length >= 3) {
-            filtered = [];
-          }
 
           // Filter by rules active state
           filtered = filtered.filter(c => {
@@ -967,6 +1045,11 @@ const prepareDailyOffersJob = async () => {
           const finalTitle    = personalizeText(templateTitle, user, offerDetails);
           const finalBody     = personalizeText(templateBody,  user, offerDetails);
 
+          const selectedFreeItems =
+            rule?.freeItems?.length > 0
+              ? rule.freeItems
+              : selected.freeItems || [];
+
           newOffersToInsert.push({
             user:              user._id,
             rule:              rule?._id || null,
@@ -976,7 +1059,8 @@ const prepareDailyOffersJob = async () => {
             bonusThreshold:    selected.bonusThreshold || 0,
             targetCategory:    selected.targetCategory || null,
             targetMenuItem:    selected.targetMenuItem || null,
-            freeItem:          selected.freeItem       || null,
+            freeItem:          selectedFreeItems.length > 0 ? null : selected.freeItem || null,
+            freeItems:         selectedFreeItems,
             scheduledNotifyAt,
             notificationTitle: finalTitle,
             notificationBody:  finalBody,

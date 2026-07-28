@@ -59,6 +59,15 @@ const getOrderService = async (id) => {
       .populate({
         path: "promoCode",
         populate: { path: "freeItem", select: "name" },
+      })
+      .populate({
+        path: "personalizedOffer",
+        populate: [
+          { path: "targetCategory", select: "name" },
+          { path: "targetMenuItem", select: "name" },
+          { path: "freeItem", select: "name" },
+          { path: "freeItems.item", select: "name category" },
+        ],
       });
 
     if (!response) {

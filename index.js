@@ -21,6 +21,7 @@ const notifiersRoutes = require("./routes/notifies");
 const appRoutes = require("./routes/app");
 const sizesRoutes = require("./routes/sizes");
 const PromoCodesRoutes = require("./routes/promoCodes");
+const personalizedOffersRoutes = require("./routes/personalizedOffers");
 const VedetteRoutes = require("./routes/vedettes");
 const auditRoutes = require("./routes/audit");
 const sizesGroupesRoutes = require("./routes/sizeGroups");
@@ -37,6 +38,9 @@ const {
 const {
   startResetRestaurantItemsAvailabilityJob,
 } = require("./jobs/resetRestaurantItemsAvailability.job");
+const {
+  startPersonalizedOffersJobs,
+} = require("./jobs/personalizedOfferCron.job");
 
 const { createServer } = require("http");
 
@@ -78,6 +82,7 @@ app.use("/api/notifiers", notifiersRoutes);
 app.use("/api/sizes", sizesRoutes);
 app.use("/api/app", appRoutes);
 app.use("/api/promoCodes", PromoCodesRoutes);
+app.use("/api/personalized-offers", personalizedOffersRoutes);
 app.use("/api/vedettes", VedetteRoutes);
 app.use("/api/audits", auditRoutes);
 app.use("/api/sizeGroups", sizesGroupesRoutes);
@@ -98,6 +103,7 @@ mongoose.connect(
 startScheduledOrdersJob();
 startBirthdayNotificationsJob();
 startResetRestaurantItemsAvailabilityJob();
+startPersonalizedOffersJobs();
 
 httpServer.listen(process.env.PORT, () => {
   console.log("listening on port 5000");

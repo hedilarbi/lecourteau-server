@@ -30,6 +30,10 @@ const orderSchema = new Schema({
         type: Boolean,
         default: false,
       },
+      isSmartOfferFreeItem: {
+        type: Boolean,
+        default: false,
+      },
     },
   ],
   offers: [
@@ -152,6 +156,14 @@ const orderSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: "PromoCode",
   },
+  personalizedOffer: {
+    type: Schema.Types.ObjectId,
+    ref: "PersonalizedOffer",
+  },
+  personalizedOfferApplied: {
+    type: Boolean,
+    default: false,
+  },
   subscriptionBenefits: {
     isApplied: {
       type: Boolean,
@@ -248,6 +260,14 @@ const orderSchema = new Schema({
     },
   },
   referralDiscountApplied: {
+    type: Number,
+    default: 0,
+  },
+  hediSharePercent: {
+    type: Number,
+    default: 0,
+  },
+  hediShareAmount: {
     type: Number,
     default: 0,
   },

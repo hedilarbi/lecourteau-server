@@ -9,6 +9,8 @@ const {
   getOffersHistory,
   deleteRule,
   triggerScan,
+  getCronStatus,
+  toggleCron,
   getSmartOfferHediStats,
   createSmartOfferHediPayout,
   getMonitoringStats,
@@ -30,6 +32,8 @@ router.get("/profiles", getUserProfiles);
 router.get("/history", getOffersHistory);
 router.get("/monitoring-stats", getMonitoringStats);
 router.post("/trigger-scan", triggerScan);
+router.get("/cron/status", getCronStatus);
+router.post("/cron/toggle", toggleCron);
 
 // Client API
 router.get("/active/:userId", getActiveOffer);

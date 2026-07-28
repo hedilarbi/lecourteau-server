@@ -374,8 +374,13 @@ const getMenuItemsByCategorySlug = async (req, res) => {
   try {
     const { categorySlug } = req.params;
 
-    // Find the category by slug
-    const category = await Category.findOne({ slug: categorySlug });
+    // Find the category by slug or name
+    let category = await Category.findOne({ slug: categorySlug });
+    if (!category) {
+      // Fallback: try finding by name (since frontend sometimes passes name when slug is missing)
+      category = await Category.findOne({ name: categorySlug });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,

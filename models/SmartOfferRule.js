@@ -58,6 +58,18 @@ const smartOfferRuleSchema = new Schema({
     ref: "MenuItem",
     default: null,
   },
+  freeItems: [
+    {
+      item: {
+        type: Schema.Types.ObjectId,
+        ref: "MenuItem",
+      },
+      size: {
+        type: String,
+        required: true,
+      },
+    },
+  ],
   notificationTitle: {
     type: String,
     required: true,

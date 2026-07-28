@@ -1,6 +1,8 @@
 // services/orders/confirmOrderService.js
 const Order = require("../../models/Order");
 const PromoCode = require("../../models/PromoCode");
+const PersonalizedOffer = require("../../models/PersonalizedOffer");
+const PersonalizedOfferEvent = require("../../models/PersonalizedOfferEvent");
 const { default: mongoose } = require("mongoose");
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
@@ -412,6 +414,27 @@ async function finalizeLoyaltyAndPromo(order) {
       await promo.save();
     }
   }
+
+  if (order.personalizedOffer) {
+    await PersonalizedOffer.findByIdAndUpdate(order.personalizedOffer, {
+      status: "applied"
+    });
+    await new PersonalizedOfferEvent({
+      personalizedOffer: order.personalizedOffer,
+      user: user._id,
+      eventType: "applied"
+    }).save();
+  }
+
+  // Cancel any other obsolete active/prepared offers for this user (R15)
+  await PersonalizedOffer.updateMany(
+    {
+      user: user._id,
+      status: { $in: ["prepared", "active", "viewed", "clicked"] },
+      _id: { $ne: order.personalizedOffer }
+    },
+    { $set: { status: "expired" } }
+  );
 
   await user.save();
   await applyConfirmedOrderSubscriptionBenefits(order);

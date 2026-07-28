@@ -12,7 +12,8 @@ const getRules = async (req, res) => {
     const rules = await SmartOfferRule.find()
       .populate("targetCategory")
       .populate("targetMenuItem")
-      .populate("freeItem");
+      .populate("freeItem")
+      .populate("freeItems.item");
     return res.status(200).json(rules);
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -33,10 +34,14 @@ const createOrUpdateRule = async (req, res) => {
       targetCategory,
       targetMenuItem,
       freeItem,
+      freeItems,
       notificationTitle,
       notificationBody,
       isActive
     } = req.body;
+    const normalizedFreeItems = Array.isArray(freeItems) ? freeItems : [];
+    const normalizedFreeItem =
+      normalizedFreeItems.length > 0 ? null : freeItem || null;
 
     const query = strategyId ? { strategyId } : { segment };
     const rule = await SmartOfferRule.findOneAndUpdate(
@@ -51,13 +56,34 @@ const createOrUpdateRule = async (req, res) => {
         bonusThreshold,
         targetCategory: targetCategory || null,
         targetMenuItem: targetMenuItem || null,
-        freeItem: freeItem || null,
+        freeItem: normalizedFreeItem,
+        freeItems: normalizedFreeItems,
         notificationTitle,
         notificationBody,
         isActive: isActive !== undefined ? isActive : true
       },
       { upsert: true, new: true }
     );
+
+    if (rule?.strategyId) {
+      const PersonalizedOffer = mongoose.models.PersonalizedOffer || require("../models/PersonalizedOffer");
+      await PersonalizedOffer.updateMany(
+        { strategyId: rule.strategyId, status: { $in: ["prepared", "active", "viewed", "clicked"] } },
+        {
+          $set: {
+            discountValue: rule.discountValue,
+            bonusThreshold: rule.bonusThreshold,
+            offerType: rule.offerType,
+            targetCategory: rule.targetCategory || null,
+            targetMenuItem: rule.targetMenuItem || null,
+            freeItem: rule.freeItems?.length > 0 ? null : rule.freeItem || null,
+            freeItems: rule.freeItems || [],
+            notificationTitle: rule.notificationTitle,
+            notificationBody: rule.notificationBody
+          }
+        }
+      );
+    }
 
     return res.status(200).json(rule);
   } catch (error) {
@@ -76,7 +102,7 @@ const getActiveOffer = async (req, res) => {
       user: userId,
       status: { $in: ["active", "viewed", "clicked"] },
       validUntil: { $gt: now }
-    }).sort({ createdAt: -1 }).populate("freeItem targetCategory targetMenuItem");
+    }).sort({ createdAt: -1 }).populate("freeItem targetCategory targetMenuItem freeItems.item");
 
     if (activeOffer) {
       const Order = require("../models/Order");
@@ -444,11 +470,45 @@ const { prepareDailyOffersJob, triggerScheduledOffersJob } = require("../jobs/pe
 const triggerScan = async (req, res) => {
   try {
     console.log("[triggerScan] Manual scan triggered via admin dashboard API.");
-    await prepareDailyOffersJob();
+    await prepareDailyOffersJob(true);
     await triggerScheduledOffersJob();
     return res.status(200).json({ success: true, message: "Le scan RFM et la génération des offres ont été exécutés avec succès." });
   } catch (error) {
     console.error("[triggerScan] Error during manual scan:", error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+const getCronStatus = async (req, res) => {
+  try {
+    const SystemStat = require("../models/SystemStat");
+    const stat = await SystemStat.findOne({ key: "smartOfferCronEnabled" }).lean();
+    const isEnabled = stat?.value !== undefined ? Boolean(stat.value) : true;
+    return res.status(200).json({ success: true, isEnabled });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+const toggleCron = async (req, res) => {
+  try {
+    const SystemStat = require("../models/SystemStat");
+    const { isEnabled } = req.body;
+    const nextStatus = Boolean(isEnabled);
+    await SystemStat.findOneAndUpdate(
+      { key: "smartOfferCronEnabled" },
+      { key: "smartOfferCronEnabled", value: nextStatus, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    console.log(`[toggleCron] Smart Offer Cron status updated to: ${nextStatus}`);
+    return res.status(200).json({
+      success: true,
+      isEnabled: nextStatus,
+      message: nextStatus
+        ? "Le Cron des offres a été activé."
+        : "Le Cron des offres a été désactivé."
+    });
+  } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 };
@@ -681,6 +741,8 @@ module.exports = {
   getOffersHistory,
   deleteRule,
   triggerScan,
+  getCronStatus,
+  toggleCron,
   getSmartOfferHediStats,
   createSmartOfferHediPayout,
   getMonitoringStats,

@@ -1,6 +1,7 @@
 const { default: mongoose } = require("mongoose");
 const Order = require("../../models/Order");
 const PromoCode = require("../../models/PromoCode");
+const PersonalizedOffer = require("../../models/PersonalizedOffer");
 const { ON_GOING, SCHEDULED, CANCELED } = require("../../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const generateRandomCode = require("../../utils/generateOrderCode");
@@ -47,11 +48,11 @@ const roundMoney = (value, fallback = 0) => {
 
 const normalizeId = (value) => String(value || "").trim();
 
-const PROMO_ALWAYS_EXCLUDED_CATEGORY_NAME = "promos";
+const buildOrderItemsSubtotal = (orderItems = []) =>
+  orderItems.reduce((acc, item) => acc + toSafeNumber(item?.price, 0), 0);
 
-const isPromosCategory = (category) =>
-  String(category?.name || "").trim().toLowerCase() ===
-  PROMO_ALWAYS_EXCLUDED_CATEGORY_NAME;
+const buildOrderOffersSubtotal = (offers = []) =>
+  offers.reduce((acc, offer) => acc + toSafeNumber(offer?.price, 0), 0);
 
 const getPromoExcludedCategoryIds = (promoCode) => {
   if (!Array.isArray(promoCode?.excludedCategories)) return [];
@@ -68,17 +69,16 @@ const getPromoExcludedCategoryIds = (promoCode) => {
 const getPromoLegacyIncludedCategoryId = (promoCode) =>
   normalizeId(promoCode?.category?._id || promoCode?.category);
 
-// Offers and menu items in the "Promos" category are never eligible for a
-// promo code discount, regardless of how the promo code itself is configured.
+// Offers are excluded upstream because this subtotal contains order items only.
+// Menu items are excluded only when their category is explicitly configured.
 const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) => {
   const promoExcludedCategoryIds = getPromoExcludedCategoryIds(promoCode);
   const legacyIncludedCategoryId = getPromoLegacyIncludedCategoryId(promoCode);
 
   const itemsEligibleSubtotal = orderItems.reduce((sum, orderItem) => {
+    if (orderItem?.isSmartOfferFreeItem) return sum;
     const menuItem = menuItemsById.get(normalizeId(orderItem?.item));
     if (!menuItem) return sum;
-    if (isPromosCategory(menuItem?.category)) return sum;
-
     const menuItemCategoryId = normalizeId(
       menuItem?.category?._id || menuItem?.category,
     );
@@ -477,10 +477,10 @@ const createOrderService = async (order, options = {}) => {
       : null;
     const promoCodeRequested = Boolean(requestedPromoCodeId);
     const firstOrderDiscountApplies =
-      firstOrderDiscountEligible && !(subscriptionActive && promoCodeRequested);
+      firstOrderDiscountEligible && !(subscriptionActive && promoCodeRequested) && !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
     const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
-      subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
+      subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied) && !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
     const currentSubscriptionCycleKey = getSubscriptionFreeItemCycleKey(
       user,
       new Date(),
@@ -573,7 +573,7 @@ const createOrderService = async (order, options = {}) => {
     const requestedBirthdayBenefits = orderPayload.birthdayBenefits || {};
     const shouldApplyBirthdayBenefits =
       birthdaySummary.canClaimFreeItem &&
-      Boolean(requestedBirthdayBenefits?.isApplied);
+      Boolean(requestedBirthdayBenefits?.isApplied) && !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
     const requestedBirthdayFreeItemId = normalizeId(
       requestedBirthdayBenefits?.freeItemMenuItemId,
     );
@@ -688,12 +688,178 @@ const createOrderService = async (order, options = {}) => {
           cycleYear: birthdaySummary.cycleYear,
       };
 
+    const personalizedOfferId = orderPayload.personalizedOfferId || orderPayload.personalizedOffer;
+    let personalizedOfferDocument = null;
+    let personalizedDiscountAmount = 0;
+    let personalizedFreeItemBenefitAmount = 0;
+
+    if (personalizedOfferId) {
+      if (requestedPromoCodeId) {
+        return {
+          error: "Vous ne pouvez pas combiner un code promo et une offre personnalisée.",
+        };
+      }
+      
+      const now = new Date();
+      personalizedOfferDocument = await PersonalizedOffer.findById(personalizedOfferId);
+      if (!personalizedOfferDocument || String(personalizedOfferDocument.user) !== String(user._id)) {
+        return {
+          error: "Offre personnalisée invalide.",
+        };
+      }
+
+      if (!["active", "viewed", "clicked"].includes(personalizedOfferDocument.status) || (personalizedOfferDocument.validUntil && personalizedOfferDocument.validUntil < now)) {
+        return {
+          error: "Cette offre personnalisée a expiré ou n'est plus active.",
+        };
+      }
+
+      const existingOrderWithOffer = await Order.findOne({
+        personalizedOffer: personalizedOfferDocument._id,
+        status: { $ne: CANCELED },
+      });
+
+      if (existingOrderWithOffer) {
+        return {
+          error: "Cette offre personnalisée est déjà en cours d'utilisation dans une commande.",
+        };
+      }
+
+      if (personalizedOfferDocument.bonusThreshold > 0) {
+        const subtotalForBonus = buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers);
+        if (subtotalForBonus < personalizedOfferDocument.bonusThreshold) {
+          return {
+            error: `Le sous-total de votre commande doit être d'au moins $${personalizedOfferDocument.bonusThreshold} pour bénéficier de cette offre.`,
+          };
+        }
+      }
+
+      if (personalizedOfferDocument.offerType === "discount_category") {
+        const targetCatId = String(personalizedOfferDocument.targetCategory);
+        const itemIds = orderItems.map(i => i.item).filter(Boolean);
+        const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
+        const catMap = {};
+        const promoLockedMap = {};
+        dbItems.forEach(i => {
+          catMap[String(i._id)] = String(i.category);
+          promoLockedMap[String(i._id)] = !!i.promo_locked;
+        });
+        
+        orderItems.forEach(item => {
+          if (catMap[String(item.item)] === targetCatId && !promoLockedMap[String(item.item)]) {
+            personalizedDiscountAmount += toSafeNumber(item.price, 0) * (personalizedOfferDocument.discountValue / 100);
+          }
+        });
+      } else if (personalizedOfferDocument.offerType === "discount_product") {
+        const targetItemId = String(personalizedOfferDocument.targetMenuItem);
+        const dbItem = await mongoose.models.MenuItem.findById(targetItemId);
+        const isLocked = dbItem ? !!dbItem.promo_locked : false;
+        
+        if (!isLocked) {
+          orderItems.forEach(item => {
+            if (String(item.item) === targetItemId) {
+              personalizedDiscountAmount += toSafeNumber(item.price, 0) * (personalizedOfferDocument.discountValue / 100);
+            }
+          });
+        }
+      } else if (personalizedOfferDocument.offerType === "free_item") {
+        const subtotal = buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers);
+        if (personalizedOfferDocument.bonusThreshold && subtotal < personalizedOfferDocument.bonusThreshold) {
+          return {
+            error: `Le sous-total de votre commande doit être d'au moins $${personalizedOfferDocument.bonusThreshold} pour bénéficier de l'article offert.`,
+          };
+        }
+        const freeItemId = personalizedOfferDocument.freeItem ? String(personalizedOfferDocument.freeItem) : "";
+        const targetCatId = personalizedOfferDocument.targetCategory ? String(personalizedOfferDocument.targetCategory) : "";
+        let matchingItem = orderItems.find(item => item.isSmartOfferFreeItem);
+        if (!matchingItem && freeItemId) {
+          matchingItem = orderItems.find(item => String(item.item) === freeItemId);
+        }
+        if (!matchingItem && targetCatId) {
+          const itemIds = orderItems.map(i => i.item).filter(Boolean);
+          const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
+          const catMap = {};
+          dbItems.forEach(i => {
+            catMap[String(i._id)] = String(i.category);
+          });
+          matchingItem = orderItems.find(item => catMap[String(item.item)] === targetCatId);
+        }
+        if (matchingItem) {
+          let freeItemBasePrice = toSafeNumber(matchingItem.basePrice, 0);
+          if (freeItemBasePrice <= 0) {
+            const dbMenuItem = await mongoose.models.MenuItem.findById(matchingItem.item);
+            freeItemBasePrice = toSafeNumber(dbMenuItem?.price, toSafeNumber(matchingItem.price, 0));
+          }
+          // The free item's base price is already removed from orderItem.price;
+          // that price contains only paying extras. Keep the saved benefit for
+          // analytics, but do not subtract it from the subtotal a second time.
+          personalizedFreeItemBenefitAmount =
+            freeItemBasePrice > 0
+              ? freeItemBasePrice
+              : toSafeNumber(matchingItem.price, 0);
+          personalizedDiscountAmount = 0;
+        } else {
+          return {
+            error: "L'article gratuit de l'offre personnalisée n'est pas dans votre panier.",
+          };
+        }
+      } else if (personalizedOfferDocument.offerType === "bonus_basket") {
+        const subtotal = buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers);
+        if (subtotal >= personalizedOfferDocument.bonusThreshold) {
+          personalizedDiscountAmount = personalizedOfferDocument.discountValue;
+        } else {
+          return {
+            error: `Le sous-total doit être d'au moins $${personalizedOfferDocument.bonusThreshold} pour bénéficier de cette offre.`,
+          };
+        }
+      } else if (personalizedOfferDocument.offerType === "discount_order") {
+        // Exclude promo_locked items from the subtotal discount base (R06)
+        const itemIds = orderItems.map(i => i.item).filter(Boolean);
+        const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
+        const promoLockedMap = {};
+        dbItems.forEach(i => {
+          promoLockedMap[String(i._id)] = !!i.promo_locked;
+        });
+
+        let discountableBase = 0;
+        orderItems.forEach(item => {
+          if (!promoLockedMap[String(item.item)]) {
+            discountableBase += toSafeNumber(item.price, 0);
+          }
+        });
+        
+        personalizedDiscountAmount = discountableBase * (personalizedOfferDocument.discountValue / 100);
+      } else if (personalizedOfferDocument.offerType === "free_delivery") {
+        personalizedDiscountAmount = 0; // Discount applied directly to delivery fee, not subtotal
+      }
+
+      personalizedDiscountAmount = roundMoney(personalizedDiscountAmount, 0);
+
+      const expectedSubTotalAfterDiscount = roundMoney(
+        Math.max(0, toSafeNumber(orderPayload.subTotal, 0) - personalizedDiscountAmount),
+        0,
+      );
+      const receivedSubTotalAfterDiscount = roundMoney(
+        orderPayload.subTotalAfterDiscount,
+        0,
+      );
+
+      console.log("[PersonalizedOffer] subTotal:", orderPayload.subTotal, "| discountValue:", personalizedOfferDocument.discountValue, "| offerType:", personalizedOfferDocument.offerType, "| personalizedDiscountAmount:", personalizedDiscountAmount, "| expected subTotalAfterDiscount:", expectedSubTotalAfterDiscount, "| received subTotalAfterDiscount:", receivedSubTotalAfterDiscount);
+
+      if (Math.abs(expectedSubTotalAfterDiscount - receivedSubTotalAfterDiscount) > 0.01) {
+        return {
+          error: "Le montant de l'offre personnalisée ne correspond pas aux articles du panier.",
+        };
+      }
+    }
+
+
     let promoCodeId = requestedPromoCodeId;
 
     let promoCodeDocument = null;
     let promoDiscountAmount = 0;
 
-    if (promoCodeId && firstOrderDiscountEligible && !subscriptionActive) {
+    if (promoCodeId && (firstOrderDiscountEligible || personalizedOfferId) && !subscriptionActive) {
       return {
         error:
           "Une autre réduction est déjà appliquée à cette commande. Le code promo ne peut pas être utilisé.",
@@ -852,7 +1018,8 @@ const createOrderService = async (order, options = {}) => {
 
     const requestedDeliveryFee = toSafeNumber(orderPayload.deliveryFee, 0);
     const normalizedDeliveryFee =
-      subscriptionBenefits.isApplied && subscriptionBenefits.freeDeliveryApplied
+      (subscriptionBenefits.isApplied && subscriptionBenefits.freeDeliveryApplied) ||
+      (personalizedOfferDocument && personalizedOfferDocument.offerType === "free_delivery")
         ? 0
         : requestedDeliveryFee;
 
@@ -930,6 +1097,31 @@ const createOrderService = async (order, options = {}) => {
       user.referralBalance = Math.max(0, roundMoney(availableBalance - referralDiscountApplied, 0));
     }
 
+    const SMART_OFFER_ROYALTY_PERCENT = 5;
+    const personalizedOfferApplied = Boolean(
+      personalizedOfferDocument &&
+        (personalizedOfferDocument.offerType === "free_delivery"
+          ? order.type === "delivery" &&
+            requestedDeliveryFee > 0 &&
+            normalizedDeliveryFee === 0
+          : personalizedOfferDocument.offerType === "free_item"
+            ? personalizedFreeItemBenefitAmount > 0
+            : personalizedDiscountAmount > 0),
+    );
+    let hediSharePercent = 0;
+    let hediShareAmount = 0;
+    if (personalizedOfferApplied) {
+      hediSharePercent = SMART_OFFER_ROYALTY_PERCENT;
+      const baseAmount = toSafeNumber(
+        orderPayload.subTotalAfterDiscount,
+        toSafeNumber(orderPayload.subTotal, toSafeNumber(orderPayload.total, 0)),
+      );
+      hediShareAmount = roundMoney(
+        baseAmount * (SMART_OFFER_ROYALTY_PERCENT / 100),
+        0,
+      );
+    }
+
     const newOrder = new Order({
       user: orderPayload.user_id,
       orderItems: orderPayload.orderItems,
@@ -960,6 +1152,8 @@ const createOrderService = async (order, options = {}) => {
           ? "referral_credit"
           : normalizedPaymentMethod || "card",
       promoCode: promoCodeId,
+      personalizedOffer: personalizedOfferId || null,
+      personalizedOfferApplied,
       subscriptionBenefits,
       birthdayBenefits,
       scheduled: {
@@ -967,6 +1161,8 @@ const createOrderService = async (order, options = {}) => {
         scheduledFor: orderPayload.scheduled?.scheduledFor || null,
       },
       referralDiscountApplied,
+      hediSharePercent,
+      hediShareAmount,
     });
 
     if (user.orders.length > 0) {
@@ -1001,6 +1197,29 @@ const createOrderService = async (order, options = {}) => {
     }
     user.orders.push(response._id);
     await user.save();
+
+    // Expire/Apply smart offers for this user (Rule R15)
+    if (personalizedOfferId) {
+      await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, {
+        status: "applied"
+      }).catch(() => {});
+      await PersonalizedOffer.updateMany(
+        {
+          user: user._id,
+          status: { $in: ["prepared", "active", "viewed", "clicked"] },
+          _id: { $ne: personalizedOfferId }
+        },
+        { $set: { status: "expired" } }
+      ).catch(() => {});
+    } else {
+      await PersonalizedOffer.updateMany(
+        {
+          user: user._id,
+          status: { $in: ["prepared", "active", "viewed", "clicked"] }
+        },
+        { $set: { status: "expired" } }
+      ).catch(() => {});
+    }
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant,
     );

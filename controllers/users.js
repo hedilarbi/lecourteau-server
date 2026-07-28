@@ -1020,6 +1020,49 @@ const cleanupDuplicatePhones = async (req, res) => {
   }
 };
 
+const populateAppInstalledFields = async (req, res) => {
+  try {
+    if (req.query.force === "true") {
+      const forceResult = await User.updateMany(
+        {},
+        { $set: { appIsInstalled: true, appUninstalledAt: null } }
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Tous les utilisateurs ont été réinitialisés avec appIsInstalled = true et appUninstalledAt = null (force=true).",
+        data: {
+          modified: forceResult?.modifiedCount ?? forceResult?.nModified ?? 0,
+        },
+      });
+    }
+
+    const updateResult = await User.updateMany(
+      { $or: [{ appIsInstalled: { $exists: false } }, { appIsInstalled: null }] },
+      { $set: { appIsInstalled: true, appUninstalledAt: null } }
+    );
+
+    const totalUsers = await User.countDocuments({});
+    const installedCount = await User.countDocuments({ appIsInstalled: true });
+    const uninstalledCount = await User.countDocuments({ appIsInstalled: false });
+
+    return res.status(200).json({
+      success: true,
+      message: "Les champs appIsInstalled et appUninstalledAt ont été populés pour les utilisateurs où ils étaient absents.",
+      data: {
+        totalUsers,
+        installedCount,
+        uninstalledCount,
+        modified: updateResult?.modifiedCount ?? updateResult?.nModified ?? 0,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   createUser,
   updateUser,
@@ -1048,4 +1091,5 @@ module.exports = {
   normalizePhoneNumbers,
   cleanupDuplicatePhones,
   forceMergeAccounts,
+  populateAppInstalledFields,
 };

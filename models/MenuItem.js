@@ -34,6 +34,10 @@ const menuItemSchema = new Schema({
     default: true,
   },
   order: Number,
+  promo_locked: {
+    type: Schema.Types.Boolean,
+    default: false,
+  },
 });
 
 module.exports = model("MenuItem", menuItemSchema);

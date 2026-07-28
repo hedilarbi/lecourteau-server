@@ -42,6 +42,22 @@ const userSchema = new Schema({
     default: false,
   },
   expo_token: String,
+  appIsInstalled: {
+    type: Boolean,
+    default: true,
+  },
+  appUninstalledAt: {
+    type: Date,
+    default: null,
+  },
+  emailUnsubscribed: {
+    type: Boolean,
+    default: false,
+  },
+  emailUnsubscribedAt: {
+    type: Date,
+    default: null,
+  },
   auth_mehtod: String,
   firstOrderDiscountApplied: {
     type: Boolean,

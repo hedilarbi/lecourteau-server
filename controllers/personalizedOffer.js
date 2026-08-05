@@ -66,7 +66,6 @@ const createOrUpdateRule = async (req, res) => {
     );
 
     if (rule?.strategyId) {
-      const PersonalizedOffer = mongoose.models.PersonalizedOffer || require("../models/PersonalizedOffer");
       await PersonalizedOffer.updateMany(
         { strategyId: rule.strategyId, status: { $in: ["prepared", "active", "viewed", "clicked"] } },
         {

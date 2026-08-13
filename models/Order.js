@@ -185,6 +185,11 @@ const orderSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  smartOfferUsageStep: {
+    type: Number,
+    min: 0,
+    default: null,
+  },
   smartOfferBonusPoints: {
     type: Number,
     min: 0,

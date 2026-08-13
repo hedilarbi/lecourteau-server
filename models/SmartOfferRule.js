@@ -32,7 +32,7 @@ const smartOfferRuleSchema = new Schema({
   },
   offerType: {
     type: String,
-    enum: ["discount_category", "discount_product", "free_item", "bonus_basket", "discount_order", "free_delivery", "loyalty_points"],
+    enum: ["discount_category", "discount_product", "free_item", "bonus_basket", "discount_order", "free_delivery", "loyalty_points", "split_discount", "buy_one_get_one"],
     required: true,
   },
   discountValue: {
@@ -47,6 +47,32 @@ const smartOfferRuleSchema = new Schema({
     type: Number,
     min: 0,
     default: 0,
+  },
+  discountSteps: {
+    type: [Number],
+    default: undefined,
+    validate: {
+      validator: (steps) => !steps || (steps.length > 0 && steps.every(value => value > 0 && value <= 100)),
+      message: "Chaque étape de rabais doit être comprise entre 1 et 100%.",
+    },
+  },
+  followupValidityDays: {
+    type: Number,
+    min: 1,
+    default: 7,
+  },
+  triggerItem: {
+    type: Schema.Types.ObjectId,
+    ref: "MenuItem",
+    default: null,
+  },
+  triggerItemSize: {
+    type: String,
+    default: "",
+  },
+  giftItemSize: {
+    type: String,
+    default: "",
   },
   targetCategory: {
     type: Schema.Types.ObjectId,

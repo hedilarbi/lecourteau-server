@@ -452,9 +452,10 @@ async function finalizeLoyaltyAndPromo(order) {
   }
 
   if (order.personalizedOffer) {
-    await PersonalizedOffer.findByIdAndUpdate(order.personalizedOffer, {
-      status: "applied"
-    });
+    const confirmedOffer = await PersonalizedOffer.findById(order.personalizedOffer).select("offerType currentStep discountSteps");
+    if (confirmedOffer?.offerType !== "split_discount") {
+      await PersonalizedOffer.findByIdAndUpdate(order.personalizedOffer, { status: "applied" });
+    }
     await new PersonalizedOfferEvent({
       personalizedOffer: order.personalizedOffer,
       user: user._id,

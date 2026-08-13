@@ -729,6 +729,7 @@ const createOrderService = async (order, options = {}) => {
     let personalizedOfferDocument = null;
     let personalizedDiscountAmount = 0;
     let personalizedFreeItemBenefitAmount = 0;
+    let smartOfferUsageStep = null;
 
     if (personalizedOfferId) {
       if (requestedPromoCodeId) {
@@ -751,10 +752,17 @@ const createOrderService = async (order, options = {}) => {
         };
       }
 
-      const existingOrderWithOffer = await Order.findOne({
+      smartOfferUsageStep = personalizedOfferDocument.offerType === "split_discount"
+        ? Math.max(0, Number(personalizedOfferDocument.currentStep) || 0)
+        : null;
+      const existingOrderQuery = {
         personalizedOffer: personalizedOfferDocument._id,
         status: { $ne: CANCELED },
-      });
+      };
+      if (smartOfferUsageStep !== null) {
+        existingOrderQuery.smartOfferUsageStep = smartOfferUsageStep;
+      }
+      const existingOrderWithOffer = await Order.findOne(existingOrderQuery);
 
       if (existingOrderWithOffer) {
         return {
@@ -886,6 +894,44 @@ const createOrderService = async (order, options = {}) => {
         });
         
         personalizedDiscountAmount = discountableBase * (personalizedOfferDocument.discountValue / 100);
+      } else if (personalizedOfferDocument.offerType === "split_discount") {
+        const steps = Array.isArray(personalizedOfferDocument.discountSteps)
+          ? personalizedOfferDocument.discountSteps
+          : [];
+        const currentPercent = Number(steps[smartOfferUsageStep]);
+        if (!Number.isFinite(currentPercent) || currentPercent <= 0) {
+          return { error: "Toutes les étapes de ce rabais ont déjà été utilisées." };
+        }
+        const itemIds = orderItems.map(item => item.item).filter(Boolean);
+        const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
+        const promoLockedMap = {};
+        dbItems.forEach(item => { promoLockedMap[String(item._id)] = !!item.promo_locked; });
+        const discountableBase = orderItems.reduce(
+          (sum, item) => promoLockedMap[String(item.item)] ? sum : sum + toSafeNumber(item.price, 0),
+          0,
+        );
+        personalizedDiscountAmount = discountableBase * (currentPercent / 100);
+      } else if (personalizedOfferDocument.offerType === "buy_one_get_one") {
+        const triggerId = String(personalizedOfferDocument.triggerItem || "");
+        const giftId = String(personalizedOfferDocument.freeItem || "");
+        const triggerSize = String(personalizedOfferDocument.triggerItemSize || "").trim().toLowerCase();
+        const giftSize = String(personalizedOfferDocument.giftItemSize || "").trim().toLowerCase();
+        const matchesSize = (item, expected) => !expected || String(item.size || "").trim().toLowerCase() === expected;
+        const paidTrigger = orderItems.find(item =>
+          !item.isSmartOfferFreeItem && String(item.item || "") === triggerId && matchesSize(item, triggerSize)
+        );
+        const freeGift = orderItems.find(item =>
+          item.isSmartOfferFreeItem && String(item.item || "") === giftId && matchesSize(item, giftSize)
+        );
+        if (!paidTrigger) return { error: "L'article requis pour débloquer le cadeau n'est pas dans votre panier." };
+        if (!freeGift) return { error: "L'article offert configuré n'est pas dans votre panier." };
+        let giftBasePrice = toSafeNumber(freeGift.basePrice, 0);
+        if (giftBasePrice <= 0) {
+          const dbGift = await mongoose.models.MenuItem.findById(freeGift.item);
+          giftBasePrice = toSafeNumber(dbGift?.price, toSafeNumber(freeGift.price, 0));
+        }
+        personalizedFreeItemBenefitAmount = giftBasePrice;
+        personalizedDiscountAmount = 0;
       } else if (personalizedOfferDocument.offerType === "free_delivery") {
         personalizedDiscountAmount = 0; // Discount applied directly to delivery fee, not subtotal
       } else if (personalizedOfferDocument.offerType === "loyalty_points") {
@@ -1168,7 +1214,7 @@ const createOrderService = async (order, options = {}) => {
           ? order.type === "delivery" &&
             requestedDeliveryFee > 0 &&
             normalizedDeliveryFee === 0
-          : personalizedOfferDocument.offerType === "free_item"
+          : ["free_item", "buy_one_get_one"].includes(personalizedOfferDocument.offerType)
             ? personalizedFreeItemBenefitAmount > 0
             : personalizedOfferDocument.offerType === "loyalty_points"
               ? Math.floor(toSafeNumber(personalizedOfferDocument.bonusPoints, 0)) > 0
@@ -1211,6 +1257,7 @@ const createOrderService = async (order, options = {}) => {
       promoCode: promoCodeId,
       personalizedOffer: personalizedOfferId || null,
       personalizedOfferApplied,
+      smartOfferUsageStep,
       smartOfferBonusPoints:
         personalizedOfferApplied &&
         personalizedOfferDocument?.offerType === "loyalty_points"
@@ -1262,9 +1309,24 @@ const createOrderService = async (order, options = {}) => {
 
     // Expire/Apply smart offers for this user (Rule R15)
     if (personalizedOfferId) {
-      await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, {
-        status: "applied"
-      }).catch(() => {});
+      if (personalizedOfferDocument?.offerType === "split_discount") {
+        const nextStep = smartOfferUsageStep + 1;
+        const isComplete = nextStep >= personalizedOfferDocument.discountSteps.length;
+        const progressionUpdate = {
+          currentStep: nextStep,
+          status: isComplete ? "applied" : "active",
+        };
+        if (smartOfferUsageStep === 0) {
+          const firstAppliedAt = new Date();
+          progressionUpdate.firstAppliedAt = firstAppliedAt;
+          progressionUpdate.validUntil = new Date(
+            firstAppliedAt.getTime() + (personalizedOfferDocument.followupValidityDays || 7) * 86400000,
+          );
+        }
+        await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, { $set: progressionUpdate }).catch(() => {});
+      } else {
+        await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, { status: "applied" }).catch(() => {});
+      }
       await PersonalizedOffer.updateMany(
         {
           user: user._id,

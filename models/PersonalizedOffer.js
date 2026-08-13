@@ -18,7 +18,7 @@ const personalizedOfferSchema = new Schema({
   },
   offerType: {
     type: String,
-    enum: ["discount_category", "discount_product", "free_item", "bonus_basket", "discount_order", "free_delivery", "loyalty_points"],
+    enum: ["discount_category", "discount_product", "free_item", "bonus_basket", "discount_order", "free_delivery", "loyalty_points", "split_discount", "buy_one_get_one"],
     required: true,
   },
   discountValue: {
@@ -34,6 +34,13 @@ const personalizedOfferSchema = new Schema({
     min: 0,
     default: 0,
   },
+  discountSteps: { type: [Number], default: undefined },
+  currentStep: { type: Number, min: 0, default: 0 },
+  followupValidityDays: { type: Number, min: 1, default: 7 },
+  firstAppliedAt: { type: Date, default: null },
+  triggerItem: { type: Schema.Types.ObjectId, ref: "MenuItem", default: null },
+  triggerItemSize: { type: String, default: "" },
+  giftItemSize: { type: String, default: "" },
   targetCategory: {
     type: Schema.Types.ObjectId,
     ref: "Category",

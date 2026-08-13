@@ -12,6 +12,7 @@ const getRules = async (req, res) => {
     const rules = await SmartOfferRule.find()
       .populate("targetCategory")
       .populate("targetMenuItem")
+      .populate("triggerItem")
       .populate("freeItem")
       .populate("freeItems.item");
     return res.status(200).json(rules);
@@ -32,6 +33,11 @@ const createOrUpdateRule = async (req, res) => {
       discountValue,
       bonusThreshold,
       bonusPoints,
+      discountSteps,
+      followupValidityDays,
+      triggerItem,
+      triggerItemSize,
+      giftItemSize,
       targetCategory,
       targetMenuItem,
       freeItem,
@@ -40,9 +46,22 @@ const createOrUpdateRule = async (req, res) => {
       notificationBody,
       isActive
     } = req.body;
-    const normalizedFreeItems = Array.isArray(freeItems) ? freeItems : [];
+    const normalizedFreeItems = offerType === "buy_one_get_one"
+      ? []
+      : Array.isArray(freeItems) ? freeItems : [];
     const normalizedFreeItem =
-      normalizedFreeItems.length > 0 ? null : freeItem || null;
+      offerType === "buy_one_get_one"
+        ? freeItem || null
+        : normalizedFreeItems.length > 0 ? null : freeItem || null;
+    const normalizedDiscountSteps = Array.isArray(discountSteps)
+      ? discountSteps.map(Number).filter((value) => Number.isFinite(value) && value > 0 && value <= 100)
+      : [];
+    if (offerType === "split_discount" && normalizedDiscountSteps.length < 2) {
+      return res.status(400).json({ error: "Le rabais divisé doit contenir au moins deux étapes valides." });
+    }
+    if (offerType === "buy_one_get_one" && (!triggerItem || !normalizedFreeItem)) {
+      return res.status(400).json({ error: "L'article acheté et l'article offert sont obligatoires." });
+    }
 
     const query = strategyId ? { strategyId } : { segment };
     const rule = await SmartOfferRule.findOneAndUpdate(
@@ -56,6 +75,11 @@ const createOrUpdateRule = async (req, res) => {
         discountValue,
         bonusThreshold,
         bonusPoints: offerType === "loyalty_points" ? Math.max(0, Math.floor(Number(bonusPoints) || 0)) : 0,
+        discountSteps: offerType === "split_discount" ? normalizedDiscountSteps : undefined,
+        followupValidityDays: Math.max(1, Math.floor(Number(followupValidityDays) || 7)),
+        triggerItem: offerType === "buy_one_get_one" ? triggerItem : null,
+        triggerItemSize: offerType === "buy_one_get_one" ? String(triggerItemSize || "") : "",
+        giftItemSize: offerType === "buy_one_get_one" ? String(giftItemSize || "") : "",
         targetCategory: targetCategory || null,
         targetMenuItem: targetMenuItem || null,
         freeItem: normalizedFreeItem,
@@ -75,6 +99,11 @@ const createOrUpdateRule = async (req, res) => {
             discountValue: rule.discountValue,
             bonusThreshold: rule.bonusThreshold,
             bonusPoints: rule.bonusPoints,
+            discountSteps: rule.discountSteps,
+            followupValidityDays: rule.followupValidityDays,
+            triggerItem: rule.triggerItem || null,
+            triggerItemSize: rule.triggerItemSize || "",
+            giftItemSize: rule.giftItemSize || "",
             offerType: rule.offerType,
             targetCategory: rule.targetCategory || null,
             targetMenuItem: rule.targetMenuItem || null,
@@ -106,7 +135,7 @@ const getActiveOffer = async (req, res) => {
       validUntil: { $gt: now }
     })
       .sort({ createdAt: -1 })
-      .populate("freeItem targetCategory targetMenuItem")
+      .populate("freeItem targetCategory targetMenuItem triggerItem")
       .populate({
         path: "freeItems.item",
         populate: { path: "category", select: "name slug" },
@@ -115,10 +144,14 @@ const getActiveOffer = async (req, res) => {
     if (activeOffer) {
       const Order = require("../models/Order");
       const { CANCELED } = require("../utils/constants");
-      const existingOrder = await Order.findOne({
+      const existingOrderQuery = {
         personalizedOffer: activeOffer._id,
         status: { $ne: CANCELED },
-      });
+      };
+      if (activeOffer.offerType === "split_discount") {
+        existingOrderQuery.smartOfferUsageStep = activeOffer.currentStep || 0;
+      }
+      const existingOrder = await Order.findOne(existingOrderQuery);
       if (existingOrder) {
         return res.status(200).json(null);
       }
@@ -392,6 +425,8 @@ const getMonitoringStats = async (req, res) => {
       free_item: { label: "Article gratuit", count: 0, used: 0 },
       free_delivery: { label: "Livraison gratuite", count: 0, used: 0 },
       loyalty_points: { label: "Points de fidélité bonus", count: 0, used: 0 },
+      split_discount: { label: "Rabais divisé", count: 0, used: 0 },
+      buy_one_get_one: { label: "1 acheté = 1 offert", count: 0, used: 0 },
     };
 
     offerTypesAgg.forEach((item) => {
@@ -399,6 +434,140 @@ const getMonitoringStats = async (req, res) => {
         offerTypesMap[item._id].count = item.count || 0;
         offerTypesMap[item._id].used = item.used || 0;
       }
+    });
+
+    // Keep each historical configuration as a separate variant. This makes it
+    // possible to compare, for example, the old S02 discount with the new S02
+    // free-item offer instead of merging both under the same strategy id.
+    const strategyVariants = await PersonalizedOffer.aggregate([
+      {
+        $lookup: {
+          from: "personalizedofferevents",
+          localField: "_id",
+          foreignField: "personalizedOffer",
+          as: "events",
+        },
+      },
+      {
+        $lookup: {
+          from: "orders",
+          let: { offerId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$personalizedOffer", "$$offerId"] },
+                    { $eq: ["$personalizedOfferApplied", true] },
+                    { $ne: ["$status", "Annulé"] },
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+            { $project: { sub_total: 1, sub_total_after_discount: 1, total_price: 1 } },
+          ],
+          as: "convertedOrders",
+        },
+      },
+      {
+        $addFields: {
+          eventTypes: "$events.eventType",
+          convertedOrder: { $arrayElemAt: ["$convertedOrders", 0] },
+          freeItemKey: { $ifNull: [{ $toString: "$freeItem" }, ""] },
+          freeItemsKey: {
+            $map: {
+              input: { $ifNull: ["$freeItems", []] },
+              as: "choice",
+              in: {
+                item: { $toString: "$$choice.item" },
+                size: { $ifNull: ["$$choice.size", ""] },
+              },
+            },
+          },
+          targetItemKey: { $ifNull: [{ $toString: "$targetMenuItem" }, ""] },
+          validityHoursSnapshot: {
+            $cond: [
+              { $and: [{ $ne: ["$validFrom", null] }, { $ne: ["$validUntil", null] }] },
+              { $round: [{ $divide: [{ $subtract: ["$validUntil", "$validFrom"] }, 3600000] }, 0] },
+              null,
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            strategyId: "$strategyId",
+            offerType: "$offerType",
+            discountValue: "$discountValue",
+            bonusThreshold: "$bonusThreshold",
+            bonusPoints: "$bonusPoints",
+            freeItem: "$freeItemKey",
+            freeItems: "$freeItemsKey",
+            targetMenuItem: "$targetItemKey",
+            discountSteps: "$discountSteps",
+            triggerItem: { $ifNull: [{ $toString: "$triggerItem" }, ""] },
+            validityHours: "$validityHoursSnapshot",
+          },
+          notificationTitle: { $first: "$notificationTitle" },
+          notificationBody: { $first: "$notificationBody" },
+          generated: { $sum: 1 },
+          activated: { $sum: { $cond: [{ $ne: ["$validFrom", null] }, 1, 0] } },
+          notified: { $sum: { $cond: [{ $in: ["notified", "$eventTypes"] }, 1, 0] } },
+          notificationClicks: { $sum: { $cond: [{ $in: ["notif_clicked", "$eventTypes"] }, 1, 0] } },
+          views: { $sum: { $cond: [{ $in: ["viewed", "$eventTypes"] }, 1, 0] } },
+          clicks: { $sum: { $cond: [{ $in: ["clicked", "$eventTypes"] }, 1, 0] } },
+          conversions: { $sum: { $cond: [{ $ne: [{ $type: "$convertedOrder" }, "missing"] }, 1, 0] } },
+          revenue: { $sum: { $ifNull: ["$convertedOrder.total_price", 0] } },
+          subtotal: { $sum: { $ifNull: ["$convertedOrder.sub_total", 0] } },
+          discountedSubtotal: { $sum: { $ifNull: ["$convertedOrder.sub_total_after_discount", 0] } },
+          firstGeneratedAt: { $min: "$createdAt" },
+          lastGeneratedAt: { $max: "$createdAt" },
+        },
+      },
+      { $sort: { "_id.strategyId": 1, lastGeneratedAt: 1 } },
+    ]);
+
+    const roundRate = (value, total) =>
+      total > 0 ? Math.round((value / total) * 10000) / 100 : 0;
+    const variantCounters = {};
+    const variantsByStrategy = {};
+    strategyVariants.forEach((variant) => {
+      const strategyId = variant._id.strategyId;
+      variantCounters[strategyId] = (variantCounters[strategyId] || 0) + 1;
+      if (!variantsByStrategy[strategyId]) variantsByStrategy[strategyId] = [];
+      variantsByStrategy[strategyId].push({
+        id: `S${strategyId}-V${variantCounters[strategyId]}`,
+        strategyId,
+        version: variantCounters[strategyId],
+        ...variant._id,
+        notificationTitle: variant.notificationTitle,
+        notificationBody: variant.notificationBody,
+        generated: variant.generated,
+        activated: variant.activated,
+        notified: variant.notified,
+        notificationClicks: variant.notificationClicks,
+        views: variant.views,
+        clicks: variant.clicks,
+        conversions: variant.conversions,
+        revenue: Math.round(variant.revenue * 100) / 100,
+        averageBasket: variant.conversions > 0
+          ? Math.round((variant.subtotal / variant.conversions) * 100) / 100
+          : 0,
+        averageDiscount: variant.conversions > 0
+          ? Math.round(((variant.subtotal - variant.discountedSubtotal) / variant.conversions) * 100) / 100
+          : 0,
+        activationRate: roundRate(variant.activated, variant.generated),
+        notificationClickRate: roundRate(variant.notificationClicks, variant.notified),
+        viewRate: roundRate(variant.views, variant.activated),
+        conversionRate: roundRate(variant.conversions, variant.activated),
+        firstGeneratedAt: variant.firstGeneratedAt,
+        lastGeneratedAt: variant.lastGeneratedAt,
+      });
+    });
+    Object.values(variantsByStrategy).forEach((variants) => {
+      if (variants.length > 0) variants[variants.length - 1].isLatest = true;
     });
 
     const [rulesPopulated] = await PersonalizedOffer.aggregate([
@@ -464,6 +633,7 @@ const getMonitoringStats = async (req, res) => {
         clickRate: stats.totalOffers > 0 ? Math.round((stats.clickedOffers / stats.totalOffers) * 100) : 0,
         offerTypesMap,
         segmentsMap,
+        variantsByStrategy,
       },
     });
   } catch (error) {

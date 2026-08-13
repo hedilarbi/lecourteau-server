@@ -398,10 +398,9 @@ const getMonitoringStats = async (req, res) => {
       viewedOffers: 0,
     };
 
-    const notifClickEvents = await PersonalizedOfferEvent.distinct("personalizedOffer", {
-      eventType: "notif_clicked",
-    });
-    const totalNotifClicked = Math.max(stats.notifClickedOffers || 0, notifClickEvents ? notifClickEvents.length : 0);
+    // notifClicked is denormalized on the offer; avoid a full distinct scan of
+    // the ever-growing events collection on every dashboard refresh.
+    const totalNotifClicked = stats.notifClickedOffers || 0;
 
     const offerTypesAgg = await PersonalizedOffer.aggregate([
       {
@@ -441,60 +440,7 @@ const getMonitoringStats = async (req, res) => {
     // free-item offer instead of merging both under the same strategy id.
     const strategyVariants = await PersonalizedOffer.aggregate([
       {
-        $lookup: {
-          from: "personalizedofferevents",
-          localField: "_id",
-          foreignField: "personalizedOffer",
-          as: "events",
-        },
-      },
-      {
-        $lookup: {
-          from: "orders",
-          let: { offerId: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$personalizedOffer", "$$offerId"] },
-                    { $eq: ["$personalizedOfferApplied", true] },
-                    { $ne: ["$status", "Annulé"] },
-                  ],
-                },
-              },
-            },
-            { $limit: 1 },
-            {
-              $project: {
-                sub_total: 1,
-                sub_total_after_discount: 1,
-                total_price: 1,
-                freeItemBenefit: {
-                  $sum: {
-                    $map: {
-                      input: {
-                        $filter: {
-                          input: { $ifNull: ["$orderItems", []] },
-                          as: "item",
-                          cond: { $eq: ["$$item.isSmartOfferFreeItem", true] },
-                        },
-                      },
-                      as: "freeItem",
-                      in: { $ifNull: ["$$freeItem.basePrice", 0] },
-                    },
-                  },
-                },
-              },
-            },
-          ],
-          as: "convertedOrders",
-        },
-      },
-      {
         $addFields: {
-          eventTypes: "$events.eventType",
-          convertedOrder: { $arrayElemAt: ["$convertedOrders", 0] },
           freeItemKey: { $ifNull: [{ $toString: "$freeItem" }, ""] },
           freeItemsKey: {
             $map: {
@@ -507,13 +453,6 @@ const getMonitoringStats = async (req, res) => {
             },
           },
           targetItemKey: { $ifNull: [{ $toString: "$targetMenuItem" }, ""] },
-          validityHoursSnapshot: {
-            $cond: [
-              { $and: [{ $ne: ["$validFrom", null] }, { $ne: ["$validUntil", null] }] },
-              { $round: [{ $divide: [{ $subtract: ["$validUntil", "$validFrom"] }, 3600000] }, 0] },
-              null,
-            ],
-          },
         },
       },
       {
@@ -529,27 +468,99 @@ const getMonitoringStats = async (req, res) => {
             targetMenuItem: "$targetItemKey",
             discountSteps: "$discountSteps",
             triggerItem: { $ifNull: [{ $toString: "$triggerItem" }, ""] },
-            validityHours: "$validityHoursSnapshot",
           },
           notificationTitle: { $first: "$notificationTitle" },
           notificationBody: { $first: "$notificationBody" },
           generated: { $sum: 1 },
           activated: { $sum: { $cond: [{ $ne: ["$validFrom", null] }, 1, 0] } },
-          notified: { $sum: { $cond: [{ $in: ["notified", "$eventTypes"] }, 1, 0] } },
-          notificationClicks: { $sum: { $cond: [{ $in: ["notif_clicked", "$eventTypes"] }, 1, 0] } },
-          views: { $sum: { $cond: [{ $in: ["viewed", "$eventTypes"] }, 1, 0] } },
-          clicks: { $sum: { $cond: [{ $in: ["clicked", "$eventTypes"] }, 1, 0] } },
-          conversions: { $sum: { $cond: [{ $ne: [{ $type: "$convertedOrder" }, "missing"] }, 1, 0] } },
-          revenue: { $sum: { $ifNull: ["$convertedOrder.total_price", 0] } },
-          subtotal: { $sum: { $ifNull: ["$convertedOrder.sub_total", 0] } },
-          discountedSubtotal: { $sum: { $ifNull: ["$convertedOrder.sub_total_after_discount", 0] } },
-          freeItemBenefit: { $sum: { $ifNull: ["$convertedOrder.freeItemBenefit", 0] } },
           firstGeneratedAt: { $min: "$createdAt" },
           lastGeneratedAt: { $max: "$createdAt" },
         },
       },
       { $sort: { "_id.strategyId": 1, lastGeneratedAt: 1 } },
-    ]);
+    ], { allowDiskUse: true });
+
+    // Revenue is calculated from the much smaller set of converted orders.
+    // Avoid joining every offer to the full orders/events collections: that
+    // caused the production monitoring page to time out as history grew.
+    const convertedOrderStats = await Order.aggregate([
+      { $match: { personalizedOfferApplied: true, personalizedOffer: { $ne: null }, status: { $ne: "Annulé" } } },
+      {
+        $group: {
+          _id: "$personalizedOffer",
+          conversions: { $sum: 1 },
+          revenue: { $sum: { $ifNull: ["$total_price", 0] } },
+          subtotal: { $sum: { $ifNull: ["$sub_total", 0] } },
+          discountedSubtotal: { $sum: { $ifNull: ["$sub_total_after_discount", 0] } },
+          freeItemBenefit: {
+            $sum: {
+              $sum: {
+                $map: {
+                  input: {
+                    $filter: {
+                      input: { $ifNull: ["$orderItems", []] },
+                      as: "item",
+                      cond: { $eq: ["$$item.isSmartOfferFreeItem", true] },
+                    },
+                  },
+                  as: "freeItem",
+                  in: { $ifNull: ["$$freeItem.basePrice", 0] },
+                },
+              },
+            },
+          },
+        },
+      },
+    ], { allowDiskUse: true });
+
+    const convertedOfferIds = convertedOrderStats.map((item) => item._id);
+    const convertedOffers = convertedOfferIds.length > 0
+      ? await PersonalizedOffer.find({ _id: { $in: convertedOfferIds } })
+        .select("strategyId offerType discountValue bonusThreshold bonusPoints freeItem freeItems targetMenuItem discountSteps triggerItem validFrom validUntil")
+        .lean()
+      : [];
+    const convertedOfferMap = new Map(convertedOffers.map((offer) => [String(offer._id), offer]));
+
+    const variantKey = (config) => JSON.stringify({
+      strategyId: Number(config.strategyId) || null,
+      offerType: config.offerType || null,
+      discountValue: Number(config.discountValue) || 0,
+      bonusThreshold: Number(config.bonusThreshold) || 0,
+      bonusPoints: Number(config.bonusPoints) || 0,
+      freeItem: String(config.freeItem || ""),
+      freeItems: (config.freeItems || []).map((choice) => ({
+        item: String(choice?.item?._id || choice?.item || ""),
+        size: String(choice?.size || ""),
+      })),
+      targetMenuItem: String(config.targetMenuItem || ""),
+      discountSteps: config.discountSteps || null,
+      triggerItem: String(config.triggerItem || ""),
+    });
+
+    const commercialStatsByVariant = new Map();
+    convertedOrderStats.forEach((statsItem) => {
+      const offer = convertedOfferMap.get(String(statsItem._id));
+      if (!offer) return;
+      const key = variantKey(offer);
+      const current = commercialStatsByVariant.get(key) || {
+        conversions: 0, revenue: 0, subtotal: 0, discountedSubtotal: 0, freeItemBenefit: 0,
+      };
+      current.conversions += statsItem.conversions || 0;
+      current.revenue += statsItem.revenue || 0;
+      current.subtotal += statsItem.subtotal || 0;
+      current.discountedSubtotal += statsItem.discountedSubtotal || 0;
+      current.freeItemBenefit += statsItem.freeItemBenefit || 0;
+      commercialStatsByVariant.set(key, current);
+    });
+
+    strategyVariants.forEach((variant) => {
+      const commercial = commercialStatsByVariant.get(variantKey(variant._id)) || {};
+      variant.conversions = commercial.conversions || 0;
+      variant.revenue = commercial.revenue || 0;
+      variant.subtotal = commercial.subtotal || 0;
+      variant.discountedSubtotal = commercial.discountedSubtotal || 0;
+      variant.freeItemBenefit = commercial.freeItemBenefit || 0;
+    });
 
     const roundRate = (value, total) =>
       total > 0 ? Math.round((value / total) * 10000) / 100 : 0;
@@ -568,10 +579,6 @@ const getMonitoringStats = async (req, res) => {
         notificationBody: variant.notificationBody,
         generated: variant.generated,
         activated: variant.activated,
-        notified: variant.notified,
-        notificationClicks: variant.notificationClicks,
-        views: variant.views,
-        clicks: variant.clicks,
         conversions: variant.conversions,
         revenue: Math.round(variant.revenue * 100) / 100,
         averageBasket: variant.conversions > 0
@@ -584,8 +591,6 @@ const getMonitoringStats = async (req, res) => {
           Math.max(0, variant.subtotal - variant.discountedSubtotal + variant.freeItemBenefit) * 100,
         ) / 100,
         activationRate: roundRate(variant.activated, variant.generated),
-        notificationClickRate: roundRate(variant.notificationClicks, variant.notified),
-        viewRate: roundRate(variant.views, variant.activated),
         conversionRate: roundRate(variant.conversions, variant.activated),
         firstGeneratedAt: variant.firstGeneratedAt,
         lastGeneratedAt: variant.lastGeneratedAt,

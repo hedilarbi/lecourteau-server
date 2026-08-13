@@ -304,4 +304,6 @@ const orderSchema = new Schema({
   },
 });
 
+orderSchema.index({ personalizedOfferApplied: 1, personalizedOffer: 1, status: 1 });
+
 module.exports = model("Order", orderSchema);

@@ -465,7 +465,28 @@ const getMonitoringStats = async (req, res) => {
               },
             },
             { $limit: 1 },
-            { $project: { sub_total: 1, sub_total_after_discount: 1, total_price: 1 } },
+            {
+              $project: {
+                sub_total: 1,
+                sub_total_after_discount: 1,
+                total_price: 1,
+                freeItemBenefit: {
+                  $sum: {
+                    $map: {
+                      input: {
+                        $filter: {
+                          input: { $ifNull: ["$orderItems", []] },
+                          as: "item",
+                          cond: { $eq: ["$$item.isSmartOfferFreeItem", true] },
+                        },
+                      },
+                      as: "freeItem",
+                      in: { $ifNull: ["$$freeItem.basePrice", 0] },
+                    },
+                  },
+                },
+              },
+            },
           ],
           as: "convertedOrders",
         },
@@ -522,6 +543,7 @@ const getMonitoringStats = async (req, res) => {
           revenue: { $sum: { $ifNull: ["$convertedOrder.total_price", 0] } },
           subtotal: { $sum: { $ifNull: ["$convertedOrder.sub_total", 0] } },
           discountedSubtotal: { $sum: { $ifNull: ["$convertedOrder.sub_total_after_discount", 0] } },
+          freeItemBenefit: { $sum: { $ifNull: ["$convertedOrder.freeItemBenefit", 0] } },
           firstGeneratedAt: { $min: "$createdAt" },
           lastGeneratedAt: { $max: "$createdAt" },
         },
@@ -558,6 +580,9 @@ const getMonitoringStats = async (req, res) => {
         averageDiscount: variant.conversions > 0
           ? Math.round(((variant.subtotal - variant.discountedSubtotal) / variant.conversions) * 100) / 100
           : 0,
+        totalDiscount: Math.round(
+          Math.max(0, variant.subtotal - variant.discountedSubtotal + variant.freeItemBenefit) * 100,
+        ) / 100,
         activationRate: roundRate(variant.activated, variant.generated),
         notificationClickRate: roundRate(variant.notificationClicks, variant.notified),
         viewRate: roundRate(variant.views, variant.activated),

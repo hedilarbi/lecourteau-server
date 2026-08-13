@@ -31,6 +31,7 @@ const createOrUpdateRule = async (req, res) => {
       offerType, 
       discountValue,
       bonusThreshold,
+      bonusPoints,
       targetCategory,
       targetMenuItem,
       freeItem,
@@ -54,6 +55,7 @@ const createOrUpdateRule = async (req, res) => {
         offerType,
         discountValue,
         bonusThreshold,
+        bonusPoints: offerType === "loyalty_points" ? Math.max(0, Math.floor(Number(bonusPoints) || 0)) : 0,
         targetCategory: targetCategory || null,
         targetMenuItem: targetMenuItem || null,
         freeItem: normalizedFreeItem,
@@ -72,6 +74,7 @@ const createOrUpdateRule = async (req, res) => {
           $set: {
             discountValue: rule.discountValue,
             bonusThreshold: rule.bonusThreshold,
+            bonusPoints: rule.bonusPoints,
             offerType: rule.offerType,
             targetCategory: rule.targetCategory || null,
             targetMenuItem: rule.targetMenuItem || null,
@@ -101,7 +104,13 @@ const getActiveOffer = async (req, res) => {
       user: userId,
       status: { $in: ["active", "viewed", "clicked"] },
       validUntil: { $gt: now }
-    }).sort({ createdAt: -1 }).populate("freeItem targetCategory targetMenuItem freeItems.item");
+    })
+      .sort({ createdAt: -1 })
+      .populate("freeItem targetCategory targetMenuItem")
+      .populate({
+        path: "freeItems.item",
+        populate: { path: "category", select: "name slug" },
+      });
 
     if (activeOffer) {
       const Order = require("../models/Order");
@@ -253,7 +262,7 @@ const getOffersHistory = async (req, res) => {
     const orders = await Order.find({
       personalizedOffer: { $in: usedOfferIds },
       status: { $ne: "Annulé" },
-    }).select("personalizedOffer sub_total_after_discount sub_total total_price hediShareAmount");
+    }).select("personalizedOffer sub_total_after_discount sub_total total_price confirmed personalizedOfferApplied hediShareAmount");
 
     const ordersMap = {};
     orders.forEach((o) => {
@@ -267,7 +276,15 @@ const getOffersHistory = async (req, res) => {
       return {
         ...h,
         orderAmount: order ? (order.sub_total_after_discount || order.sub_total || order.total_price || 0) : 0,
-        hediRoyalty: order ? (order.hediShareAmount || 0) : 0,
+        hediRoyalty:
+          order?.confirmed && order?.personalizedOfferApplied
+            ? Math.round(
+                (order.sub_total_after_discount != null &&
+                Number.isFinite(Number(order.sub_total_after_discount))
+                  ? Number(order.sub_total_after_discount)
+                  : Number(order.sub_total || 0)) * 5,
+              ) / 100
+            : 0,
       };
     });
 
@@ -374,6 +391,7 @@ const getMonitoringStats = async (req, res) => {
       discount_product: { label: "Réduction sur article (%)", count: 0, used: 0 },
       free_item: { label: "Article gratuit", count: 0, used: 0 },
       free_delivery: { label: "Livraison gratuite", count: 0, used: 0 },
+      loyalty_points: { label: "Points de fidélité bonus", count: 0, used: 0 },
     };
 
     offerTypesAgg.forEach((item) => {
@@ -551,7 +569,8 @@ const getSmartOfferHediSummary = async () => {
     {
       $match: {
         status: { $ne: "Annulé" },
-        hediShareAmount: { $gt: 0 },
+        confirmed: true,
+        personalizedOfferApplied: true,
       },
     },
     {
@@ -559,7 +578,20 @@ const getSmartOfferHediSummary = async () => {
         _id: null,
         totalCredits: {
           $sum: {
-            $ifNull: ["$hediShareAmount", 0],
+            $round: [
+              {
+                $multiply: [
+                  {
+                    $ifNull: [
+                      "$sub_total_after_discount",
+                      { $ifNull: ["$sub_total", 0] },
+                    ],
+                  },
+                  0.05,
+                ],
+              },
+              2,
+            ],
           },
         },
         totalOrdersCount: {

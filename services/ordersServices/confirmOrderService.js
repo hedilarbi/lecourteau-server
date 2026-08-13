@@ -58,7 +58,7 @@ async function claimOrderForCapture(orderId) {
   )
     .populate({ path: "orderItems", populate: "customizations item" })
     .populate({ path: "offers", populate: "offer " })
-    .populate({ path: "rewards", populate: "item" })
+    .populate({ path: "rewards", populate: "item customizations" })
     .populate({ path: "user" });
 
   return order;
@@ -79,6 +79,28 @@ function calculatePoints(order) {
     points += order.orderItems.reduce((acc, it) => acc + it.price, 0);
   if (order.discount) points -= (points * order.discount) / 100;
   return points;
+}
+
+function applySmartOfferHediShare(order) {
+  const offerWasUsed = Boolean(
+    order?.personalizedOffer && order?.personalizedOfferApplied,
+  );
+  if (!offerWasUsed) {
+    order.hediSharePercent = 0;
+    order.hediShareAmount = 0;
+    return;
+  }
+
+  const hasDiscountedSubtotal = order?.sub_total_after_discount != null;
+  const discountedSubtotal = Number(order?.sub_total_after_discount);
+  const regularSubtotal = Number(order?.sub_total || 0);
+  const applicableSubtotal =
+    hasDiscountedSubtotal && Number.isFinite(discountedSubtotal)
+    ? discountedSubtotal
+    : regularSubtotal;
+  order.hediSharePercent = 5;
+  order.hediShareAmount =
+    Math.round(Math.max(0, applicableSubtotal) * 5) / 100;
 }
 
 async function sendMail(order) {
@@ -125,7 +147,7 @@ async function sendMail(order) {
   }
 }
 
-async function sendPush(user, orderId, pointsEarned) {
+async function sendPush(user, orderId, pointsEarned, bonusPoints = 0) {
   try {
     if (!user?.expo_token) return;
     const expo = new Expo({ useFcmV1: true });
@@ -135,7 +157,8 @@ async function sendPush(user, orderId, pointsEarned) {
         sound: "default",
         title: "Commande confirmée",
         body: `Bienvenue chez Le Courteau ! Votre commande a été confirmée et est en cours de préparation, vous avez remporté ${
-          pointsEarned * 10
+          Math.floor(pointsEarned * 10) +
+          Math.max(0, Math.floor(Number(bonusPoints) || 0))
         } points de fidélité.`,
         data: { order_id: orderId },
         priority: "high",
@@ -266,11 +289,12 @@ module.exports = async function confirmOrderService(orderId) {
       if (totalPrice <= 0 || isSubscriptionFreeItemPayment) {
         order.payment_status = true;
       }
+      applySmartOfferHediShare(order);
       await order.save();
       await finalizeLoyaltyAndPromo(order);
       const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order)),
+        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
       );
       process.nextTick(() => sendMail(order));
       return {
@@ -291,12 +315,13 @@ module.exports = async function confirmOrderService(orderId) {
       // Already captured previously => treat as success (idempotent)
       order.payment_status = true;
       order.confirmed = true;
+      applySmartOfferHediShare(order);
       await order.save();
       // Loyalty + promo bookkeeping (run once; guard via flags if needed)
       await finalizeLoyaltyAndPromo(order);
       const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order)),
+        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
       );
       process.nextTick(() => sendMail(order));
       return { response: "Order already captured; confirmed", warning };
@@ -331,13 +356,14 @@ module.exports = async function confirmOrderService(orderId) {
     // 5) Mark order paid/confirmed
     order.payment_status = true;
     order.confirmed = true;
+    applySmartOfferHediShare(order);
     await order.save();
 
     // 6) Loyalty + promo bookkeeping
     await finalizeLoyaltyAndPromo(order);
     const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
     process.nextTick(() =>
-      sendPush(order.user, order._id, calculatePoints(order)),
+      sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
     );
     process.nextTick(() => sendMail(order));
 
@@ -354,10 +380,11 @@ module.exports = async function confirmOrderService(orderId) {
     ) {
       order.payment_status = true;
       order.confirmed = true;
+      applySmartOfferHediShare(order);
       await order.save();
       await finalizeLoyaltyAndPromo(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order)),
+        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
       );
       process.nextTick(() => sendMail(order));
       return { response: "Order already captured; confirmed" };
@@ -387,13 +414,22 @@ module.exports = async function confirmOrderService(orderId) {
 
 async function finalizeLoyaltyAndPromo(order) {
   const user = await mongoose.models.User.findById(order.user._id);
-  const pointsToremove = (order.rewards || []).reduce(
-    (acc, it) => acc + it.points,
-    0,
-  );
+  // Les points sont figés sur la commande à la création : ils ne bougent
+  // plus si la récompense est modifiée entre-temps.
+  const pointsToremove = (order.rewards || []).reduce((acc, it) => {
+    const points = Number(it?.points);
+    return acc + (Number.isFinite(points) ? points : 0);
+  }, 0);
   const pointsEarned = calculatePoints(order);
-  const totalPoints = Math.floor(pointsEarned * 10 - pointsToremove);
-  user.fidelity_points += totalPoints;
+  const smartOfferBonusPoints =
+    order.personalizedOfferApplied === true
+      ? Math.max(0, Math.floor(Number(order.smartOfferBonusPoints) || 0))
+      : 0;
+  const totalPoints = Math.floor(
+    pointsEarned * 10 - pointsToremove + smartOfferBonusPoints,
+  );
+  user.fidelity_points =
+    (Number(user.fidelity_points) || 0) + totalPoints;
   const orderDiscountPercent = Number(order?.discount);
   const usedFirstOrderDiscount =
     Number.isFinite(orderDiscountPercent) && orderDiscountPercent >= 20;

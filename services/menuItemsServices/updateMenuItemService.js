@@ -1,5 +1,21 @@
-const { isValidObjectId } = require("mongoose");
+const mongoose = require("mongoose");
+const { isValidObjectId } = mongoose;
 const MenuItem = require("../../models/MenuItem");
+
+// Une récompense pointe vers un couple article/taille : si la taille
+// disparaît des prix de l'article, la récompense n'a plus de sens.
+// `$type: "string"` protège les anciennes récompenses sans taille,
+// qui doivent être reprises via scripts/backfillRewardSizes.js.
+const deleteRewardsWithRemovedSizes = async (itemId, prices) => {
+  const remainingSizes = (prices || [])
+    .map((price) => price?.size)
+    .filter((size) => typeof size === "string");
+
+  await mongoose.models.Reward.deleteMany({
+    item: itemId,
+    size: { $type: "string", $nin: remainingSizes },
+  });
+};
 
 const normalizeCustomizationGroupIds = (value) => {
   if (typeof value === "undefined") return undefined;
@@ -71,6 +87,10 @@ const updateMenuItemService = async (
         path: "customization_group",
         populate: { path: "toppings" },
       });
+
+    if (response) {
+      await deleteRewardsWithRemovedSizes(response._id, response.prices);
+    }
 
     return { response };
   } catch (err) {

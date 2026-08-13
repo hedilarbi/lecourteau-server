@@ -59,10 +59,31 @@ const orderSchema = new Schema({
       price: Number,
     },
   ],
+  // L'article et la taille sont dénormalisés : une récompense peut être
+  // supprimée du catalogue, la commande doit rester lisible.
   rewards: [
     {
-      type: Schema.Types.ObjectId,
-      ref: "Reward",
+      reward: {
+        type: Schema.Types.ObjectId,
+        ref: "Reward",
+      },
+      item: {
+        type: Schema.Types.ObjectId,
+        ref: "MenuItem",
+      },
+      size: String,
+      customizations: [
+        {
+          type: Schema.Types.ObjectId,
+          ref: "Topping",
+        },
+      ],
+      points: Number,
+      extraPrice: {
+        type: Number,
+        default: 0,
+      },
+      comment: String,
     },
   ],
 
@@ -163,6 +184,11 @@ const orderSchema = new Schema({
   personalizedOfferApplied: {
     type: Boolean,
     default: false,
+  },
+  smartOfferBonusPoints: {
+    type: Number,
+    min: 0,
+    default: 0,
   },
   subscriptionBenefits: {
     isApplied: {

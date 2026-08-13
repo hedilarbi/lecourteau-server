@@ -51,7 +51,18 @@ const getOrderService = async (id) => {
           },
         ],
       })
-      .populate({ path: "rewards", populate: "item" })
+      .populate({
+        path: "rewards",
+        populate: [
+          { path: "item", select: "name image" },
+          { path: "customizations", select: "name price" },
+          {
+            path: "reward",
+            select: "points size item",
+            populate: { path: "item", select: "name image" },
+          },
+        ],
+      })
       .populate({ path: "user", select: "name phone_number email" })
       .populate("restaurant", "name")
       .populate("subscriptionBenefits.freeItemMenuItemId", "name")

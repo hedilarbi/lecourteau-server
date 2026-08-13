@@ -4,29 +4,48 @@ const {
   createRewardService,
 } = require("../services/rewardServices/createRewardService");
 const {
+  updateRewardService,
+} = require("../services/rewardServices/updateRewardService");
+const {
   deleteRewardsService,
 } = require("../services/rewardServices/deleteRewardsService");
+const { REWARD_POPULATE } = require("../services/rewardServices/rewardValidation");
 
-const createReward = async (req, res) => {
-  const { item, points } = req.body;
-
-  // Input validation
+// Validation commune à la création et à la modification.
+const validatePayload = ({ item, size, points }) => {
   if (!item || !points) {
-    return res
-      .status(400)
-      .json({ success: false, error: "Item and points are required." });
+    return "Item and points are required.";
+  }
+
+  if (typeof size !== "string" || size.trim().length === 0) {
+    return "Size is required.";
   }
 
   if (isNaN(points) || points < 0) {
-    return res
-      .status(400)
-      .json({ success: false, error: "Points must be a non-negative number." });
+    return "Points must be a non-negative number.";
+  }
+
+  return null;
+};
+
+const createReward = async (req, res) => {
+  const { item, points } = req.body;
+  const size = typeof req.body.size === "string" ? req.body.size.trim() : "";
+
+  // Input validation
+  const validationError = validatePayload({ item, size, points });
+  if (validationError) {
+    return res.status(400).json({ success: false, error: validationError });
   }
 
   try {
-    const { response, error } = await createRewardService(item, points);
+    const { response, error, statusCode } = await createRewardService(
+      item,
+      size,
+      points
+    );
     if (error) {
-      return res.status(500).json({ success: false, error });
+      return res.status(statusCode || 500).json({ success: false, error });
     }
     res.status(201).json(response);
   } catch (err) {
@@ -35,13 +54,37 @@ const createReward = async (req, res) => {
   }
 };
 
+const updateReward = async (req, res) => {
+  const { id } = req.params;
+  const { item, points } = req.body;
+  const size = typeof req.body.size === "string" ? req.body.size.trim() : "";
+
+  const validationError = validatePayload({ item, size, points });
+  if (validationError) {
+    return res.status(400).json({ success: false, error: validationError });
+  }
+
+  try {
+    const { response, error, statusCode } = await updateRewardService(
+      id,
+      item,
+      size,
+      points
+    );
+    if (error) {
+      return res.status(statusCode || 500).json({ success: false, error });
+    }
+    res.status(200).json(response);
+  } catch (err) {
+    console.error("Error updating reward:", err);
+    res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+};
+
 const getRewards = async (req, res) => {
   try {
     // Fetch rewards from the database, populating the item field
-    let response = await Reward.find().populate({
-      path: "item",
-      select: "name image slug",
-    });
+    let response = await Reward.find().populate(REWARD_POPULATE);
 
     // Reverse the array if needed (assumed to get the latest rewards first)
     response = response.reverse();
@@ -74,4 +117,4 @@ const deleteReward = async (req, res) => {
   }
 };
 
-module.exports = { createReward, getRewards, deleteReward };
+module.exports = { createReward, getRewards, updateReward, deleteReward };

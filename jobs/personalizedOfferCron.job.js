@@ -49,6 +49,9 @@ const personalizeText = (text, user, offerDetails = {}) => {
   if (offerDetails.discount) {
     result = result.replace(/{discount}/g, offerDetails.discount);
   }
+  if (offerDetails.points) {
+    result = result.replace(/{points}/g, String(offerDetails.points));
+  }
   if (offerDetails.threshold !== undefined && offerDetails.threshold !== null && offerDetails.threshold !== "") {
     result = result.replace(/{threshold}/g, String(offerDetails.threshold));
   }
@@ -448,6 +451,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           $set: {
             discountValue: ruleDoc.discountValue,
             bonusThreshold: ruleDoc.bonusThreshold,
+            bonusPoints: ruleDoc.bonusPoints || 0,
             offerType: ruleDoc.offerType,
             targetCategory: ruleDoc.targetCategory || null,
             targetMenuItem: ruleDoc.targetMenuItem || null,
@@ -764,6 +768,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
                 offerType: dbRule.offerType || defaultStrat.offerType,
                 discountValue: dbRule.discountValue !== undefined ? dbRule.discountValue : defaultStrat.discountValue,
                 bonusThreshold: dbRule.bonusThreshold !== undefined ? dbRule.bonusThreshold : defaultStrat.bonusThreshold,
+                bonusPoints: dbRule.bonusPoints || 0,
                 cooldownDays: dbRule.cooldownDays !== undefined ? dbRule.cooldownDays : defaultStrat.cooldownDays,
                 validityHours: dbRule.validityHours !== undefined ? dbRule.validityHours : defaultStrat.validityHours,
                 notificationTitle: dbRule.notificationTitle || defaultStrat.notificationTitle,
@@ -1038,6 +1043,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             discount:     selected.discountValue
               ? (selected.offerType === "bonus_basket" ? `${selected.discountValue}$` : `${selected.discountValue}%`)
               : "",
+            points:       selected.bonusPoints || rule?.bonusPoints || "",
             threshold:    selected.bonusThreshold || "",
           };
           const templateTitle = selected.notificationTitle || rule?.notificationTitle || "";
@@ -1057,6 +1063,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             offerType:         selected.offerType,
             discountValue:     selected.discountValue  || 0,
             bonusThreshold:    selected.bonusThreshold || 0,
+            bonusPoints:       selected.bonusPoints || rule?.bonusPoints || 0,
             targetCategory:    selected.targetCategory || null,
             targetMenuItem:    selected.targetMenuItem || null,
             freeItem:          selectedFreeItems.length > 0 ? null : selected.freeItem || null,

@@ -54,6 +54,46 @@ const buildOrderItemsSubtotal = (orderItems = []) =>
 const buildOrderOffersSubtotal = (offers = []) =>
   offers.reduce((acc, offer) => acc + toSafeNumber(offer?.price, 0), 0);
 
+// Le client n'envoie que l'id de la récompense et ses personnalisations.
+// L'article, la taille et les points sont relus en base (le client ne doit
+// pas pouvoir décider du coût en points), puis dénormalisés sur la commande
+// pour qu'elle reste lisible si la récompense est retirée du catalogue.
+const buildOrderRewards = async (rewards = []) => {
+  const rewardIds = rewards
+    .map((entry) => normalizeId(entry?.id))
+    .filter(Boolean);
+
+  if (!rewardIds.length) return [];
+
+  const rewardDocuments = await mongoose.models.Reward.find({
+    _id: { $in: rewardIds },
+  });
+  const rewardsById = new Map(
+    rewardDocuments.map((document) => [String(document._id), document]),
+  );
+
+  return rewards.reduce((acc, entry) => {
+    const rewardDocument = rewardsById.get(normalizeId(entry?.id));
+    if (!rewardDocument) return acc;
+
+    const customizations = Array.isArray(entry?.customizations)
+      ? entry.customizations.map(normalizeId).filter(Boolean)
+      : [];
+
+    acc.push({
+      reward: rewardDocument._id,
+      item: rewardDocument.item,
+      size: rewardDocument.size || entry?.size || "",
+      customizations,
+      points: toSafeNumber(rewardDocument.points, 0),
+      extraPrice: roundMoney(entry?.extraPrice, 0),
+      comment: entry?.comment || "",
+    });
+
+    return acc;
+  }, []);
+};
+
 const getPromoExcludedCategoryIds = (promoCode) => {
   if (!Array.isArray(promoCode?.excludedCategories)) return [];
 
@@ -281,11 +321,7 @@ const createOrderService = async (order, options = {}) => {
     const rewards = Array.isArray(orderPayload.rewards)
       ? orderPayload.rewards
       : [];
-    const rewardsList = rewards.length
-      ? rewards
-          .map((item) => item?.id)
-          .filter((rewardId) => Boolean(rewardId))
-      : [];
+    const rewardsList = await buildOrderRewards(rewards);
     const code = generateRandomCode(8).toUpperCase();
 
     const user = await mongoose.models.User.findById(
@@ -480,7 +516,7 @@ const createOrderService = async (order, options = {}) => {
       firstOrderDiscountEligible && !(subscriptionActive && promoCodeRequested) && !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
     const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
-      subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied) && !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
+      subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
     const currentSubscriptionCycleKey = getSubscriptionFreeItemCycleKey(
       user,
       new Date(),
@@ -510,7 +546,8 @@ const createOrderService = async (order, options = {}) => {
     const appliedSubscriptionDiscountPercent =
       shouldApplySubscriptionBenefits &&
       !firstOrderDiscountApplies &&
-      !promoCodeRequested
+      !promoCodeRequested &&
+      !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer)
         ? SUBSCRIPTION_DISCOUNT_PERCENT
         : 0;
     const appliedSubscriptionDiscountAmount =
@@ -771,7 +808,27 @@ const createOrderService = async (order, options = {}) => {
         }
         const freeItemId = personalizedOfferDocument.freeItem ? String(personalizedOfferDocument.freeItem) : "";
         const targetCatId = personalizedOfferDocument.targetCategory ? String(personalizedOfferDocument.targetCategory) : "";
-        let matchingItem = orderItems.find(item => item.isSmartOfferFreeItem);
+        const configuredFreeItems = Array.isArray(personalizedOfferDocument.freeItems)
+          ? personalizedOfferDocument.freeItems
+          : [];
+        let matchingItem = orderItems.find(item => {
+          if (!item.isSmartOfferFreeItem) return false;
+          if (configuredFreeItems.length === 0) {
+            return freeItemId ? String(item.item) === freeItemId : false;
+          }
+
+          const itemId = String(item.item || "");
+          const itemSize = String(item.size || "").trim().toLowerCase();
+          return configuredFreeItems.some(configuredItem => {
+            const configuredItemId = String(
+              configuredItem?.item?._id || configuredItem?.item || "",
+            );
+            const configuredSize = String(configuredItem?.size || "")
+              .trim()
+              .toLowerCase();
+            return configuredItemId === itemId && configuredSize === itemSize;
+          });
+        });
         if (!matchingItem && freeItemId) {
           matchingItem = orderItems.find(item => String(item.item) === freeItemId);
         }
@@ -831,6 +888,14 @@ const createOrderService = async (order, options = {}) => {
         personalizedDiscountAmount = discountableBase * (personalizedOfferDocument.discountValue / 100);
       } else if (personalizedOfferDocument.offerType === "free_delivery") {
         personalizedDiscountAmount = 0; // Discount applied directly to delivery fee, not subtotal
+      } else if (personalizedOfferDocument.offerType === "loyalty_points") {
+        const bonusPoints = Math.floor(
+          toSafeNumber(personalizedOfferDocument.bonusPoints, 0),
+        );
+        if (bonusPoints <= 0) {
+          return { error: "Le nombre de points bonus configuré est invalide." };
+        }
+        personalizedDiscountAmount = 0;
       }
 
       personalizedDiscountAmount = roundMoney(personalizedDiscountAmount, 0);
@@ -1097,7 +1162,6 @@ const createOrderService = async (order, options = {}) => {
       user.referralBalance = Math.max(0, roundMoney(availableBalance - referralDiscountApplied, 0));
     }
 
-    const SMART_OFFER_ROYALTY_PERCENT = 5;
     const personalizedOfferApplied = Boolean(
       personalizedOfferDocument &&
         (personalizedOfferDocument.offerType === "free_delivery"
@@ -1106,21 +1170,14 @@ const createOrderService = async (order, options = {}) => {
             normalizedDeliveryFee === 0
           : personalizedOfferDocument.offerType === "free_item"
             ? personalizedFreeItemBenefitAmount > 0
+            : personalizedOfferDocument.offerType === "loyalty_points"
+              ? Math.floor(toSafeNumber(personalizedOfferDocument.bonusPoints, 0)) > 0
             : personalizedDiscountAmount > 0),
     );
-    let hediSharePercent = 0;
-    let hediShareAmount = 0;
-    if (personalizedOfferApplied) {
-      hediSharePercent = SMART_OFFER_ROYALTY_PERCENT;
-      const baseAmount = toSafeNumber(
-        orderPayload.subTotalAfterDiscount,
-        toSafeNumber(orderPayload.subTotal, toSafeNumber(orderPayload.total, 0)),
-      );
-      hediShareAmount = roundMoney(
-        baseAmount * (SMART_OFFER_ROYALTY_PERCENT / 100),
-        0,
-      );
-    }
+    // The Hedi share is credited only when the restaurant confirms the order.
+    // Keep it at zero while the order is awaiting confirmation.
+    const hediSharePercent = 0;
+    const hediShareAmount = 0;
 
     const newOrder = new Order({
       user: orderPayload.user_id,
@@ -1154,6 +1211,11 @@ const createOrderService = async (order, options = {}) => {
       promoCode: promoCodeId,
       personalizedOffer: personalizedOfferId || null,
       personalizedOfferApplied,
+      smartOfferBonusPoints:
+        personalizedOfferApplied &&
+        personalizedOfferDocument?.offerType === "loyalty_points"
+          ? Math.floor(toSafeNumber(personalizedOfferDocument.bonusPoints, 0))
+          : 0,
       subscriptionBenefits,
       birthdayBenefits,
       scheduled: {

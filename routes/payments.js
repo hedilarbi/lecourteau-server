@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   createPayment,
+  createPlatformPaymentIntent,
   createSetupIntent,
   getPaymentMethods,
   verifyPayment,
@@ -15,6 +16,7 @@ const {
 const router = express.Router();
 
 router.post("/create-payment-intent", createPayment);
+router.post("/create-platform-payment-intent", createPlatformPaymentIntent);
 router.post("/create-setup-intent", createSetupIntent);
 router.get("/get-payment-methods/:customerId", getPaymentMethods);
 router.get("/verify-payment", verifyPayment);

@@ -17,6 +17,7 @@ const sanitizeRuleForProduction = (rule) => {
     offerType: rule.offerType,
     discountValue: rule.discountValue || 0,
     bonusThreshold: rule.bonusThreshold || 0,
+    bonusPoints: rule.bonusPoints || 0,
     targetCategory: null,
     targetMenuItem: null,
     freeItem: null,

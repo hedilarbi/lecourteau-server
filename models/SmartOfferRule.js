@@ -32,7 +32,7 @@ const smartOfferRuleSchema = new Schema({
   },
   offerType: {
     type: String,
-    enum: ["discount_category", "discount_product", "free_item", "bonus_basket", "discount_order", "free_delivery"],
+    enum: ["discount_category", "discount_product", "free_item", "bonus_basket", "discount_order", "free_delivery", "loyalty_points"],
     required: true,
   },
   discountValue: {
@@ -41,6 +41,11 @@ const smartOfferRuleSchema = new Schema({
   },
   bonusThreshold: {
     type: Number, // For bonus_basket (e.g. $20)
+    default: 0,
+  },
+  bonusPoints: {
+    type: Number,
+    min: 0,
     default: 0,
   },
   targetCategory: {

@@ -41,6 +41,112 @@ const getPendingPaymentIntentEntry = (key) => {
   return entry;
 };
 
+const getOrCreateStripeCustomer = async ({ user, email }) => {
+  if (user?.stripe_id) {
+    try {
+      const customer = await stripe.customers.retrieve(user.stripe_id);
+      if (!customer?.deleted) return customer;
+    } catch (error) {
+      if (error?.code !== "resource_missing") throw error;
+    }
+  }
+
+  const customers = await stripe.customers.list({ email, limit: 1 });
+  const customer =
+    customers.data[0] || (await stripe.customers.create({ email }));
+
+  if (user && String(user.stripe_id || "") !== String(customer.id)) {
+    await User.findByIdAndUpdate(user._id, { stripe_id: customer.id });
+  }
+
+  return customer;
+};
+
+const createPlatformPaymentIntent = async (req, res) => {
+  const { amount, email, userId, platform } = req.body;
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedAmount = Math.round(Number(amount));
+  const normalizedPlatform = String(platform || "platform_pay")
+    .trim()
+    .toLowerCase();
+  const allowedPlatforms = new Set([
+    "apple_pay",
+    "google_pay",
+    "express_checkout",
+  ]);
+
+  if (
+    !normalizedEmail ||
+    !Number.isSafeInteger(normalizedAmount) ||
+    normalizedAmount <= 0 ||
+    !allowedPlatforms.has(normalizedPlatform)
+  ) {
+    return res.status(400).json({
+      success: false,
+      error: "Les informations du paiement wallet sont invalides.",
+    });
+  }
+
+  try {
+    const user = userId
+      ? await User.findById(userId).populate("orders")
+      : await User.findOne({ email: normalizedEmail }).populate("orders");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "Utilisateur introuvable.",
+      });
+    }
+
+    const lastOrder = user.orders?.[user.orders.length - 1];
+    if (lastOrder?.createdAt) {
+      const elapsedMinutes =
+        (Date.now() - new Date(lastOrder.createdAt).getTime()) / 1000 / 60;
+      if (elapsedMinutes <= 1) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Vous avez déjà passé une commande il y a moins d'une minute. Veuillez attendre avant de passer une nouvelle commande.",
+        });
+      }
+    }
+
+    const customer = await getOrCreateStripeCustomer({
+      user,
+      email: normalizedEmail,
+    });
+    const paymentIntent = await stripe.paymentIntents.create({
+      customer: customer.id,
+      amount: normalizedAmount,
+      currency: "cad",
+      capture_method: "manual",
+      payment_method_types: ["card"],
+      metadata: {
+        userId: String(user._id),
+        source: "checkout_order",
+        platform: normalizedPlatform,
+      },
+    });
+
+    return res.status(200).json({
+      id: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      status: paymentIntent.status,
+    });
+  } catch (error) {
+    logWithTimestamp(
+      `Error creating platform payment intent: userId ${userId}, platform ${normalizedPlatform}, error: ${error}`
+    );
+    return res.status(500).json({
+      success: false,
+      error:
+        error?.message ||
+        "Une erreur est survenue lors de la préparation du paiement wallet.",
+    });
+  }
+};
+
 const createPayment = async (req, res) => {
   const { amount, email, paymentMethod, saved, userId } = req.body;
   const requestKey = buildPaymentIntentRequestKey({
@@ -422,6 +528,7 @@ const catchError = (req, res) => {
 
 module.exports = {
   createPayment,
+  createPlatformPaymentIntent,
   createSetupIntent,
   getPaymentMethods,
   verifyPayment,

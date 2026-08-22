@@ -139,7 +139,7 @@ const calculatePromoEligibleSubtotal = (promoCode, orderItems, menuItemsById) =>
   return roundMoney(itemsEligibleSubtotal, 0);
 };
 
-const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal) => {
+const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal, orderItems = []) => {
   if (!promoCode) return 0;
 
   if (promoCode.type === "percent") {
@@ -154,6 +154,19 @@ const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal) => {
       Math.min(eligibleSubtotal, toSafeNumber(promoCode?.amount, 0)),
       0,
     );
+  }
+
+  if (promoCode.type === "free_item") {
+    const freeItemId = String(promoCode.freeItem?._id || promoCode.freeItem || "").trim();
+    if (!freeItemId) return 0;
+    
+    const matchingItem = orderItems.find(
+      (item) => String(item?.item || "").trim() === freeItemId
+    );
+
+    if (matchingItem) {
+      return roundMoney(toSafeNumber(matchingItem.basePrice ?? matchingItem.price, 0), 0);
+    }
   }
 
   return 0;
@@ -312,8 +325,11 @@ const createOrderService = async (order, options = {}) => {
     const allowZeroTotalReferralOrder = Boolean(
       options?.allowZeroTotalReferralOrder,
     );
+    const allowZeroTotalPromoOrder = Boolean(
+      options?.allowZeroTotalPromoOrder,
+    );
     const allowAnyZeroTotalOrder =
-      allowZeroTotalSubscriptionOrder || allowZeroTotalReferralOrder;
+      allowZeroTotalSubscriptionOrder || allowZeroTotalReferralOrder || allowZeroTotalPromoOrder;
     const orderItems = Array.isArray(orderPayload.orderItems)
       ? orderPayload.orderItems
       : [];
@@ -537,11 +553,29 @@ const createOrderService = async (order, options = {}) => {
       Boolean(configuredFreeItemId) &&
       Boolean(requestedFreeItemId) &&
       configuredFreeItemId === requestedFreeItemId;
+    // Le bénéfice mensuel exige une ligne de panier qui lui soit propre. Un
+    // article déjà offert par un autre avantage (cadeau d'offre personnalisée,
+    // cadeau d'anniversaire) a la même signature de prix et serait sinon
+    // facturé deux fois : remise abonnement appliquée à un article déjà
+    // gratuit, et quota mensuel consommé sans que le client l'ait demandé.
+    // Les clients antérieurs à ces drapeaux envoient `undefined`, donc falsy :
+    // leur comportement reste inchangé.
+    // La ligne doit aussi porter la signature d'un article offert
+    // (basePrice > price, le client ne payant que les suppléments) : sinon
+    // l'article déclencheur d'une offre "1 acheté = 1 offert", payé plein tarif
+    // et portant le même MenuItem, suffirait à valider le bénéfice.
+    const subscriptionFreeItemLine = orderItems.find((line) => {
+      if (normalizeId(line?.item) !== configuredFreeItemId) return false;
+      if (line?.isSmartOfferFreeItem || line?.isBirthdayFreeItem) return false;
+      if (line?.isSubscriptionFreeItem) return true;
+      return toSafeNumber(line?.basePrice, 0) > toSafeNumber(line?.price, 0);
+    });
     const canApplyConfiguredFreeItem =
       shouldApplySubscriptionBenefits &&
       requestedFreeItemApplied &&
       configuredFreeItemSelected &&
-      freeItemRemaining > 0;
+      freeItemRemaining > 0 &&
+      Boolean(subscriptionFreeItemLine);
 
     const appliedSubscriptionDiscountPercent =
       shouldApplySubscriptionBenefits &&
@@ -619,6 +653,11 @@ const createOrderService = async (order, options = {}) => {
     );
     const containsBirthdayGiftInOrderItems = orderItems.some((item) => {
       if (Boolean(item?.isBirthdayFreeItem)) return true;
+      // Même isolation que pour l'abonnement : une ligne déjà offerte par un
+      // autre avantage ne doit pas être prise pour le cadeau d'anniversaire.
+      if (item?.isSmartOfferFreeItem || item?.isSubscriptionFreeItem) {
+        return false;
+      }
       const itemId = normalizeId(item?.item);
       if (!configuredBirthdayFreeItemId || itemId !== configuredBirthdayFreeItemId) {
         return false;
@@ -1014,9 +1053,20 @@ const createOrderService = async (order, options = {}) => {
         };
       }
 
+      if (promoCodeDocument.type === "free_item") {
+        const freeItemId = String(promoCodeDocument.freeItem?._id || promoCodeDocument.freeItem || "").trim();
+        const hasFreeItem = orderItems.some((item) => String(item?.item || "").trim() === freeItemId);
+        if (!hasFreeItem) {
+          return {
+            error: "Ce code promo nécessite l'ajout de l'article gratuit à votre commande.",
+          };
+        }
+      }
+
       if (
         promoCodeDocument.type === "percent" ||
-        promoCodeDocument.type === "amount"
+        promoCodeDocument.type === "amount" ||
+        promoCodeDocument.type === "free_item"
       ) {
         const orderMenuItemIds = [
           ...new Set(
@@ -1070,6 +1120,7 @@ const createOrderService = async (order, options = {}) => {
         promoDiscountAmount = calculatePromoDiscountAmount(
           promoCodeDocument,
           eligibleSubtotal,
+          orderItems
         );
 
         const expectedSubTotalAfterDiscount = roundMoney(
@@ -1186,6 +1237,15 @@ const createOrderService = async (order, options = {}) => {
       }
     }
 
+    if (allowZeroTotalPromoOrder) {
+      if (!promoCodeId) {
+        return {
+          error:
+            "Un code promo valide est requis pour passer une commande à total 0 via cette route.",
+        };
+      }
+    }
+
     let coords = resolvedOrderAddress.coords || {};
     if (!coords?.latitude || !coords?.longitude) {
       coords = {
@@ -1253,7 +1313,9 @@ const createOrderService = async (order, options = {}) => {
         ? "subscription_free_item"
         : allowZeroTotalReferralOrder
           ? "referral_credit"
-          : normalizedPaymentMethod || "card",
+          : allowZeroTotalPromoOrder
+            ? "promo_code"
+            : normalizedPaymentMethod || "card",
       promoCode: promoCodeId,
       personalizedOffer: personalizedOfferId || null,
       personalizedOfferApplied,

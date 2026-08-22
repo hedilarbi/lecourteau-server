@@ -5,7 +5,11 @@ const {
   DELIVERED,
   READY,
   SCHEDULED,
+  CANCELED,
 } = require("../../utils/constants");
+const {
+  restoreSplitDiscountStepOnCancel,
+} = require("./restoreSmartOfferOnCancelService");
 const Order = require("../../models/Order");
 
 const updateStatusService = async (id, status) => {
@@ -21,6 +25,12 @@ const updateStatusService = async (id, status) => {
     }
 
     const response = await Order.findByIdAndUpdate(id, update, { new: true });
+
+    // Une annulation côté restaurant doit rendre au client l'étape de rabais
+    // divisé que la création de la commande avait déjà consommée.
+    if (status === CANCELED) {
+      await restoreSplitDiscountStepOnCancel(response).catch(() => {});
+    }
 
     const user = await mongoose.models.User.findById(response.user);
 

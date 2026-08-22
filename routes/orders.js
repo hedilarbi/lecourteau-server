@@ -3,6 +3,7 @@ const {
   createOrder,
   createZeroTotalSubscriptionOrder,
   createZeroTotalReferralOrder,
+  createZeroTotalPromoOrder,
   getOrders,
   getOrder,
   deleteOrder,
@@ -31,6 +32,7 @@ router.put("/confirm/:id", authStaff, confirmOrder);
 router.post("/create", createOrder);
 router.post("/create/subscription-zero-total", createZeroTotalSubscriptionOrder);
 router.post("/create/referral-zero-total", createZeroTotalReferralOrder);
+router.post("/create/promo-zero-total", createZeroTotalPromoOrder);
 router.get("/filter", getFilteredOrders);
 router.get("/filter/:id", getRestaurantFilteredOrders);
 router.delete("/delete/:id", deleteOrder);

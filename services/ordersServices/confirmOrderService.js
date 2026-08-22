@@ -13,6 +13,9 @@ const {
   generateOrderConfirmationEmail,
 } = require("../../utils/mailTemplateGenerators");
 const { CANCELED } = require("../../utils/constants");
+const {
+  restoreSplitDiscountStepOnCancel,
+} = require("./restoreSmartOfferOnCancelService");
 const nodemailer = require("nodemailer");
 const {
   applyConfirmedOrderSubscriptionBenefits,
@@ -332,6 +335,7 @@ module.exports = async function confirmOrderService(orderId) {
       order.payment_status = false;
       order.confirmed = false;
       await order.save();
+      await restoreSplitDiscountStepOnCancel(order).catch(() => {});
       return { error: "PaymentIntent is canceled" };
     }
 
@@ -396,6 +400,7 @@ module.exports = async function confirmOrderService(orderId) {
       order.payment_status = false;
       order.confirmed = false;
       await order.save();
+      await restoreSplitDiscountStepOnCancel(order).catch(() => {});
       logWithTimestamp("Marked order canceled after capture attempt", {
         orderId,
         code,

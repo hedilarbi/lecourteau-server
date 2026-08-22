@@ -402,7 +402,19 @@ const updatePaymentMethod = async (req, res) => {
   const month = parseInt(exp_month, 10);
   const year = parseInt(exp_year, 10);
 
-  if (month < 1 || month > 12 || year < new Date().getFullYear()) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  if (
+    !Number.isInteger(month) ||
+    !Number.isInteger(year) ||
+    month < 1 ||
+    month > 12 ||
+    year < currentYear ||
+    year > currentYear + 50 ||
+    (year === currentYear && month < currentMonth)
+  ) {
     return res.status(400).json({ success: false, error: "Date d'expiration invalide." });
   }
 
@@ -490,6 +502,26 @@ const attachPaymentMethod = async (req, res) => {
     } while (true);
 
     if (existingPMToReuse) {
+      // Le fingerprint Stripe n'identifie que le numéro de carte : une carte
+      // renouvelée (même numéro, nouvelle date d'expiration) retombe donc sur
+      // l'ancien PaymentMethod. On met sa date à jour sur place plutôt que de
+      // renvoyer la carte périmée, ce qui conserve l'id référencé par les
+      // abonnements et par invoice_settings.default_payment_method.
+      const expiryChanged =
+        existingPMToReuse.card &&
+        (existingPMToReuse.card.exp_month !== newPM.card.exp_month ||
+          existingPMToReuse.card.exp_year !== newPM.card.exp_year);
+
+      if (expiryChanged) {
+        const refreshed = await stripe.paymentMethods.update(existingPMToReuse.id, {
+          card: {
+            exp_month: newPM.card.exp_month,
+            exp_year: newPM.card.exp_year,
+          },
+        });
+        return res.status(200).json({ success: true, data: refreshed });
+      }
+
       return res.status(200).json({ success: true, data: existingPMToReuse });
     }
 

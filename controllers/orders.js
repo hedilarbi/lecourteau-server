@@ -199,6 +199,28 @@ const createZeroTotalReferralOrder = async (req, res) => {
   }
 };
 
+const createZeroTotalPromoOrder = async (req, res) => {
+  const { order } = req.body;
+
+  try {
+    const { error, response } = await createOrderService(order, {
+      allowZeroTotalPromoOrder: true,
+    });
+
+    if (error) {
+      logWithTimestamp(
+        `Error creating zero-total promo order: userId ${order?.order?.user_id || "-"}, error: ${error}`,
+      );
+      return res.status(400).json({ success: false, message: error });
+    }
+
+    return res.status(201).json({ success: true, orderId: response._id });
+  } catch (err) {
+    logWithTimestamp(`Error creating zero-total promo order: ${err}`);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const getOrders = async (req, res) => {
   try {
     const { response, error } = await getOrdersService();
@@ -918,6 +940,7 @@ module.exports = {
   createOrder,
   createZeroTotalSubscriptionOrder,
   createZeroTotalReferralOrder,
+  createZeroTotalPromoOrder,
   getOrders,
   getOrder,
   deleteOrder,

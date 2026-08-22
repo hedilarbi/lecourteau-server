@@ -72,8 +72,19 @@ const createOrUpdateRule = async (req, res) => {
         cooldownDays,
         validityHours,
         offerType,
-        discountValue,
-        bonusThreshold,
+        // `bonusThreshold` est désormais saisissable pour tous les types qui
+        // l'appliquent, y compris "1 acheté = 1 offert" et "rabais divisé" :
+        // on le persiste tel quel.
+        //
+        // `discountValue` reste normalisé : ces deux types ne l'exposent pas
+        // dans le formulaire (les pourcentages vivent dans `discountSteps` pour
+        // le rabais divisé, et le BOGO n'a pas de montant), mais le formulaire
+        // réémet la valeur du type précédemment sélectionné. Sans remise à
+        // zéro, un montant fantôme resterait en base.
+        discountValue: ["buy_one_get_one", "split_discount"].includes(offerType)
+          ? 0
+          : discountValue,
+        bonusThreshold: Math.max(0, Number(bonusThreshold) || 0),
         bonusPoints: offerType === "loyalty_points" ? Math.max(0, Math.floor(Number(bonusPoints) || 0)) : 0,
         discountSteps: offerType === "split_discount" ? normalizedDiscountSteps : undefined,
         followupValidityDays: Math.max(1, Math.floor(Number(followupValidityDays) || 7)),

@@ -104,7 +104,7 @@ const run = async () => {
     }
 
     // Write to brain artifact
-    const artifactPath = '/Users/hedilarbi/.gemini/antigravity-ide/brain/d8395161-f99a-43da-909f-e307fc6e257e/etude_smart_offers.md';
+    const artifactPath = '/Users/hedilarbi/.gemini/antigravity-ide/brain/c173cd64-88dc-4d2f-892f-cb979c83f6d8/etude_smart_offers.md';
     fs.writeFileSync(artifactPath, md);
     console.log("Analysis written to " + artifactPath);
 

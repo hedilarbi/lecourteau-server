@@ -116,6 +116,18 @@ const mode = (arr) => {
   return modeVal;
 };
 
+const median = (values) => {
+  const sorted = values
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+};
+
 // ─── One-time DB lookups cached for the lifetime of a cron run ───────────────
 
 // Find available item of a category containing a keyword (e.g. dessert, boisson)
@@ -631,6 +643,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           let averageBasketSize = 0;
           let avgBasket90d      = 0;
           let basketSizeStdDev  = 0;
+          let medianOrderIntervalDays = null;
           const categoryShare90d = new Map();
 
           if (orders.length > 0) {
@@ -676,6 +689,18 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             preferredHour = mode(hours) ?? 12;
             preferredDay  = mode(days)  ?? 0;
             recencyDays   = Math.floor((now - new Date(lastOrderAt)) / 86400000);
+
+            const sortedOrderDates = orders
+              .map(o => new Date(o.createdAt).getTime())
+              .filter(Number.isFinite)
+              .sort((a, b) => a - b);
+            const orderIntervalDays = [];
+            for (let index = 1; index < sortedOrderDates.length; index++) {
+              const intervalDays =
+                (sortedOrderDates[index] - sortedOrderDates[index - 1]) / 86400000;
+              if (intervalDays > 0) orderIntervalDays.push(intervalDays);
+            }
+            medianOrderIntervalDays = median(orderIntervalDays);
 
             const sum = totals.reduce((a, b) => a + b, 0);
             averageBasketSize = roundMoney(sum / totals.length, 0);
@@ -806,22 +831,28 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             );
           }
 
-          // S02
-          if (orderCount === 1 && recencyDays >= 4) {
+          // S02 — Build the second-order habit while the first purchase is
+          // still recent. From day 18 onward, S09–S12 own the reactivation
+          // journey and must not be displaced by S02's higher priority.
+          if (orderCount === 1 && recencyDays >= 4 && recencyDays <= 17) {
             const strat = getStrategyConfig(2);
             if (strat && getStrategyCooldownPassed(2, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
-          // S03
-          if (orderCount === 2 && recencyDays >= 7) {
+          // S03 — Consolidate the third-order habit while the second purchase
+          // is still recent. From day 18 onward, reactivation strategies own
+          // the journey and must not be displaced by S03's higher priority.
+          if (orderCount === 2 && recencyDays >= 7 && recencyDays <= 17) {
             const strat = getStrategyConfig(3);
             if (strat && getStrategyCooldownPassed(3, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
-          // S04
-          if (ordersLast30d === 3) {
+          // S04 — Reward the lifetime third-order milestone and encourage the
+          // fourth purchase. This must use the all-time order count, not the
+          // rolling 30-day frequency.
+          if (orderCount === 3 && recencyDays <= 17) {
             const strat = getStrategyConfig(4);
             if (strat && getStrategyCooldownPassed(4, strat.cooldownDays)) {
               const freeItem = strat.freeItem || cachedDessertItem?._id;
@@ -831,8 +862,10 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
               }
             }
           }
-          // S05
-          if (ordersLast30d === 4) {
+          // S05 — Reward the lifetime fourth-order milestone and encourage the
+          // fifth purchase. This follows S04's milestone journey and must not
+          // include established customers based on rolling monthly frequency.
+          if (orderCount === 4 && recencyDays <= 17) {
             const strat = getStrategyConfig(5);
             if (strat && getStrategyCooldownPassed(5, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });
@@ -860,8 +893,17 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
               }
             }
           }
-          // S08
-          if (recencyDays >= 10 && recencyDays <= 17 && orderCount >= 2) {
+          // S08 — Trigger early reactivation only when the user approaches
+          // their own usual ordering cadence. With insufficient history, the
+          // standard day-10 trigger remains the fallback.
+          const s8TriggerDay = Number.isFinite(medianOrderIntervalDays)
+            ? Math.max(10, Math.floor(medianOrderIntervalDays * 0.8))
+            : 10;
+          if (
+            orderCount >= 2 &&
+            recencyDays >= s8TriggerDay &&
+            recencyDays <= 17
+          ) {
             const strat = getStrategyConfig(8);
             if (strat && getStrategyCooldownPassed(8, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });

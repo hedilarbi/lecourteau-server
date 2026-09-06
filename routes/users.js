@@ -48,6 +48,7 @@ router.put(
   dismissFirstOrderDiscountPrompt,
 );
 router.put("/:id/delete/addresses/:addressId", deleteFromAddresses);
+router.delete("/:id/addresses/:addressId", deleteFromAddresses);
 router.get("/orders/:id", getOrdersList);
 router.put("/update/:id", updateUser);
 router.put("/set/:id", setUserInfo);

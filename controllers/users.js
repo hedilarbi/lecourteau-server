@@ -299,11 +299,14 @@ const addToAddresses = async (req, res) => {
 const deleteFromAddresses = async (req, res) => {
   const { id, addressId } = req.params;
   try {
-    const { error, user } = await deleteFromAddressesService(id, addressId);
+    const { error, user, status } = await deleteFromAddressesService(id, addressId);
     if (error) {
-      return res.status(404).json({ error });
+      return res.status(status || 404).json({ success: false, error });
     }
-    res.status(200).json(user);
+    if (req.method === "PUT") {
+      return res.status(200).json(user);
+    }
+    res.status(200).json({ success: true, data: user });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

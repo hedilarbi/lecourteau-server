@@ -1,22 +1,25 @@
 const User = require("../../models/User");
+const mongoose = require("mongoose");
 
 const deleteFromAddressesService = async (id, addressId) => {
   try {
-    const user = await User.findById(id);
-    if (!user) {
-      return { error: "User not found" };
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return { error: "Invalid user id", status: 400 };
     }
-    const addressIndex = user.addresses.findIndex(
-      (address) => address._id.toString() === addressId
+    if (!mongoose.Types.ObjectId.isValid(addressId)) {
+      return { error: "Invalid address id", status: 400 };
+    }
+
+    const user = await User.findOneAndUpdate(
+      { _id: id, "addresses._id": addressId },
+      { $pull: { addresses: { _id: addressId } } },
+      { new: true, runValidators: true },
     );
-    if (addressIndex === -1) {
-      return { error: "Address not found" };
-    }
-    user.addresses.splice(addressIndex, 1);
-    await user.save();
+    if (!user) return { error: "User or address not found", status: 404 };
+
     return { user };
   } catch (err) {
-    return { error: err.message };
+    return { error: err.message, status: 500 };
   }
 };
 

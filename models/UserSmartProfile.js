@@ -69,6 +69,31 @@ const userSmartProfileSchema = new Schema({
     of: Number,
     default: {},
   },
+  medianOrderIntervalDays: {
+    type: Number,
+    min: 0,
+    default: null,
+  },
+  recencyToCadenceRatio: {
+    type: Number,
+    min: 0,
+    default: null,
+  },
+  reactivationTriggerDay: {
+    type: Number,
+    min: 0,
+    default: null,
+  },
+  reactivationProfile: {
+    type: String,
+    enum: ["early_risk", "early_abandonment", "sudden_stop", "low_frequency", "not_overdue"],
+    default: null,
+  },
+  recommendedReactivationStrategyId: {
+    type: Number,
+    enum: [8, 9, 10, 11, 12, 19, 20],
+    default: null,
+  },
 }, {
   timestamps: true,
 });

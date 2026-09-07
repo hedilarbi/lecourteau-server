@@ -128,6 +128,84 @@ const median = (values) => {
     : sorted[middle];
 };
 
+const determineReactivationProfile = ({
+  orderCount,
+  recencyDays,
+  medianOrderIntervalDays,
+}) => {
+  const hasCadence = orderCount >= 2 && Number.isFinite(medianOrderIntervalDays);
+  const recencyToCadenceRatio = hasCadence && medianOrderIntervalDays > 0
+    ? roundMoney(recencyDays / medianOrderIntervalDays, null)
+    : null;
+
+  const earlyRiskTriggerDay = hasCadence
+    ? Math.max(10, Math.floor(medianOrderIntervalDays * 0.8))
+    : 10;
+  if (
+    orderCount >= 2 &&
+    recencyDays >= earlyRiskTriggerDay &&
+    recencyDays <= 17
+  ) {
+    return {
+      reactivationProfile: "early_risk",
+      recommendedReactivationStrategyId: 8,
+      reactivationTriggerDay: earlyRiskTriggerDay,
+      recencyToCadenceRatio,
+    };
+  }
+
+  if (orderCount >= 1 && orderCount <= 2 && recencyDays >= 18) {
+    const recommendedReactivationStrategyId = recencyDays <= 29
+      ? 9
+      : recencyDays <= 59
+        ? 10
+        : recencyDays <= 89
+          ? 11
+          : 12;
+    return {
+      reactivationProfile: "early_abandonment",
+      recommendedReactivationStrategyId,
+      reactivationTriggerDay: 18,
+      recencyToCadenceRatio,
+    };
+  }
+
+  const hasReliableCadence = orderCount >= 3 && Number.isFinite(medianOrderIntervalDays);
+  if (hasReliableCadence && medianOrderIntervalDays <= 30) {
+    const reactivationTriggerDay = Math.max(
+      18,
+      Math.ceil(medianOrderIntervalDays * 1.5),
+    );
+    if (recencyDays >= reactivationTriggerDay) {
+      return {
+        reactivationProfile: "sudden_stop",
+        recommendedReactivationStrategyId: 19,
+        reactivationTriggerDay,
+        recencyToCadenceRatio,
+      };
+    }
+  }
+
+  if (hasReliableCadence && medianOrderIntervalDays > 30) {
+    const reactivationTriggerDay = Math.ceil(medianOrderIntervalDays * 1.2);
+    if (recencyDays >= reactivationTriggerDay) {
+      return {
+        reactivationProfile: "low_frequency",
+        recommendedReactivationStrategyId: 20,
+        reactivationTriggerDay,
+        recencyToCadenceRatio,
+      };
+    }
+  }
+
+  return {
+    reactivationProfile: orderCount >= 1 ? "not_overdue" : null,
+    recommendedReactivationStrategyId: null,
+    reactivationTriggerDay: null,
+    recencyToCadenceRatio,
+  };
+};
+
 // ─── One-time DB lookups cached for the lifetime of a cron run ───────────────
 
 // Find available item of a category containing a keyword (e.g. dessert, boisson)
@@ -146,6 +224,7 @@ const findItemFromCategoryKeyword = async (keyword, allCategories, allMenuItems)
 // ─── 1. Nightly Scan: prepareDailyOffersJob (00:00 every day) ────────────────
 const STRATEGIES_DEFAULTS = [
   {
+    name: "Installer l'habitude de la 2e commande",
     strategyId: 2,
     segment: "normal",
     group: "HABITUDE",
@@ -159,6 +238,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 15% de rabais sur ta deuxième commande dès 20$ d'achat."
   },
   {
+    name: "Consolider l'habitude de la 3e commande",
     strategyId: 3,
     segment: "normal",
     group: "HABITUDE",
@@ -172,6 +252,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 5$ de rabais sur ta commande dès 25$ d'achat."
   },
   {
+    name: "Faire franchir le cap de la 4e commande",
     strategyId: 4,
     segment: "loyal",
     group: "HABITUDE",
@@ -185,6 +266,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Un dessert au choix offert pour ta prochaine commande dès 30$."
   },
   {
+    name: "Transformer en client fidèle à la 5e commande",
     strategyId: 5,
     segment: "loyal",
     group: "FIDELITE",
@@ -198,6 +280,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 7$ de rabais sur ta prochaine commande dès 35$."
   },
   {
+    name: "Entretenir la fidélité active",
     strategyId: 6,
     segment: "loyal",
     group: "FIDELITE",
@@ -211,6 +294,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Une boisson ou dessert offert dès 30$ d'achat."
   },
   {
+    name: "Reconnaître les clients VIP",
     strategyId: 7,
     segment: "very_active",
     group: "FIDELITE",
@@ -224,6 +308,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Un dessert ou accompagnement VIP offert dès 35$ d'achat."
   },
   {
+    name: "Prévenir le décrochage selon la cadence",
     strategyId: 8,
     segment: "normal",
     group: "REACTIVATION",
@@ -237,6 +322,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 10% de rabais sur ta prochaine commande dès 25$."
   },
   {
+    name: "Récupérer les nouveaux clients abandonnés",
     strategyId: 9,
     segment: "normal",
     group: "REACTIVATION",
@@ -250,45 +336,49 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Économise 5$ sur ta prochaine commande dès 25$."
   },
   {
+    name: "Récupérer les nouveaux clients en abandon prolongé",
     strategyId: 10,
     segment: "inactive",
     group: "REACTIVATION",
     priority: 92,
     cooldownDays: 21,
     validityHours: 48,
-    offerType: "discount_order",
-    discountValue: 20,
+    offerType: "bonus_basket",
+    discountValue: 6,
     bonusThreshold: 25,
-    notificationTitle: "🔥 Reviens nous voir : 20% de rabais pour 48 h !",
-    notificationBody: "Profite de 20% de rabais sur ta commande dès 25$."
+    notificationTitle: "👋 On aimerait te revoir : 6$ pour reprendre l'habitude.",
+    notificationBody: "Profite de 6$ de rabais sur ta prochaine commande dès 25$."
   },
   {
+    name: "Récupérer les nouveaux clients en abandon ancien",
     strategyId: 11,
     segment: "reactivate",
     group: "REACTIVATION",
     priority: 94,
     cooldownDays: 45,
     validityHours: 72,
-    offerType: "discount_order",
-    discountValue: 25,
+    offerType: "bonus_basket",
+    discountValue: 6,
     bonusThreshold: 25,
-    notificationTitle: "😋 Ça fait longtemps ! 25% pour ton retour chez Courteau.",
-    notificationBody: "Bénéficie de 25% de rabais sur ta commande dès 25$."
+    notificationTitle: "😋 Ça fait longtemps : 6$ pour redonner une chance à Courteau.",
+    notificationBody: "Profite de 6$ de rabais sur ta prochaine commande dès 25$."
   },
   {
+    name: "Dernière tentative de récupération des nouveaux clients",
     strategyId: 12,
     segment: "reactivate",
     group: "REACTIVATION",
     priority: 97,
-    cooldownDays: 60,
+    cooldownDays: 9999,
     validityHours: 72,
     offerType: "bonus_basket",
-    discountValue: 10,
+    discountValue: 8,
     bonusThreshold: 30,
-    notificationTitle: "💥 10$ pour ton retour chez Courteau dès 30$ !",
-    notificationBody: "Profite de 10$ de rabais sur ta commande dès 30$ d'achat."
+    notificationTitle: "💥 Une dernière invitation : 8$ pour revenir chez Courteau.",
+    notificationBody: "Profite de 8$ de rabais sur ta prochaine commande dès 30$ d'achat."
   },
   {
+    name: "Développer les petits paniers",
     strategyId: 13,
     segment: "normal",
     group: "PANIER",
@@ -302,6 +392,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 5$ de rabais dès que ta commande atteint 30$."
   },
   {
+    name: "Faire progresser les paniers intermédiaires",
     strategyId: 14,
     segment: "normal",
     group: "PANIER",
@@ -315,6 +406,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Une boisson ou dessert offert pour toute commande dès 35$."
   },
   {
+    name: "Faire progresser les grands paniers",
     strategyId: 15,
     segment: "normal",
     group: "PANIER",
@@ -328,6 +420,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 7$ de rabais dès que ta commande atteint 50$."
   },
   {
+    name: "Valoriser les très grands paniers",
     strategyId: 16,
     segment: "normal",
     group: "PANIER",
@@ -341,6 +434,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 10$ de rabais dès que ta commande atteint 65$."
   },
   {
+    name: "Renforcer l'affinité avec la catégorie favorite",
     strategyId: 17,
     segment: "normal",
     group: "AFFINITE",
@@ -354,6 +448,7 @@ const STRATEGIES_DEFAULTS = [
     notificationBody: "Profite de 10% de réduction sur ta catégorie préférée dès 25$."
   },
   {
+    name: "Développer la découverte de nouvelles catégories",
     strategyId: 18,
     segment: "normal",
     group: "DECOUVERTE",
@@ -365,6 +460,34 @@ const STRATEGIES_DEFAULTS = [
     bonusThreshold: 20,
     notificationTitle: "👀 Jamais essayé ça chez Courteau ? Profite de 15% !",
     notificationBody: "Profite de 15% de rabais sur notre catégorie {category} dès 20$."
+  },
+  {
+    name: "Réactiver après un arrêt soudain",
+    strategyId: 19,
+    segment: "normal",
+    group: "REACTIVATION",
+    priority: 99,
+    cooldownDays: 14,
+    validityHours: 48,
+    offerType: "bonus_basket",
+    discountValue: 5,
+    bonusThreshold: 25,
+    notificationTitle: "🍟 Tu nous manques ! Une offre t'attend pour ton retour.",
+    notificationBody: "Profite de ton offre personnalisée sur ta prochaine commande."
+  },
+  {
+    name: "Réactiver les clients à faible fréquence au bon moment",
+    strategyId: 20,
+    segment: "normal",
+    group: "REACTIVATION",
+    priority: 99,
+    cooldownDays: 30,
+    validityHours: 48,
+    offerType: "bonus_basket",
+    discountValue: 5,
+    bonusThreshold: 25,
+    notificationTitle: "👋 Le bon moment pour revenir chez Courteau.",
+    notificationBody: "Profite de ton offre personnalisée sur ta prochaine commande."
   }
 ];
 
@@ -495,6 +618,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
         }
 
         await SmartOfferRule.create({
+          name: def.name,
           strategyId: def.strategyId,
           segment: def.segment,
           group: def.group,
@@ -623,12 +747,6 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           const orders = ordersByUser[uid] || [];
           const userOffers = offersByUser[uid] || [];
 
-          // Skip if user already has a valid active offer
-          if (usersWithActiveOffer.has(uid)) {
-            totalSkipped++;
-            continue;
-          }
-
           // ── Compute RFM metrics ───────────────────────────────────────────
           let preferredHour     = 12;
           let preferredDay      = 0;
@@ -722,6 +840,11 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           }
 
           const segment = determineSegment({ recencyDays, ordersLast7d, ordersLast14d, ordersLast30d, ordersLast60d });
+          const reactivationProfiling = determineReactivationProfile({
+            orderCount,
+            recencyDays,
+            medianOrderIntervalDays,
+          });
 
           // Queue UserSmartProfile update
           profileUpserts.push({
@@ -742,12 +865,24 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
                   basketSizeStdDev,
                   ordersCount90d: ordersLast90d,
                   avgBasket90d,
-                  categoryShare90d
+                  categoryShare90d,
+                  medianOrderIntervalDays,
+                  recencyToCadenceRatio: reactivationProfiling.recencyToCadenceRatio,
+                  reactivationTriggerDay: reactivationProfiling.reactivationTriggerDay,
+                  reactivationProfile: reactivationProfiling.reactivationProfile,
+                  recommendedReactivationStrategyId:
+                    reactivationProfiling.recommendedReactivationStrategyId
                 }
               },
               upsert: true,
             }
           });
+
+          // Profiling must remain current even when offer generation is blocked.
+          if (usersWithActiveOffer.has(uid)) {
+            totalSkipped++;
+            continue;
+          }
 
           // ── Evaluate candidates ───────────────────────────────────────────
           const candidates = [];
@@ -893,47 +1028,24 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
               }
             }
           }
-          // S08 — Trigger early reactivation only when the user approaches
-          // their own usual ordering cadence. With insufficient history, the
-          // standard day-10 trigger remains the fallback.
-          const s8TriggerDay = Number.isFinite(medianOrderIntervalDays)
-            ? Math.max(10, Math.floor(medianOrderIntervalDays * 0.8))
-            : 10;
-          if (
-            orderCount >= 2 &&
-            recencyDays >= s8TriggerDay &&
-            recencyDays <= 17
-          ) {
-            const strat = getStrategyConfig(8);
-            if (strat && getStrategyCooldownPassed(8, strat.cooldownDays)) {
-              candidates.push({ ...strat, score: strat.priority });
-            }
-          }
-          // S09
-          if (recencyDays >= 18 && recencyDays <= 29 && orderCount >= 1) {
-            const strat = getStrategyConfig(9);
-            if (strat && getStrategyCooldownPassed(9, strat.cooldownDays)) {
-              candidates.push({ ...strat, score: strat.priority });
-            }
-          }
-          // S10
-          if (recencyDays >= 30 && recencyDays <= 59 && orderCount >= 1) {
-            const strat = getStrategyConfig(10);
-            if (strat && getStrategyCooldownPassed(10, strat.cooldownDays)) {
-              candidates.push({ ...strat, score: strat.priority });
-            }
-          }
-          // S11
-          if (recencyDays >= 60 && recencyDays <= 89 && orderCount >= 1) {
-            const strat = getStrategyConfig(11);
-            if (strat && getStrategyCooldownPassed(11, strat.cooldownDays)) {
-              candidates.push({ ...strat, score: strat.priority });
-            }
-          }
-          // S12
-          if (recencyDays >= 90 && orderCount >= 1) {
-            const strat = getStrategyConfig(12);
-            if (strat && getStrategyCooldownPassed(12, strat.cooldownDays)) {
+          // Reactivation strategies are assigned by the profiling result. The
+          // offer engine only enforces configuration and journey cooldowns.
+          const reactivationStrategyId =
+            reactivationProfiling.recommendedReactivationStrategyId;
+          if (reactivationStrategyId) {
+            const predecessorByStrategyId = { 10: 9, 11: 10, 12: 11 };
+            const predecessorId = predecessorByStrategyId[reactivationStrategyId];
+            const predecessorRule = predecessorId
+              ? ruleByStrategyId[predecessorId]
+              : null;
+            const predecessorCooldownPassed = !predecessorRule ||
+              getStrategyCooldownPassed(predecessorId, predecessorRule.cooldownDays);
+            const strat = getStrategyConfig(reactivationStrategyId);
+            if (
+              predecessorCooldownPassed &&
+              strat &&
+              getStrategyCooldownPassed(reactivationStrategyId, strat.cooldownDays)
+            ) {
               candidates.push({ ...strat, score: strat.priority });
             }
           }
@@ -1446,6 +1558,7 @@ function startPersonalizedOffersJobs() {
 }
 
 module.exports = {
+  determineReactivationProfile,
   startPersonalizedOffersJobs,
   prepareDailyOffersJob,
   triggerScheduledOffersJob,

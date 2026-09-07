@@ -1,6 +1,11 @@
 const { Schema, model } = require("mongoose");
 
 const smartOfferRuleSchema = new Schema({
+  name: {
+    type: String,
+    trim: true,
+    required: true,
+  },
   strategyId: {
     type: Number,
     required: true,

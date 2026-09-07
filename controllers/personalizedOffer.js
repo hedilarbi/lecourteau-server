@@ -25,6 +25,7 @@ const getRules = async (req, res) => {
 const createOrUpdateRule = async (req, res) => {
   try {
     const { 
+      name,
       strategyId,
       segment, 
       cooldownDays, 
@@ -67,6 +68,7 @@ const createOrUpdateRule = async (req, res) => {
     const rule = await SmartOfferRule.findOneAndUpdate(
       query,
       {
+        name,
         strategyId,
         segment,
         cooldownDays,
@@ -235,6 +237,7 @@ const getUserProfiles = async (req, res) => {
       query.$or = [
         { user: { $in: userIds } },
         { segment: { $regex: search, $options: "i" } },
+        { reactivationProfile: { $regex: search, $options: "i" } },
       ];
     }
 

@@ -8,6 +8,7 @@ const sanitizeRuleForProduction = (rule) => {
   const needsFreeItemConfiguration = FREE_ITEM_STRATEGY_IDS.has(strategyId);
 
   return {
+    name: rule.name,
     strategyId,
     segment: rule.segment,
     group: rule.group,
@@ -45,13 +46,13 @@ const run = async () => {
 
     const sourceRules = await source
       .collection("smartofferrules")
-      .find({ strategyId: { $gte: 2, $lte: 18 } })
+      .find({ strategyId: { $gte: 2, $lte: 20 } })
       .sort({ strategyId: 1 })
       .toArray();
 
-    if (sourceRules.length !== 17) {
+    if (sourceRules.length !== 19) {
       throw new Error(
-        `Expected 17 Smart Offer rules in development, found ${sourceRules.length}.`,
+        `Expected 19 Smart Offer rules in development, found ${sourceRules.length}.`,
       );
     }
 

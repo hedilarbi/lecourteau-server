@@ -9,6 +9,7 @@
     "smart-offers:migrate-names": "node scripts/migrateSmartOfferStrategyNames.js",
     "smart-offers:update-s10": "node scripts/updateS10Strategy.js",
     "smart-offers:update-s11-s12": "node scripts/updateS11S12Strategies.js",
+    "smart-offers:renotify-updated": "node scripts/renotifyUpdatedSmartOffers.js",
     "smart-offers:migrate-prod": "node scripts/migrateSmartOfferRulesToProd.js"
   },
   "repository": {

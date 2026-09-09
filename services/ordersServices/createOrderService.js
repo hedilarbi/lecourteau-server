@@ -504,6 +504,7 @@ const createOrderService = async (order, options = {}) => {
       await checkRestaurantOrderAvailabilityService(order.restaurant, {
         orderItems,
         offers,
+        orderType: order.type,
       });
 
     if (availabilityError) {
@@ -518,7 +519,9 @@ const createOrderService = async (order, options = {}) => {
 
     if (!availabilityResponse?.isValid) {
       return {
-        error: buildAvailabilityErrorMessage(availabilityResponse),
+        error:
+          availabilityResponse?.message ||
+          buildAvailabilityErrorMessage(availabilityResponse),
       };
     }
 
@@ -529,7 +532,9 @@ const createOrderService = async (order, options = {}) => {
       : null;
     const promoCodeRequested = Boolean(requestedPromoCodeId);
     const firstOrderDiscountApplies =
-      firstOrderDiscountEligible && !(subscriptionActive && promoCodeRequested) && !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
+      firstOrderDiscountEligible &&
+      !promoCodeRequested &&
+      !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
     const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
       subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
@@ -1009,7 +1014,7 @@ const createOrderService = async (order, options = {}) => {
     let promoCodeDocument = null;
     let promoDiscountAmount = 0;
 
-    if (promoCodeId && (firstOrderDiscountEligible || personalizedOfferId) && !subscriptionActive) {
+    if (promoCodeId && personalizedOfferId && !subscriptionActive) {
       return {
         error:
           "Une autre réduction est déjà appliquée à cette commande. Le code promo ne peut pas être utilisé.",

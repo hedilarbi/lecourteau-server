@@ -435,11 +435,11 @@ async function finalizeLoyaltyAndPromo(order) {
   );
   user.fidelity_points =
     (Number(user.fidelity_points) || 0) + totalPoints;
-  const orderDiscountPercent = Number(order?.discount);
-  const usedFirstOrderDiscount =
-    Number.isFinite(orderDiscountPercent) && orderDiscountPercent >= 20;
-  if (!user.firstOrderDiscountApplied && usedFirstOrderDiscount)
+  // La première commande confirmée consomme l'avantage de bienvenue, même si
+  // le client a choisi d'utiliser un code promo à la place des 20 %.
+  if (!user.firstOrderDiscountApplied) {
     user.firstOrderDiscountApplied = true;
+  }
 
   if (order.promoCode) {
     const used = user.usedPromoCodes.find(

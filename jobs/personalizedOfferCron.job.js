@@ -224,6 +224,20 @@ const findItemFromCategoryKeyword = async (keyword, allCategories, allMenuItems)
 // ─── 1. Nightly Scan: prepareDailyOffersJob (00:00 every day) ────────────────
 const STRATEGIES_DEFAULTS = [
   {
+    name: "Bienvenue 1re commande",
+    strategyId: 1,
+    segment: "normal",
+    group: "HABITUDE",
+    priority: 100,
+    cooldownDays: 9999,
+    validityHours: 72,
+    offerType: "discount_order",
+    discountValue: 15,
+    bonusThreshold: 20,
+    notificationTitle: "🎉 Bienvenue chez Courteau ! 15% sur ta 1re commande",
+    notificationBody: "Profite de 15% de rabais sur ta première commande dès 20$ d'achat."
+  },
+  {
     name: "Installer l'habitude de la 2e commande",
     strategyId: 2,
     segment: "normal",
@@ -558,10 +572,6 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       );
       console.log(`[prepareDailyOffersJob] Top category computed: ${topCategoryDoc.name}`);
     }
-
-    // Purge obsolete strategyId 1 (S01 - Bienvenue 1re commande) if present
-    await SmartOfferRule.deleteMany({ strategyId: 1 });
-    await PersonalizedOffer.deleteMany({ strategyId: 1, status: { $in: ["prepared", "active", "viewed", "clicked"] } });
 
     // Update S02 if present with old free_delivery offerType
     await SmartOfferRule.updateOne(
@@ -966,6 +976,14 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             );
           }
 
+          // S01 — Bienvenue 1re commande (Welcome offer)
+          if (orderCount === 0) {
+            const strat = getStrategyConfig(1);
+            if (strat && getStrategyCooldownPassed(1, strat.cooldownDays)) {
+              candidates.push({ ...strat, score: strat.priority });
+            }
+          }
+
           // S02 — Build the second-order habit while the first purchase is
           // still recent. From day 18 onward, S09–S12 own the reactivation
           // journey and must not be displaced by S02's higher priority.
@@ -1197,6 +1215,12 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           // ── Compute scheduled notification time ───────────────────────────
           let notifyHour = preferredHour - 1;
           if (notifyHour < 8 || notifyHour > 21) notifyHour = 11;
+          
+          // For users with no orders (e.g. S01), default to 13h (Canada time)
+          if (orderCount === 0) {
+            notifyHour = 13;
+          }
+          
           const scheduledNotifyAt = new Date();
           scheduledNotifyAt.setHours(notifyHour, 0, 0, 0);
 

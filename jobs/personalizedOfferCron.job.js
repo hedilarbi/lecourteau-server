@@ -11,12 +11,14 @@ const PersonalizedOffer = require("../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../models/PersonalizedOfferEvent");
 const { sendSmartOfferUninstalledEmail } = require("../services/offersServices/smartOfferMailService");
 const SystemStat = require("../models/SystemStat");
+const { CANCELED } = require("../utils/constants");
 
 // In-memory store: { ticketId -> { offerId, userId } }
 // Persisted across cron cycles within the same process instance
 const pendingReceiptMap = {};
 
 const DEFAULT_TIMEZONE = "America/Toronto";
+const CANCELED_ORDER_STATUSES = [CANCELED, "cancelled", "canceled"];
 
 // ─── Batch / concurrency settings ────────────────────────────────────────────
 // prepareDailyOffersJob  → runs at midnight, no live traffic, larger batches OK
@@ -38,7 +40,7 @@ const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 const personalizeText = (text, user, offerDetails = {}) => {
   if (!text) return "";
   const name = user.name ? user.name.trim() : "cher client";
-  let result = text.replace(/{name}/g, name).replace(/{{name}}/g, name);
+  let result = text.replace(/{{name}}/g, name).replace(/{name}/g, name);
 
   if (offerDetails.categoryName) {
     result = result.replace(/{category}/g, offerDetails.categoryName);
@@ -547,7 +549,12 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
     // ── Compute top category (most sold in last 90 days) and store in SystemStat ──
     const date90dAgo = new Date(Date.now() - 90 * 86400000);
     const topItemDocs = await Order.aggregate([
-      { $match: { createdAt: { $gte: date90dAgo } } },
+      {
+        $match: {
+          createdAt: { $gte: date90dAgo },
+          status: { $nin: CANCELED_ORDER_STATUSES },
+        },
+      },
       { $unwind: "$orderItems" },
       { $group: { _id: "$orderItems.item", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
@@ -607,8 +614,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             targetMenuItem: ruleDoc.targetMenuItem || null,
             freeItem: ruleDoc.freeItems?.length > 0 ? null : ruleDoc.freeItem || null,
             freeItems: ruleDoc.freeItems || [],
-            notificationTitle: ruleDoc.notificationTitle,
-            notificationBody: ruleDoc.notificationBody
+            // Notification text is personalized when the offer is created.
+            // Replacing it here with the rule template would expose raw
+            // placeholders such as {category} to the customer.
           }
         }
       );
@@ -685,7 +693,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       // ── Bulk-fetch orders for all users in the batch ───────────────────────
       const batchOrders = await Order.find({
         user: { $in: userIds },
-        status: { $ne: "cancelled" }
+        status: { $nin: CANCELED_ORDER_STATUSES }
       })
         .select("user createdAt sub_total total_price orderItems discount personalizedOffer")
         .lean();
@@ -798,7 +806,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
               if (orderDate >= date60d) ordersLast60d++;
               if (orderDate >= date90d) {
                 ordersLast90d++;
-                totals90d.push(toSafeNumber(o.sub_total || o.total_price, 0));
+                totals90d.push(
+                  Math.max(0, toSafeNumber(o.sub_total ?? o.total_price, 0)),
+                );
                 
                 (o.orderItems || []).forEach(item => {
                   if (item.item) {
@@ -810,7 +820,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
                   }
                 });
               }
-              totals.push(toSafeNumber(o.sub_total || o.total_price, 0));
+              totals.push(
+                Math.max(0, toSafeNumber(o.sub_total ?? o.total_price, 0)),
+              );
               if (!lastOrderAt || o.createdAt > lastOrderAt) lastOrderAt = o.createdAt;
             });
 
@@ -896,7 +908,13 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
 
           // ── Evaluate candidates ───────────────────────────────────────────
           const candidates = [];
-          const accountAgeDays = (now - new Date(user.createdAt || 0)) / 86400000;
+          const accountCreatedAt = user.createdAt ? new Date(user.createdAt) : null;
+          const hasValidAccountCreatedAt =
+            accountCreatedAt instanceof Date &&
+            Number.isFinite(accountCreatedAt.getTime());
+          const accountAgeDays = hasValidAccountCreatedAt
+            ? (now.getTime() - accountCreatedAt.getTime()) / 86400000
+            : null;
 
           const getStrategyCooldownPassed = (strategyId, defaultCooldownDays) => {
             const dbRuleCooldown = ruleByStrategyId[strategyId]?.cooldownDays;
@@ -976,8 +994,10 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             );
           }
 
-          // S01 — Bienvenue 1re commande (Welcome offer)
-          if (orderCount === 0) {
+          // S01 — Welcome users who still have no order at least 7 full days
+          // after registration. Missing/invalid registration dates are not
+          // eligible, otherwise legacy accounts would be treated as very old.
+          if (orderCount === 0 && accountAgeDays !== null && accountAgeDays >= 7) {
             const strat = getStrategyConfig(1);
             if (strat && getStrategyCooldownPassed(1, strat.cooldownDays)) {
               candidates.push({ ...strat, score: strat.priority });

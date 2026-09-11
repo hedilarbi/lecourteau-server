@@ -122,8 +122,8 @@ const createOrUpdateRule = async (req, res) => {
             targetMenuItem: rule.targetMenuItem || null,
             freeItem: rule.freeItems?.length > 0 ? null : rule.freeItem || null,
             freeItems: rule.freeItems || [],
-            notificationTitle: rule.notificationTitle,
-            notificationBody: rule.notificationBody
+            // Existing offers already contain customer-specific rendered
+            // text. Do not replace it with templates containing placeholders.
           }
         }
       );

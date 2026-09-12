@@ -11,6 +11,7 @@
     "smart-offers:update-s11-s12": "node scripts/updateS11S12Strategies.js",
     "smart-offers:renotify-updated": "node scripts/renotifyUpdatedSmartOffers.js",
     "smart-offers:repair-live": "node scripts/repairLiveSmartOffers.js",
+    "smart-offers:backfill-notified": "node scripts/backfillSmartOfferNotificationDates.js",
     "smart-offers:migrate-prod": "node scripts/migrateSmartOfferRulesToProd.js"
   },
   "repository": {

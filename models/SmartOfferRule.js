@@ -84,6 +84,10 @@ const smartOfferRuleSchema = new Schema({
     ref: "Category",
     default: null,
   },
+  useFavoriteCategory: {
+    type: Boolean,
+    default: false,
+  },
   targetMenuItem: {
     type: Schema.Types.ObjectId,
     ref: "MenuItem",

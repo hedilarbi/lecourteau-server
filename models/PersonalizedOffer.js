@@ -80,6 +80,27 @@ const personalizedOfferSchema = new Schema({
     type: Date,
     default: null,
   },
+  initialNotificationSentAt: {
+    type: Date,
+    default: null,
+  },
+  reminderClaimedAt: {
+    type: Date,
+    default: null,
+  },
+  reminderSentAt: {
+    type: Date,
+    default: null,
+  },
+  reminderSkippedAt: {
+    type: Date,
+    default: null,
+  },
+  reminderAttemptCount: {
+    type: Number,
+    min: 0,
+    default: 0,
+  },
   notificationTitle: {
     type: String,
     required: true,

@@ -5,6 +5,7 @@ const PersonalizedOfferEvent = require("../models/PersonalizedOfferEvent");
 const Order = require("../models/Order");
 const SmartOfferHediPayout = require("../models/SmartOfferHediPayout");
 const Staff = require("../models/staff");
+const { renderRuleNotifications } = require("../services/offersServices/smartOfferTemplateService");
 
 // 1. Get configuration rules for segments
 const getRules = async (req, res) => {
@@ -40,6 +41,7 @@ const createOrUpdateRule = async (req, res) => {
       triggerItemSize,
       giftItemSize,
       targetCategory,
+      useFavoriteCategory,
       targetMenuItem,
       freeItem,
       freeItems,
@@ -93,7 +95,9 @@ const createOrUpdateRule = async (req, res) => {
         triggerItem: offerType === "buy_one_get_one" ? triggerItem : null,
         triggerItemSize: offerType === "buy_one_get_one" ? String(triggerItemSize || "") : "",
         giftItemSize: offerType === "buy_one_get_one" ? String(giftItemSize || "") : "",
-        targetCategory: targetCategory || null,
+        targetCategory: useFavoriteCategory ? null : targetCategory || null,
+        useFavoriteCategory:
+          offerType === "discount_category" && Boolean(useFavoriteCategory),
         targetMenuItem: targetMenuItem || null,
         freeItem: normalizedFreeItem,
         freeItems: normalizedFreeItems,
@@ -105,28 +109,55 @@ const createOrUpdateRule = async (req, res) => {
     );
 
     if (rule?.strategyId) {
+      const synchronizedOfferFields = {
+        discountValue: rule.discountValue,
+        bonusThreshold: rule.bonusThreshold,
+        bonusPoints: rule.bonusPoints,
+        discountSteps: rule.discountSteps,
+        followupValidityDays: rule.followupValidityDays,
+        triggerItem: rule.triggerItem || null,
+        triggerItemSize: rule.triggerItemSize || "",
+        giftItemSize: rule.giftItemSize || "",
+        offerType: rule.offerType,
+        targetMenuItem: rule.targetMenuItem || null,
+        freeItem: rule.freeItems?.length > 0 ? null : rule.freeItem || null,
+        freeItems: rule.freeItems || [],
+      };
+      // A favorite category is resolved per customer at offer creation and
+      // must not be overwritten with the rule's null target.
+      if (!rule.useFavoriteCategory) {
+        synchronizedOfferFields.targetCategory = rule.targetCategory || null;
+      }
+
       await PersonalizedOffer.updateMany(
         { strategyId: rule.strategyId, status: { $in: ["prepared", "active", "viewed", "clicked"] } },
         {
           $set: {
-            discountValue: rule.discountValue,
-            bonusThreshold: rule.bonusThreshold,
-            bonusPoints: rule.bonusPoints,
-            discountSteps: rule.discountSteps,
-            followupValidityDays: rule.followupValidityDays,
-            triggerItem: rule.triggerItem || null,
-            triggerItemSize: rule.triggerItemSize || "",
-            giftItemSize: rule.giftItemSize || "",
-            offerType: rule.offerType,
-            targetCategory: rule.targetCategory || null,
-            targetMenuItem: rule.targetMenuItem || null,
-            freeItem: rule.freeItems?.length > 0 ? null : rule.freeItem || null,
-            freeItems: rule.freeItems || [],
+            ...synchronizedOfferFields,
             // Existing offers already contain customer-specific rendered
             // text. Do not replace it with templates containing placeholders.
           }
         }
       );
+
+      const offersToRerender = await PersonalizedOffer.find({
+        strategyId: rule.strategyId,
+        status: { $in: ["prepared", "active", "viewed", "clicked"] },
+      })
+        .populate("user", "name")
+        .populate("targetCategory targetMenuItem freeItem triggerItem", "name")
+        .lean();
+      if (offersToRerender.length > 0) {
+        await PersonalizedOffer.bulkWrite(
+          offersToRerender.map((offer) => ({
+            updateOne: {
+              filter: { _id: offer._id },
+              update: { $set: renderRuleNotifications(rule, offer) },
+            },
+          })),
+          { ordered: false },
+        );
+      }
     }
 
     return res.status(200).json(rule);

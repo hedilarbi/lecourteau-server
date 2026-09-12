@@ -12,6 +12,7 @@ const PersonalizedOfferEvent = require("../models/PersonalizedOfferEvent");
 const { sendSmartOfferUninstalledEmail } = require("../services/offersServices/smartOfferMailService");
 const SystemStat = require("../models/SystemStat");
 const { CANCELED } = require("../utils/constants");
+const { renderRuleNotifications } = require("../services/offersServices/smartOfferTemplateService");
 
 // In-memory store: { ticketId -> { offerId, userId } }
 // Persisted across cron cycles within the same process instance
@@ -31,6 +32,7 @@ const TRIGGER_BATCH_DELAY  = 100;   // ms pause between batches
 
 // bulkWrite limit for DB writes in a single round
 const BULK_WRITE_SIZE = 50;
+const REMINDER_BATCH_SIZE = 50;
 
 /** Sleep helper – throttle between batches */
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -530,13 +532,16 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
 
     // ── Pre-load static data ONCE for the entire run ──────────────────────────
     const allCategories = await Category.find().lean();
-    const allMenuItems  = await MenuItem.find({ is_available: true }).lean();
+    // Keep unavailable historical items for profiling. Gift fallback choices
+    // still use only items that can currently be ordered.
+    const allMenuItems = await MenuItem.find().lean();
+    const availableMenuItems = allMenuItems.filter((item) => item.is_available);
     let allRules        = await SmartOfferRule.find().lean();
 
-    const cachedDessertItem = await findItemFromCategoryKeyword("dessert", allCategories, allMenuItems);
+    const cachedDessertItem = await findItemFromCategoryKeyword("dessert", allCategories, availableMenuItems);
     const cachedDrinkItem   =
-      await findItemFromCategoryKeyword("boisson", allCategories, allMenuItems) ||
-      await findItemFromCategoryKeyword("drink",   allCategories, allMenuItems);
+      await findItemFromCategoryKeyword("boisson", allCategories, availableMenuItems) ||
+      await findItemFromCategoryKeyword("drink",   allCategories, availableMenuItems);
 
     // Build menuItemToCategoryMap FIRST (needed for top-category computation below)
     const menuItemToCategoryMap = {};
@@ -597,29 +602,52 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
     // Sync all prepared/active PersonalizedOffers with latest DB SmartOfferRule values
     const activeDbRules = await SmartOfferRule.find().lean();
     for (const ruleDoc of activeDbRules) {
+      const synchronizedOfferFields = {
+        discountValue: ruleDoc.discountValue,
+        bonusThreshold: ruleDoc.bonusThreshold,
+        bonusPoints: ruleDoc.bonusPoints || 0,
+        discountSteps: ruleDoc.discountSteps,
+        followupValidityDays: ruleDoc.followupValidityDays || 7,
+        triggerItem: ruleDoc.triggerItem || null,
+        triggerItemSize: ruleDoc.triggerItemSize || "",
+        giftItemSize: ruleDoc.giftItemSize || "",
+        offerType: ruleDoc.offerType,
+        targetMenuItem: ruleDoc.targetMenuItem || null,
+        freeItem: ruleDoc.freeItems?.length > 0 ? null : ruleDoc.freeItem || null,
+        freeItems: ruleDoc.freeItems || [],
+      };
+      if (!ruleDoc.useFavoriteCategory) {
+        synchronizedOfferFields.targetCategory = ruleDoc.targetCategory || null;
+      }
       await PersonalizedOffer.updateMany(
         { strategyId: ruleDoc.strategyId, status: { $in: ["prepared", "active", "viewed", "clicked"] } },
         {
           $set: {
-            discountValue: ruleDoc.discountValue,
-            bonusThreshold: ruleDoc.bonusThreshold,
-            bonusPoints: ruleDoc.bonusPoints || 0,
-            discountSteps: ruleDoc.discountSteps,
-            followupValidityDays: ruleDoc.followupValidityDays || 7,
-            triggerItem: ruleDoc.triggerItem || null,
-            triggerItemSize: ruleDoc.triggerItemSize || "",
-            giftItemSize: ruleDoc.giftItemSize || "",
-            offerType: ruleDoc.offerType,
-            targetCategory: ruleDoc.targetCategory || null,
-            targetMenuItem: ruleDoc.targetMenuItem || null,
-            freeItem: ruleDoc.freeItems?.length > 0 ? null : ruleDoc.freeItem || null,
-            freeItems: ruleDoc.freeItems || [],
+            ...synchronizedOfferFields,
             // Notification text is personalized when the offer is created.
             // Replacing it here with the rule template would expose raw
             // placeholders such as {category} to the customer.
           }
         }
       );
+      const offersToRerender = await PersonalizedOffer.find({
+        strategyId: ruleDoc.strategyId,
+        status: { $in: ["prepared", "active", "viewed", "clicked"] },
+      })
+        .populate("user", "name")
+        .populate("targetCategory targetMenuItem freeItem triggerItem", "name")
+        .lean();
+      if (offersToRerender.length > 0) {
+        await PersonalizedOffer.bulkWrite(
+          offersToRerender.map((offer) => ({
+            updateOne: {
+              filter: { _id: offer._id },
+              update: { $set: renderRuleNotifications(ruleDoc, offer) },
+            },
+          })),
+          { ordered: false },
+        );
+      }
     }
 
     // Seed rules if missing
@@ -695,7 +723,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
         user: { $in: userIds },
         status: { $nin: CANCELED_ORDER_STATUSES }
       })
-        .select("user createdAt sub_total total_price orderItems discount personalizedOffer")
+        .select("user createdAt sub_total total_price orderItems offers discount personalizedOffer")
         .lean();
 
       const ordersByUser = {};
@@ -781,6 +809,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           let basketSizeStdDev  = 0;
           let medianOrderIntervalDays = null;
           const categoryShare90d = new Map();
+          const categoryPurchaseCounts = new Map();
 
           if (orders.length > 0) {
             const hours  = [];
@@ -798,6 +827,12 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             orders.forEach(o => {
               const parts     = getPartsInTimezone(o.createdAt);
               const orderDate = new Date(o.createdAt);
+              const purchasedItemIds = [
+                ...(o.orderItems || []).map((item) => item.item),
+                ...(o.offers || []).flatMap((offer) =>
+                  (offer.items || []).map((item) => item.item),
+                ),
+              ].filter(Boolean);
               hours.push(parts.hour);
               days.push(parts.day);
               if (orderDate >= date7d)  ordersLast7d++;
@@ -810,13 +845,26 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
                   Math.max(0, toSafeNumber(o.sub_total ?? o.total_price, 0)),
                 );
                 
-                (o.orderItems || []).forEach(item => {
-                  if (item.item) {
-                    const categoryId = menuItemToCategoryMap[String(item.item)];
+                purchasedItemIds.forEach((itemId) => {
+                    const categoryId = menuItemToCategoryMap[String(itemId)];
                     if (categoryId) {
+                      categoryPurchaseCounts.set(
+                        categoryId,
+                        (categoryPurchaseCounts.get(categoryId) || 0) + 1,
+                      );
                       catCount90d[categoryId] = (catCount90d[categoryId] || 0) + 1;
                       totalItemsOrdered90d++;
                     }
+                });
+              }
+              if (orderDate < date90d) {
+                purchasedItemIds.forEach((itemId) => {
+                  const categoryId = menuItemToCategoryMap[String(itemId)];
+                  if (categoryId) {
+                    categoryPurchaseCounts.set(
+                      categoryId,
+                      (categoryPurchaseCounts.get(categoryId) || 0) + 1,
+                    );
                   }
                 });
               }
@@ -862,6 +910,16 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           }
 
           const segment = determineSegment({ recencyDays, ordersLast7d, ordersLast14d, ordersLast30d, ordersLast60d });
+          let favoriteCategory = null;
+          let favoriteCategoryCount = 0;
+          for (const [categoryId, count] of categoryPurchaseCounts.entries()) {
+            if (count > favoriteCategoryCount) {
+              favoriteCategoryCount = count;
+              favoriteCategory = allCategories.find(
+                (category) => String(category._id) === String(categoryId),
+              ) || null;
+            }
+          }
           const reactivationProfiling = determineReactivationProfile({
             orderCount,
             recencyDays,
@@ -977,6 +1035,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
                   : dbRule.freeItem || defaultStrat.freeItem,
                 freeItems: dbRule.freeItems?.length > 0 ? dbRule.freeItems : (defaultStrat.freeItems || []),
                 targetCategory: dbRule.targetCategory || defaultStrat.targetCategory,
+                useFavoriteCategory: Boolean(dbRule.useFavoriteCategory),
                 targetMenuItem: dbRule.targetMenuItem || defaultStrat.targetMenuItem,
               };
             }
@@ -1133,10 +1192,15 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
               const dominantCat = allCategories.find(c => String(c._id) === dominantCatId);
               const strat = getStrategyConfig(17);
               if (strat && dominantCat && getStrategyCooldownPassed(17, strat.cooldownDays)) {
+                const configuredCategory = strat.targetCategory
+                  ? allCategories.find(
+                      (category) => String(category._id) === String(strat.targetCategory),
+                    )
+                  : null;
                 candidates.push({
                   ...strat,
                   targetCategory: strat.targetCategory || dominantCat._id,
-                  categoryName: dominantCat.name,
+                  categoryName: configuredCategory?.name || dominantCat.name,
                   score: strat.priority
                 });
               }
@@ -1205,6 +1269,18 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             return !rule || rule.isActive;
           });
 
+          // Rules configured with "favorite category" require purchase data.
+          // Resolve the concrete category before sorting and persisting.
+          filtered = filtered
+            .filter((candidate) => !candidate.useFavoriteCategory || favoriteCategory)
+            .map((candidate) => candidate.useFavoriteCategory
+              ? {
+                  ...candidate,
+                  targetCategory: favoriteCategory._id,
+                  categoryName: favoriteCategory.name,
+                }
+              : candidate);
+
           if (filtered.length === 0) {
             totalSkipped++;
             continue;
@@ -1245,8 +1321,13 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           scheduledNotifyAt.setHours(notifyHour, 0, 0, 0);
 
           // ── Personalize text ──────────────────────────────────────────────
+          const selectedCategory = selected.targetCategory
+            ? allCategories.find(
+                (category) => String(category._id) === String(selected.targetCategory),
+              )
+            : null;
           const offerDetails = {
-            categoryName: selected.categoryName || "",
+            categoryName: selected.categoryName || selectedCategory?.name || "",
             itemName:     selected.itemName     || "",
             discount:     selected.discountValue
               ? (selected.offerType === "bonus_basket" ? `${selected.discountValue}$` : `${selected.discountValue}%`)
@@ -1432,7 +1513,14 @@ const triggerScheduledOffersJob = async () => {
               offerActivations.push({
                 updateOne: {
                   filter: { _id: tokenInfo.offerId },
-                  update: { $set: { status: "active", validFrom: tokenInfo.validFrom, validUntil: tokenInfo.validUntil } },
+                  update: {
+                    $set: {
+                      status: "active",
+                      validFrom: tokenInfo.validFrom,
+                      validUntil: tokenInfo.validUntil,
+                      initialNotificationSentAt: new Date(),
+                    },
+                  },
                 }
               });
               eventInserts.push({
@@ -1547,6 +1635,156 @@ const triggerScheduledOffersJob = async () => {
   }
 };
 
+// ─── 3. Reminder after two thirds of the offer validity ─────────────────────
+const sendSmartOfferRemindersJob = async () => {
+  const now = new Date();
+
+  try {
+    const cronStat = await SystemStat.findOne({ key: "smartOfferCronEnabled" }).lean();
+    const cronEnabled = cronStat?.value !== undefined ? Boolean(cronStat.value) : true;
+    if (!cronEnabled) return;
+
+    const candidates = await PersonalizedOffer.find({
+      status: { $in: ["active", "viewed", "clicked"] },
+      initialNotificationSentAt: { $ne: null },
+      reminderSentAt: null,
+      reminderSkippedAt: null,
+      reminderClaimedAt: null,
+      validFrom: { $ne: null },
+      validUntil: { $gt: now },
+      $expr: {
+        $gte: [
+          now,
+          {
+            $add: [
+              "$validFrom",
+              {
+                $multiply: [
+                  { $subtract: ["$validUntil", "$validFrom"] },
+                  2 / 3,
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    })
+      .populate("user", "expo_token appIsInstalled")
+      .sort({ validUntil: 1 })
+      .limit(REMINDER_BATCH_SIZE)
+      .lean();
+
+    if (candidates.length === 0) return;
+
+    const expo = new Expo({ useFcmV1: true });
+    for (const offer of candidates) {
+      const token = offer.user?.expo_token;
+      if (
+        !token ||
+        offer.user?.appIsInstalled === false ||
+        !Expo.isExpoPushToken(token)
+      ) {
+        await PersonalizedOffer.updateOne(
+          { _id: offer._id, reminderSentAt: null, reminderSkippedAt: null },
+          { $set: { reminderSkippedAt: now } },
+        );
+        continue;
+      }
+
+      const claimedOffer = await PersonalizedOffer.findOneAndUpdate(
+        {
+          _id: offer._id,
+          status: { $in: ["active", "viewed", "clicked"] },
+          validUntil: { $gt: now },
+          reminderSentAt: null,
+          reminderSkippedAt: null,
+          reminderClaimedAt: null,
+        },
+        {
+          $set: { reminderClaimedAt: now },
+          $inc: { reminderAttemptCount: 1 },
+        },
+        { new: true },
+      ).lean();
+      if (!claimedOffer) continue;
+
+      let pushAccepted = false;
+      try {
+        const [ticket] = await expo.sendPushNotificationsAsync([{
+          to: token,
+          sound: "default",
+          title: `⏰ Rappel : ${offer.notificationTitle}`,
+          body: offer.notificationBody,
+          priority: "high",
+          data: {
+            type: "smart_offer",
+            offerId: String(offer._id),
+            userId: String(offer.user._id || offer.user),
+            isReminder: true,
+          },
+        }]);
+
+        if (ticket?.status !== "ok") {
+          if (ticket?.details?.error === "DeviceNotRegistered") {
+            await User.updateOne(
+              { _id: offer.user._id },
+              {
+                $set: {
+                  expo_token: null,
+                  appIsInstalled: false,
+                  appUninstalledAt: new Date(),
+                },
+              },
+            );
+          }
+          await PersonalizedOffer.updateOne(
+            { _id: offer._id, reminderSentAt: null },
+            {
+              $set: (claimedOffer.reminderAttemptCount || 0) >= 3
+                ? { reminderClaimedAt: null, reminderSkippedAt: new Date() }
+                : { reminderClaimedAt: null },
+            },
+          );
+          continue;
+        }
+        pushAccepted = true;
+
+        const sentAt = new Date();
+        await PersonalizedOffer.updateOne(
+          { _id: offer._id, reminderSentAt: null },
+          { $set: { reminderSentAt: sentAt, reminderClaimedAt: null } },
+        );
+        await PersonalizedOfferEvent.create({
+          personalizedOffer: offer._id,
+          user: offer.user._id,
+          eventType: "reminder_notified",
+          timestamp: sentAt,
+        });
+      } catch (error) {
+        // Once Expo accepted the push, keep the claim if the final DB write
+        // fails. This trades a potentially missing audit marker for avoiding
+        // a duplicate customer notification on the next cron run.
+        if (!pushAccepted) {
+          await PersonalizedOffer.updateOne(
+            { _id: offer._id, reminderSentAt: null },
+            {
+              $set: (claimedOffer.reminderAttemptCount || 0) >= 3
+                ? { reminderClaimedAt: null, reminderSkippedAt: new Date() }
+                : { reminderClaimedAt: null },
+            },
+          ).catch(() => {});
+        }
+        console.error(
+          `[sendSmartOfferRemindersJob] Reminder failed for offer ${offer._id}:`,
+          error.message,
+        );
+      }
+    }
+  } catch (error) {
+    console.error("[sendSmartOfferRemindersJob] Fatal error:", error);
+  }
+};
+
 // ─── 3. Push Receipt Checker (every hour) ────────────────────────────────────
 const checkPushReceiptsJob = async () => {
   const ticketIds = Object.keys(pendingReceiptMap);
@@ -1593,11 +1831,15 @@ function startPersonalizedOffersJobs() {
   // Trigger & expire: every 5 minutes
   cron.schedule("*/5 * * * *", async () => { await triggerScheduledOffersJob(); }, { timezone: DEFAULT_TIMEZONE });
 
+  // Reminder scan: offset by 2 minutes to avoid overlapping activation work.
+  cron.schedule("2-59/5 * * * *", async () => { await sendSmartOfferRemindersJob(); }, { timezone: DEFAULT_TIMEZONE });
+
   // Receipt checker: every hour
   cron.schedule("0 * * * *", async () => { await checkPushReceiptsJob(); }, { timezone: DEFAULT_TIMEZONE });
 
   console.log(`[personalizedOffersJobs] ✅ Nightly scan:     00:00 (${DEFAULT_TIMEZONE})`);
   console.log(`[personalizedOffersJobs] ✅ Periodic trigger: every 5 min (${DEFAULT_TIMEZONE})`);
+  console.log(`[personalizedOffersJobs] ✅ Offer reminders:  at 2/3 validity (${DEFAULT_TIMEZONE})`);
   console.log(`[personalizedOffersJobs] ✅ Receipt checker:  every hour (${DEFAULT_TIMEZONE})`);
 }
 
@@ -1606,5 +1848,6 @@ module.exports = {
   startPersonalizedOffersJobs,
   prepareDailyOffersJob,
   triggerScheduledOffersJob,
+  sendSmartOfferRemindersJob,
   checkPushReceiptsJob,
 };

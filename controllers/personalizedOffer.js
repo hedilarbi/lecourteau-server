@@ -125,7 +125,9 @@ const createOrUpdateRule = async (req, res) => {
       };
       // A favorite category is resolved per customer at offer creation and
       // must not be overwritten with the rule's null target.
-      if (!rule.useFavoriteCategory) {
+      const hasDynamicCategory =
+        rule.useFavoriteCategory || [17, 18].includes(Number(rule.strategyId));
+      if (rule.targetCategory || !hasDynamicCategory) {
         synchronizedOfferFields.targetCategory = rule.targetCategory || null;
       }
 
@@ -529,7 +531,7 @@ const getMonitoringStats = async (req, res) => {
     // Avoid joining every offer to the full orders/events collections: that
     // caused the production monitoring page to time out as history grew.
     const convertedOrderStats = await Order.aggregate([
-      { $match: { personalizedOfferApplied: true, personalizedOffer: { $ne: null }, status: { $ne: "Annulé" } } },
+      { $match: { confirmed: true, personalizedOfferApplied: true, personalizedOffer: { $ne: null }, status: { $ne: "Annulé" } } },
       {
         $group: {
           _id: "$personalizedOffer",
@@ -557,6 +559,10 @@ const getMonitoringStats = async (req, res) => {
         },
       },
     ], { allowDiskUse: true });
+    const convertedOrdersCount = convertedOrderStats.reduce(
+      (total, item) => total + (item.conversions || 0),
+      0,
+    );
 
     const convertedOfferIds = convertedOrderStats.map((item) => item._id);
     const convertedOffers = convertedOfferIds.length > 0
@@ -699,11 +705,11 @@ const getMonitoringStats = async (req, res) => {
         totalProfilesCount,
         totalOffers: stats.totalOffers,
         notifClickedOffers: totalNotifClicked,
-        usedOffers: stats.usedOffers,
+        usedOffers: convertedOrdersCount,
         clickedOffers: stats.clickedOffers,
         viewedOffers: stats.viewedOffers,
         notifClickRate: stats.totalOffers > 0 ? Math.round((totalNotifClicked / stats.totalOffers) * 100) : 0,
-        conversionRate: stats.totalOffers > 0 ? Math.round((stats.usedOffers / stats.totalOffers) * 100) : 0,
+        conversionRate: stats.totalOffers > 0 ? Math.round((convertedOrdersCount / stats.totalOffers) * 100) : 0,
         engagementRate: stats.totalOffers > 0 ? Math.round((stats.viewedOffers / stats.totalOffers) * 100) : 0,
         clickRate: stats.totalOffers > 0 ? Math.round((stats.clickedOffers / stats.totalOffers) * 100) : 0,
         offerTypesMap,

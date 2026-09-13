@@ -616,7 +616,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
         freeItem: ruleDoc.freeItems?.length > 0 ? null : ruleDoc.freeItem || null,
         freeItems: ruleDoc.freeItems || [],
       };
-      if (!ruleDoc.useFavoriteCategory) {
+      const hasDynamicCategory =
+        ruleDoc.useFavoriteCategory || [17, 18].includes(Number(ruleDoc.strategyId));
+      if (ruleDoc.targetCategory || !hasDynamicCategory) {
         synchronizedOfferFields.targetCategory = ruleDoc.targetCategory || null;
       }
       await PersonalizedOffer.updateMany(
@@ -648,6 +650,24 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           { ordered: false },
         );
       }
+    }
+
+    // S17/S18 require a category selected dynamically for each user. An offer
+    // without one cannot grant its configured discount. Expire historical
+    // invalid offers so the scan can generate a valid replacement below.
+    const invalidDynamicCategoryOffers = await PersonalizedOffer.updateMany(
+      {
+        strategyId: { $in: [17, 18] },
+        offerType: "discount_category",
+        targetCategory: null,
+        status: { $in: ["prepared", "active", "viewed", "clicked"] },
+      },
+      { $set: { status: "expired" } },
+    );
+    if (invalidDynamicCategoryOffers.modifiedCount > 0) {
+      console.log(
+        `[prepareDailyOffersJob] Expired ${invalidDynamicCategoryOffers.modifiedCount} invalid S17/S18 offers without a target category.`,
+      );
     }
 
     // Seed rules if missing

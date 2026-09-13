@@ -773,6 +773,7 @@ const createOrderService = async (order, options = {}) => {
     let personalizedOfferDocument = null;
     let personalizedDiscountAmount = 0;
     let personalizedFreeItemBenefitAmount = 0;
+    let personalizedOfferApplied = false;
     let smartOfferUsageStep = null;
 
     if (personalizedOfferId) {
@@ -989,6 +990,18 @@ const createOrderService = async (order, options = {}) => {
       }
 
       personalizedDiscountAmount = roundMoney(personalizedDiscountAmount, 0);
+
+      personalizedOfferApplied = Boolean(
+        personalizedOfferDocument.offerType === "free_delivery"
+          ? order.type === "delivery" &&
+            requestedDeliveryFee > 0 &&
+            normalizedDeliveryFee === 0
+          : ["free_item", "buy_one_get_one"].includes(personalizedOfferDocument.offerType)
+            ? personalizedFreeItemBenefitAmount > 0
+            : personalizedOfferDocument.offerType === "loyalty_points"
+              ? Math.floor(toSafeNumber(personalizedOfferDocument.bonusPoints, 0)) > 0
+              : personalizedDiscountAmount > 0,
+      );
 
       const expectedSubTotalAfterDiscount = roundMoney(
         Math.max(0, toSafeNumber(orderPayload.subTotal, 0) - personalizedDiscountAmount),
@@ -1273,18 +1286,6 @@ const createOrderService = async (order, options = {}) => {
       user.referralBalance = Math.max(0, roundMoney(availableBalance - referralDiscountApplied, 0));
     }
 
-    const personalizedOfferApplied = Boolean(
-      personalizedOfferDocument &&
-        (personalizedOfferDocument.offerType === "free_delivery"
-          ? order.type === "delivery" &&
-            requestedDeliveryFee > 0 &&
-            normalizedDeliveryFee === 0
-          : ["free_item", "buy_one_get_one"].includes(personalizedOfferDocument.offerType)
-            ? personalizedFreeItemBenefitAmount > 0
-            : personalizedOfferDocument.offerType === "loyalty_points"
-              ? Math.floor(toSafeNumber(personalizedOfferDocument.bonusPoints, 0)) > 0
-            : personalizedDiscountAmount > 0),
-    );
     // The Hedi share is credited only when the restaurant confirms the order.
     // Keep it at zero while the order is awaiting confirmation.
     const hediSharePercent = 0;
@@ -1322,9 +1323,11 @@ const createOrderService = async (order, options = {}) => {
             ? "promo_code"
             : normalizedPaymentMethod || "card",
       promoCode: promoCodeId,
-      personalizedOffer: personalizedOfferId || null,
+      // Keep an inapplicable offer available for a later eligible basket. The
+      // current order remains a normal order and must not consume the offer.
+      personalizedOffer: personalizedOfferApplied ? personalizedOfferId : null,
       personalizedOfferApplied,
-      smartOfferUsageStep,
+      smartOfferUsageStep: personalizedOfferApplied ? smartOfferUsageStep : null,
       smartOfferBonusPoints:
         personalizedOfferApplied &&
         personalizedOfferDocument?.offerType === "loyalty_points"
@@ -1375,7 +1378,7 @@ const createOrderService = async (order, options = {}) => {
     await user.save();
 
     // Expire/Apply smart offers for this user (Rule R15)
-    if (personalizedOfferId) {
+    if (personalizedOfferId && personalizedOfferApplied) {
       if (personalizedOfferDocument?.offerType === "split_discount") {
         const nextStep = smartOfferUsageStep + 1;
         const isComplete = nextStep >= personalizedOfferDocument.discountSteps.length;
@@ -1402,7 +1405,7 @@ const createOrderService = async (order, options = {}) => {
         },
         { $set: { status: "expired" } }
       ).catch(() => {});
-    } else {
+    } else if (!personalizedOfferId) {
       await PersonalizedOffer.updateMany(
         {
           user: user._id,

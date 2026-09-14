@@ -440,6 +440,22 @@ const buildOrdersAnalytics = async ({
       },
     ],
   };
+  const subTotalWithTaxExpr = {
+    $max: [
+      0,
+      {
+        $subtract: [
+          totalPriceExpr,
+          {
+            $add: [
+              tipExpr,
+              { $multiply: [deliveryFeeExpr, 1.14975] }
+            ]
+          }
+        ]
+      }
+    ]
+  };
   const netSalesExpr = {
     $ifNull: [
       subTotalAfterDiscountExpr,
@@ -466,6 +482,10 @@ const buildOrdersAnalytics = async ({
           totalRevenue: { $sum: totalPriceExpr },
           totalNetSales: { $sum: netSalesExpr },
           totalDeliveryFee: { $sum: deliveryFeeExpr },
+          totalTip: { $sum: tipExpr },
+          totalSubTotal: { $sum: subTotalExpr },
+          totalSubTotalAfterDiscount: { $sum: subTotalAfterDiscountExpr },
+          totalSubTotalAfterTax: { $sum: subTotalWithTaxExpr },
           totalOrders: { $sum: 1 },
           promoOrders: {
             $sum: {
@@ -711,6 +731,10 @@ const buildOrdersAnalytics = async ({
   const totalRevenue = roundMoney(summary.totalRevenue, 0);
   const totalNetSales = roundMoney(summary.totalNetSales, 0);
   const totalDeliveryFee = roundMoney(summary.totalDeliveryFee, 0);
+  const totalTip = roundMoney(summary.totalTip, 0);
+  const totalSubTotal = roundMoney(summary.totalSubTotal, 0);
+  const totalSubTotalAfterDiscount = roundMoney(summary.totalSubTotalAfterDiscount, 0);
+  const totalSubTotalAfterTax = roundMoney(summary.totalSubTotalAfterTax, 0);
   const totalOrders = Math.max(0, Math.floor(safeNumber(summary.totalOrders, 0)));
   const promoOrders = Math.max(0, Math.floor(safeNumber(summary.promoOrders, 0)));
   const referralOrders = Math.max(0, Math.floor(safeNumber(summary.referralOrders, 0)));
@@ -830,6 +854,10 @@ const buildOrdersAnalytics = async ({
       totalRevenue,
       totalNetSales,
       totalDeliveryFee,
+      totalTip,
+      totalSubTotal,
+      totalSubTotalAfterDiscount,
+      totalSubTotalAfterTax,
       averageBasket,
       frequencyPerWeek,
       frequencyPerMonth,

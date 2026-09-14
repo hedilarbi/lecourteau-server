@@ -482,6 +482,7 @@ const buildOrdersAnalytics = async ({
           totalRevenue: { $sum: totalPriceExpr },
           totalNetSales: { $sum: netSalesExpr },
           totalDeliveryFee: { $sum: deliveryFeeExpr },
+          totalDeliveryFeeWithTax: { $sum: { $multiply: [deliveryFeeExpr, 1.14975] } },
           totalTip: { $sum: tipExpr },
           totalSubTotal: { $sum: subTotalExpr },
           totalSubTotalAfterDiscount: { $sum: subTotalAfterDiscountExpr },
@@ -731,6 +732,7 @@ const buildOrdersAnalytics = async ({
   const totalRevenue = roundMoney(summary.totalRevenue, 0);
   const totalNetSales = roundMoney(summary.totalNetSales, 0);
   const totalDeliveryFee = roundMoney(summary.totalDeliveryFee, 0);
+  const totalDeliveryFeeWithTax = roundMoney(summary.totalDeliveryFeeWithTax, 0);
   const totalTip = roundMoney(summary.totalTip, 0);
   const totalSubTotal = roundMoney(summary.totalSubTotal, 0);
   const totalSubTotalAfterDiscount = roundMoney(summary.totalSubTotalAfterDiscount, 0);
@@ -854,6 +856,7 @@ const buildOrdersAnalytics = async ({
       totalRevenue,
       totalNetSales,
       totalDeliveryFee,
+      totalDeliveryFeeWithTax,
       totalTip,
       totalSubTotal,
       totalSubTotalAfterDiscount,

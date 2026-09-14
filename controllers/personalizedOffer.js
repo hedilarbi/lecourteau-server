@@ -108,60 +108,6 @@ const createOrUpdateRule = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    if (rule?.strategyId) {
-      const synchronizedOfferFields = {
-        discountValue: rule.discountValue,
-        bonusThreshold: rule.bonusThreshold,
-        bonusPoints: rule.bonusPoints,
-        discountSteps: rule.discountSteps,
-        followupValidityDays: rule.followupValidityDays,
-        triggerItem: rule.triggerItem || null,
-        triggerItemSize: rule.triggerItemSize || "",
-        giftItemSize: rule.giftItemSize || "",
-        offerType: rule.offerType,
-        targetMenuItem: rule.targetMenuItem || null,
-        freeItem: rule.freeItems?.length > 0 ? null : rule.freeItem || null,
-        freeItems: rule.freeItems || [],
-      };
-      // A favorite category is resolved per customer at offer creation and
-      // must not be overwritten with the rule's null target.
-      const hasDynamicCategory =
-        rule.useFavoriteCategory || [17, 18].includes(Number(rule.strategyId));
-      if (rule.targetCategory || !hasDynamicCategory) {
-        synchronizedOfferFields.targetCategory = rule.targetCategory || null;
-      }
-
-      await PersonalizedOffer.updateMany(
-        { strategyId: rule.strategyId, status: { $in: ["prepared", "active", "viewed", "clicked"] } },
-        {
-          $set: {
-            ...synchronizedOfferFields,
-            // Existing offers already contain customer-specific rendered
-            // text. Do not replace it with templates containing placeholders.
-          }
-        }
-      );
-
-      const offersToRerender = await PersonalizedOffer.find({
-        strategyId: rule.strategyId,
-        status: { $in: ["prepared", "active", "viewed", "clicked"] },
-      })
-        .populate("user", "name")
-        .populate("targetCategory targetMenuItem freeItem triggerItem", "name")
-        .lean();
-      if (offersToRerender.length > 0) {
-        await PersonalizedOffer.bulkWrite(
-          offersToRerender.map((offer) => ({
-            updateOne: {
-              filter: { _id: offer._id },
-              update: { $set: renderRuleNotifications(rule, offer) },
-            },
-          })),
-          { ordered: false },
-        );
-      }
-    }
-
     return res.status(200).json(rule);
   } catch (error) {
     return res.status(500).json({ error: error.message });

@@ -680,7 +680,15 @@ const deleteRule = async (req, res) => {
 };
 
 // 8. Trigger manual scan
-const { prepareDailyOffersJob, triggerScheduledOffersJob } = require("../jobs/personalizedOfferCron.job");
+const { prepareDailyOffersJob, triggerScheduledOffersJob, initializeBasketStrategyRules } = require("../jobs/personalizedOfferCron.job");
+const initializeBasketRules = async (req, res) => {
+  try {
+    const createdStrategyIds = await initializeBasketStrategyRules();
+    return res.status(200).json({ success: true, createdStrategyIds });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 const triggerScan = async (req, res) => {
   try {
     console.log("[triggerScan] Manual scan triggered via admin dashboard API.");
@@ -969,6 +977,7 @@ module.exports = {
   getOffersHistory,
   deleteRule,
   triggerScan,
+  initializeBasketRules,
   getCronStatus,
   toggleCron,
   getSmartOfferHediStats,

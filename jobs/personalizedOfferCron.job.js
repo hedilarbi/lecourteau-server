@@ -572,6 +572,69 @@ const resolveBasketStrategyId = (average, isActive) => {
   return band && isActive(band.strategyId) ? band.strategyId : null;
 };
 
+// Crée uniquement les règles absentes. Aucun profil ni offre n'est généré ici.
+const ensureSmartOfferRules = async ({ cachedDessertItem, cachedDrinkItem, strategyIds } = {}) => {
+  try {
+    await mongoose.connection.db.collection("smartofferrules").dropIndex("segment_1");
+  } catch (error) {
+    if (error.codeName !== "IndexNotFound" && error.code !== 27) throw error;
+  }
+
+  const existingRules = await SmartOfferRule.find().lean();
+  const existingIds = new Set(existingRules.map((rule) => rule.strategyId));
+  const createdIds = [];
+  for (const def of STRATEGIES_DEFAULTS) {
+    if (strategyIds && !strategyIds.has(def.strategyId)) continue;
+    if (existingIds.has(def.strategyId)) continue;
+    const source = def.cloneFromStrategyId
+      ? await SmartOfferRule.findOne({ strategyId: def.cloneFromStrategyId }).lean()
+      : null;
+    const config = source || def;
+    const basketCopy = def.cloneFromStrategyId
+      ? renderBasketStrategyNotification(config)
+      : null;
+    let freeItem = null;
+    if ([4, 6, 7, 14].includes(def.strategyId)) {
+      freeItem = [4, 14].includes(def.strategyId)
+        ? cachedDessertItem?._id || null
+        : cachedDrinkItem?._id || null;
+    }
+    await SmartOfferRule.create({
+      name: def.name,
+      strategyId: def.strategyId,
+      segment: config.segment,
+      group: config.group,
+      priority: config.priority,
+      cooldownDays: config.cooldownDays,
+      validityHours: config.validityHours,
+      offerType: config.offerType,
+      discountValue: config.discountValue,
+      bonusThreshold: config.bonusThreshold,
+      bonusPoints: config.bonusPoints || 0,
+      discountSteps: config.discountSteps,
+      followupValidityDays: config.followupValidityDays,
+      triggerItem: config.triggerItem || null,
+      triggerItemSize: config.triggerItemSize || "",
+      giftItemSize: config.giftItemSize || "",
+      targetCategory: config.targetCategory || null,
+      targetMenuItem: config.targetMenuItem || null,
+      useFavoriteCategory: Boolean(config.useFavoriteCategory),
+      freeItem: config.freeItems?.length ? null : config.freeItem || freeItem,
+      freeItems: config.freeItems || [],
+      notificationTitle: basketCopy?.title || config.notificationTitle,
+      notificationBody: basketCopy?.body || config.notificationBody,
+      isActive: def.strategyId === 21 ? false : config.isActive !== false,
+    });
+    existingIds.add(def.strategyId);
+    createdIds.push(def.strategyId);
+  }
+  return createdIds;
+};
+
+const initializeBasketStrategyRules = () => ensureSmartOfferRules({
+  strategyIds: new Set(BASKET_STRATEGY_BANDS.map((band) => band.strategyId)),
+});
+
 const prepareDailyOffersJob = async (isManualTrigger = false) => {
   console.log("[prepareDailyOffersJob] Starting Smart Offers scan job...");
   const jobStart = Date.now();
@@ -585,14 +648,6 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
         return;
       }
     }
-    // Drop the old segment unique index if it exists in MongoDB
-    try {
-      await mongoose.connection.db.collection("smartofferrules").dropIndex("segment_1");
-      console.log("[prepareDailyOffersJob] Dropped legacy segment_1 unique index successfully.");
-    } catch (e) {
-      // Ignore if index doesn't exist
-    }
-
     // ── Pre-load static data ONCE for the entire run ──────────────────────────
     const allCategories = await Category.find().lean();
     // Keep unavailable historical items for profiling. Gift fallback choices
@@ -648,58 +703,8 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       console.log(`[prepareDailyOffersJob] Top category computed: ${topCategoryDoc.name}`);
     }
 
-    // Seed rules if missing
-    let rulesCreated = false;
-    for (const def of STRATEGIES_DEFAULTS) {
-      const exists = allRules.some(r => r.strategyId === def.strategyId);
-      if (!exists) {
-        const source = def.cloneFromStrategyId
-          ? await SmartOfferRule.findOne({ strategyId: def.cloneFromStrategyId }).lean()
-          : null;
-        const config = source || def;
-        const basketCopy = def.cloneFromStrategyId
-          ? renderBasketStrategyNotification(config)
-          : null;
-        let targetCategory = null;
-        // S17 and S18 are dynamic per-user; no fixed targetCategory at seeding time
-
-        let freeItem = null;
-        if ([4, 6, 7, 14].includes(def.strategyId)) {
-          freeItem = [4, 14].includes(def.strategyId) ? (cachedDessertItem?._id || null) : (cachedDrinkItem?._id || null);
-        }
-
-        await SmartOfferRule.create({
-          name: def.name,
-          strategyId: def.strategyId,
-          segment: config.segment,
-          group: config.group,
-          priority: config.priority,
-          cooldownDays: config.cooldownDays,
-          validityHours: config.validityHours,
-          offerType: config.offerType,
-          discountValue: config.discountValue,
-          bonusThreshold: config.bonusThreshold,
-          bonusPoints: config.bonusPoints || 0,
-          discountSteps: config.discountSteps,
-          followupValidityDays: config.followupValidityDays,
-          triggerItem: config.triggerItem || null,
-          triggerItemSize: config.triggerItemSize || "",
-          giftItemSize: config.giftItemSize || "",
-          targetCategory: config.targetCategory || targetCategory,
-          targetMenuItem: config.targetMenuItem || null,
-          useFavoriteCategory: Boolean(config.useFavoriteCategory),
-          freeItem: config.freeItems?.length ? null : config.freeItem || freeItem,
-          freeItems: config.freeItems || [],
-          notificationTitle: basketCopy?.title || config.notificationTitle,
-          notificationBody: basketCopy?.body || config.notificationBody,
-          isActive: config.isActive !== false
-        });
-        rulesCreated = true;
-        console.log(`[prepareDailyOffersJob] Seeded SmartOfferRule for S${def.strategyId}`);
-      }
-    }
-
-    if (rulesCreated) {
+    const createdRuleIds = await ensureSmartOfferRules({ cachedDessertItem, cachedDrinkItem });
+    if (createdRuleIds.length) {
       allRules = await SmartOfferRule.find().lean();
     }
 
@@ -1817,6 +1822,8 @@ function startPersonalizedOffersJobs() {
 }
 
 module.exports = {
+  ensureSmartOfferRules,
+  initializeBasketStrategyRules,
   getBasketStrategyBand,
   resolveBasketStrategyId,
   determineReactivationProfile,

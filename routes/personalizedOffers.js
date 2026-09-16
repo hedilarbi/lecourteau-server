@@ -9,6 +9,7 @@ const {
   getOffersHistory,
   deleteRule,
   triggerScan,
+  initializeBasketRules,
   getCronStatus,
   toggleCron,
   getSmartOfferHediStats,
@@ -32,6 +33,7 @@ router.get("/profiles", getUserProfiles);
 router.get("/history", getOffersHistory);
 router.get("/monitoring-stats", getMonitoringStats);
 router.post("/trigger-scan", triggerScan);
+router.post("/rules/initialize-basket", authStaff, initializeBasketRules);
 router.get("/cron/status", getCronStatus);
 router.post("/cron/toggle", toggleCron);
 

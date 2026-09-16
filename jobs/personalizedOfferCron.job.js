@@ -9,6 +9,7 @@ const UserSmartProfile = require("../models/UserSmartProfile");
 const SmartOfferRule = require("../models/SmartOfferRule");
 const PersonalizedOffer = require("../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../models/PersonalizedOfferEvent");
+const SmartOfferWaveReset = require("../models/SmartOfferWaveReset");
 const { sendSmartOfferUninstalledEmail } = require("../services/offersServices/smartOfferMailService");
 const SystemStat = require("../models/SystemStat");
 const { CANCELED } = require("../utils/constants");
@@ -660,6 +661,8 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
     const cachedDrinkItem   =
       await findItemFromCategoryKeyword("boisson", allCategories, availableMenuItems) ||
       await findItemFromCategoryKeyword("drink",   allCategories, availableMenuItems);
+    const latestWaveReset = await SmartOfferWaveReset.findOne().sort({ createdAt: -1 }).lean();
+    const cooldownResetAt = latestWaveReset?.createdAt || null;
 
     // Build menuItemToCategoryMap FIRST (needed for top-category computation below)
     const menuItemToCategoryMap = {};
@@ -811,6 +814,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           const uid    = String(user._id);
           const orders = ordersByUser[uid] || [];
           const userOffers = offersByUser[uid] || [];
+          const cooldownOffers = cooldownResetAt
+            ? userOffers.filter((offer) => new Date(offer.createdAt) >= cooldownResetAt)
+            : userOffers;
 
           // ── Compute RFM metrics ───────────────────────────────────────────
           let preferredHour     = 12;
@@ -1018,11 +1024,11 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             if (!Number.isFinite(cooldownDays) || cooldownDays < 0) return false;
 
             if (cooldownDays === 9999) {
-              const hasOffer = userOffers.some(o => o.strategyId === strategyId);
+              const hasOffer = cooldownOffers.some(o => o.strategyId === strategyId);
               return !hasOffer;
             }
             const familyId = basketFamilyId(strategyId);
-            const stratOffers = userOffers.filter(o =>
+            const stratOffers = cooldownOffers.filter(o =>
               familyId ? basketFamilyId(o.strategyId) === familyId : o.strategyId === strategyId
             );
             if (stratOffers.length === 0) return true;
@@ -1201,10 +1207,11 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
 
           // ── R10: Global Cooldown (7 days after any redemption, exception S01-S04) ──
           const redeemedOffers = userOffers.filter(o => o.status === "applied");
+          const cooldownRedeemedOffers = cooldownOffers.filter(o => o.status === "applied");
           let lastRedeemedAt = null;
-          if (redeemedOffers.length > 0) {
-            redeemedOffers.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-            lastRedeemedAt = redeemedOffers[0].updatedAt;
+          if (cooldownRedeemedOffers.length > 0) {
+            cooldownRedeemedOffers.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+            lastRedeemedAt = cooldownRedeemedOffers[0].updatedAt;
           }
 
           let isGlobalCooldownActive = false;

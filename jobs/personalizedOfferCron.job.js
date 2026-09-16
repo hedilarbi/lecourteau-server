@@ -736,6 +736,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
     let totalProcessed = 0;
     let totalPrepared  = 0;
     let totalSkipped   = 0;
+    let totalFailed    = 0;
 
     const processBatch = async (users) => {
       const userIds = users.map(u => u._id);
@@ -836,6 +837,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           let basketSizeStdDev90d = 0;
           let basketBand5Min = null;
           let medianOrderIntervalDays = null;
+          const totals90d = [];
           const categoryShare90d = new Map();
           const categoryPurchaseCounts = new Map();
 
@@ -843,7 +845,6 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             const hours  = [];
             const days   = [];
             const totals = [];
-            const totals90d = [];
             const date7d  = new Date(now.getTime() -  7 * 86400000);
             const date14d = new Date(now.getTime() - 14 * 86400000);
             const date30d = new Date(now.getTime() - 30 * 86400000);
@@ -1352,6 +1353,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
 
           totalPrepared++;
         } catch (userErr) {
+          totalFailed++;
           console.error(`[prepareDailyOffersJob] Error processing user ${user._id}:`, userErr.message);
         }
       }
@@ -1369,7 +1371,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       totalProcessed += users.length;
       console.log(
         `[prepareDailyOffersJob] Batch done — processed: ${totalProcessed}, ` +
-        `prepared: ${totalPrepared}, skipped: ${totalSkipped}`
+        `prepared: ${totalPrepared}, skipped: ${totalSkipped}, failed: ${totalFailed}`
       );
     };
 
@@ -1390,10 +1392,14 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
     const elapsed = ((Date.now() - jobStart) / 1000).toFixed(1);
     console.log(
       `[prepareDailyOffersJob] ✅ Finished in ${elapsed}s — ` +
-      `total: ${totalProcessed}, prepared: ${totalPrepared}, skipped: ${totalSkipped}`
+      `total: ${totalProcessed}, prepared: ${totalPrepared}, skipped: ${totalSkipped}, failed: ${totalFailed}`
     );
+    if (totalFailed > 0) {
+      throw new Error(`${totalFailed} utilisateur(s) n'ont pas pu être traités pendant le scan Smart Offers.`);
+    }
   } catch (error) {
     console.error("[prepareDailyOffersJob] Fatal error:", error);
+    if (isManualTrigger) throw error;
   }
 };
 

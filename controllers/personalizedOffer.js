@@ -105,7 +105,7 @@ const createOrUpdateRule = async (req, res) => {
         notificationBody,
         isActive: isActive !== undefined ? isActive : true
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true, runValidators: true }
     );
 
     return res.status(200).json(rule);

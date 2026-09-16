@@ -72,6 +72,10 @@ const personalizedOfferSchema = new Schema({
     type: Date,
     required: true,
   },
+  validityHours: {
+    type: Number,
+    min: 1,
+  },
   validFrom: {
     type: Date,
     default: null,

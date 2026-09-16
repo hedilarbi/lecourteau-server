@@ -321,6 +321,65 @@ const updateStatus = async (req, res) => {
   }
 };
 
+const addPickupDelay = async (req, res) => {
+  const minutes = Number(req.body?.minutes);
+  if (![5, 10, 15, 20, 25, 30].includes(minutes)) {
+    return res.status(400).json({ success: false, message: "Retard invalide." });
+  }
+
+  try {
+    const order = await Order.findById(req.params.id).select(
+      "user type confirmed scheduled status pickupReadyAt pickupDelayMinutes code",
+    );
+    if (!order) return res.status(404).json({ success: false, message: "Commande introuvable." });
+    if (
+      !order.confirmed ||
+      !["pick up", "pickup"].includes(String(order.type || "").toLowerCase()) ||
+      order.scheduled?.isScheduled ||
+      !order.pickupReadyAt ||
+      ["Prête", "Ramassé", "Terminée", "Annulé"].includes(order.status)
+    ) {
+      return res.status(409).json({ success: false, message: "Le retard n'est pas applicable à cette commande." });
+    }
+
+    const currentDelay = Number(order.pickupDelayMinutes || 0);
+    if (currentDelay + minutes > 120) {
+      return res.status(400).json({ success: false, message: "Le retard total ne peut pas dépasser 120 minutes." });
+    }
+    const pickupReadyAt = new Date(order.pickupReadyAt.getTime() + minutes * 60_000);
+    const updated = await Order.findOneAndUpdate(
+      { _id: order._id, pickupDelayMinutes: currentDelay, pickupReadyAt: order.pickupReadyAt, status: order.status },
+      { $set: { pickupReadyAt }, $inc: { pickupDelayMinutes: minutes } },
+      { new: true },
+    ).select("pickupReadyAt pickupDelayMinutes user code");
+    if (!updated) return res.status(409).json({ success: false, message: "La commande a changé. Actualisez et réessayez." });
+
+    const user = await User.findById(updated.user).select("expo_token").lean();
+    let notificationSent = false;
+    if (user?.expo_token) {
+      const time = new Intl.DateTimeFormat("fr-CA", {
+        timeZone: "America/Toronto", hour: "2-digit", minute: "2-digit",
+      }).format(updated.pickupReadyAt);
+      try {
+        await new Expo({ useFcmV1: true }).sendPushNotificationsAsync([{
+          to: user.expo_token,
+          sound: "default",
+          title: "Retard de votre commande",
+          body: `Votre commande #${updated.code} a ${minutes} min de retard supplémentaires. Elle devrait être prête vers ${time}.`,
+          data: { order_id: updated._id },
+          priority: "high",
+        }]);
+        notificationSent = true;
+      } catch (error) {
+        logWithTimestamp(`Pickup delay notification failed: ${error.message}`);
+      }
+    }
+    return res.json({ success: true, pickupReadyAt: updated.pickupReadyAt, pickupDelayMinutes: updated.pickupDelayMinutes, notificationSent });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 const updateDeliveryProvider = async (req, res) => {
   const { id } = req.params;
   const { delivery_provider } = req.body;
@@ -945,6 +1004,7 @@ module.exports = {
   getOrder,
   deleteOrder,
   updateStatus,
+  addPickupDelay,
   updateDeliveryProvider,
   updateOrderRestaurant,
   updatePrice,

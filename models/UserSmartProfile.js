@@ -64,6 +64,18 @@ const userSmartProfileSchema = new Schema({
     type: Number,
     default: 0,
   },
+  basketSizeStdDev90d: {
+    type: Number,
+    default: 0,
+  },
+  basketBand5Min: {
+    type: Number,
+    default: null,
+  },
+  basketStrategyId: {
+    type: Number,
+    default: null,
+  },
   categoryShare90d: {
     type: Map,
     of: Number,

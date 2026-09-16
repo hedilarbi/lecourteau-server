@@ -150,7 +150,7 @@ async function sendMail(order) {
   }
 }
 
-async function sendPush(user, orderId, pointsEarned, bonusPoints = 0) {
+async function sendPush(user, orderId, pointsEarned, bonusPoints = 0, pickupReadyAt = null) {
   try {
     if (!user?.expo_token) return;
     const expo = new Expo({ useFcmV1: true });
@@ -159,7 +159,7 @@ async function sendPush(user, orderId, pointsEarned, bonusPoints = 0) {
         to: user.expo_token,
         sound: "default",
         title: "Commande confirmée",
-        body: `Bienvenue chez Le Courteau ! Votre commande a été confirmée et est en cours de préparation, vous avez remporté ${
+        body: `Bienvenue chez Le Courteau ! Votre commande a été confirmée et est en cours de préparation${pickupReadyAt ? `. Elle devrait être prête vers ${new Intl.DateTimeFormat("fr-CA", { timeZone: "America/Toronto", hour: "2-digit", minute: "2-digit" }).format(pickupReadyAt)}` : ""}, vous avez remporté ${
           Math.floor(pointsEarned * 10) +
           Math.max(0, Math.floor(Number(bonusPoints) || 0))
         } points de fidélité.`,
@@ -178,6 +178,16 @@ const isDeliveryOrderType = (type) =>
       .toLowerCase()
       .trim(),
   );
+
+function setPickupReadyEstimate(order) {
+  if (
+    !["pick up", "pickup"].includes(String(order.type || "").toLowerCase().trim()) ||
+    order.scheduled?.isScheduled
+  ) return;
+  order.confirmedAt = new Date();
+  order.pickupDelayMinutes = 0;
+  order.pickupReadyAt = new Date(order.confirmedAt.getTime() + 15 * 60_000);
+}
 
 const isRetryableUberStatus = (uberStatus) =>
   ["canceled", "cancelled", "returned", "failed"].includes(
@@ -289,6 +299,7 @@ module.exports = async function confirmOrderService(orderId) {
       }
 
       order.confirmed = true;
+      setPickupReadyEstimate(order);
       if (totalPrice <= 0 || isSubscriptionFreeItemPayment) {
         order.payment_status = true;
       }
@@ -297,7 +308,7 @@ module.exports = async function confirmOrderService(orderId) {
       await finalizeLoyaltyAndPromo(order);
       const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
+        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints, order.pickupReadyAt),
       );
       process.nextTick(() => sendMail(order));
       return {
@@ -318,13 +329,14 @@ module.exports = async function confirmOrderService(orderId) {
       // Already captured previously => treat as success (idempotent)
       order.payment_status = true;
       order.confirmed = true;
+      setPickupReadyEstimate(order);
       applySmartOfferHediShare(order);
       await order.save();
       // Loyalty + promo bookkeeping (run once; guard via flags if needed)
       await finalizeLoyaltyAndPromo(order);
       const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
+        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints, order.pickupReadyAt),
       );
       process.nextTick(() => sendMail(order));
       return { response: "Order already captured; confirmed", warning };
@@ -360,6 +372,7 @@ module.exports = async function confirmOrderService(orderId) {
     // 5) Mark order paid/confirmed
     order.payment_status = true;
     order.confirmed = true;
+    setPickupReadyEstimate(order);
     applySmartOfferHediShare(order);
     await order.save();
 
@@ -367,7 +380,7 @@ module.exports = async function confirmOrderService(orderId) {
     await finalizeLoyaltyAndPromo(order);
     const warning = await maybeCreateUberDeliveryAfterConfirmation(order);
     process.nextTick(() =>
-      sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
+      sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints, order.pickupReadyAt),
     );
     process.nextTick(() => sendMail(order));
 
@@ -384,11 +397,12 @@ module.exports = async function confirmOrderService(orderId) {
     ) {
       order.payment_status = true;
       order.confirmed = true;
+      setPickupReadyEstimate(order);
       applySmartOfferHediShare(order);
       await order.save();
       await finalizeLoyaltyAndPromo(order);
       process.nextTick(() =>
-        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints),
+        sendPush(order.user, order._id, calculatePoints(order), order.smartOfferBonusPoints, order.pickupReadyAt),
       );
       process.nextTick(() => sendMail(order));
       return { response: "Order already captured; confirmed" };

@@ -8,6 +8,7 @@ const {
   getOrder,
   deleteOrder,
   updateStatus,
+  addPickupDelay,
   updateDeliveryProvider,
   updateOrderRestaurant,
   updatePrice,
@@ -38,6 +39,7 @@ router.get("/filter/:id", getRestaurantFilteredOrders);
 router.delete("/delete/:id", deleteOrder);
 router.put("/review/:id", reviewOrder);
 router.put("/update/status/:id", authStaff, updateStatus);
+router.put("/pickup-delay/:id", authStaff, addPickupDelay);
 router.put("/update/delivery_provider/:id", authStaff, updateDeliveryProvider);
 router.put("/update/restaurant/:id", authStaff, updateOrderRestaurant);
 router.put("/update/delivered/:orderId", orderDelivered);

@@ -28,11 +28,13 @@ const smartOfferRuleSchema = new Schema({
   cooldownDays: {
     type: Number,
     required: true,
+    min: 0,
     default: 7,
   },
   validityHours: {
     type: Number,
     required: true,
+    min: 1,
     default: 24,
   },
   offerType: {

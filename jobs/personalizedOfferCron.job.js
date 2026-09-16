@@ -27,8 +27,8 @@ const CANCELED_ORDER_STATUSES = [CANCELED, "cancelled", "canceled"];
 const PREPARE_BATCH_SIZE   = 100;   // users processed per batch
 const PREPARE_BATCH_DELAY  = 200;   // ms pause between batches (let DB breathe)
 
-// triggerScheduledOffersJob → runs every 5 min during peak hours, stay light
-const TRIGGER_BATCH_SIZE   = 50;    // offers activated per tick
+// triggerScheduledOffersJob → runs each minute and drains large waves progressively
+const TRIGGER_BATCH_SIZE   = 1000;  // offers activated per tick
 const TRIGGER_BATCH_DELAY  = 100;   // ms pause between batches
 
 // bulkWrite limit for DB writes in a single round
@@ -83,6 +83,30 @@ const getPartsInTimezone = (date, timezone = DEFAULT_TIMEZONE) => {
   } catch (error) {
     return { hour: date.getHours(), day: date.getDay() };
   }
+};
+
+const torontoDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: DEFAULT_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit",
+});
+const torontoOffsetFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: DEFAULT_TIMEZONE, timeZoneName: "longOffset",
+});
+
+const getScheduledNotifyAt = (now, notifyHour) => {
+  const dateParts = Object.fromEntries(
+    torontoDateFormatter.formatToParts(now).map(({ type, value }) => [type, value]),
+  );
+  const wallClockUtc = new Date(Date.UTC(
+    Number(dateParts.year), Number(dateParts.month) - 1, Number(dateParts.day), notifyHour,
+  ));
+  const offsetLabel = torontoOffsetFormatter.formatToParts(wallClockUtc)
+    .find(({ type }) => type === "timeZoneName")?.value;
+  const offsetParts = /^GMT([+-])(\d{2}):(\d{2})$/.exec(offsetLabel || "");
+  if (!offsetParts) throw new Error(`Décalage horaire Toronto invalide : ${offsetLabel}`);
+  const offsetMinutes = (offsetParts[1] === "+" ? 1 : -1) *
+    (Number(offsetParts[2]) * 60 + Number(offsetParts[3]));
+  const scheduled = new Date(wallClockUtc.getTime() - offsetMinutes * 60000);
+  return scheduled <= now ? new Date(now) : scheduled;
 };
 
 const determineSegment = ({ recencyDays, ordersLast7d, ordersLast14d, ordersLast30d, ordersLast60d }) => {
@@ -1207,7 +1231,6 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           }
 
           // ── R10: Global Cooldown (7 days after any redemption, exception S01-S04) ──
-          const redeemedOffers = userOffers.filter(o => o.status === "applied");
           const cooldownRedeemedOffers = cooldownOffers.filter(o => o.status === "applied");
           let lastRedeemedAt = null;
           if (cooldownRedeemedOffers.length > 0) {
@@ -1238,17 +1261,6 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           filtered = filtered.filter(c => {
             const limit = [1, 2, 3, 4].includes(c.strategyId) ? 25 : 20;
             return rollingSubsidy30d < limit;
-          });
-
-          // ── R12: Max 2 redemptions rolling 30d (exception S01-S04 Max 3) ────
-          const redeemedCount30d = redeemedOffers.filter(o => {
-            const diffDays = (Date.now() - new Date(o.updatedAt).getTime()) / 86400000;
-            return diffDays <= 30;
-          }).length;
-
-          filtered = filtered.filter(c => {
-            const limit = [1, 2, 3, 4].includes(c.strategyId) ? 3 : 2;
-            return redeemedCount30d < limit;
           });
 
           // Filter by rules active state
@@ -1304,8 +1316,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             notifyHour = 13;
           }
           
-          const scheduledNotifyAt = new Date();
-          scheduledNotifyAt.setHours(notifyHour, 0, 0, 0);
+          const scheduledNotifyAt = getScheduledNotifyAt(now, notifyHour);
 
           // ── Personalize text ──────────────────────────────────────────────
           const selectedCategory = selected.targetCategory
@@ -1404,7 +1415,13 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
 };
 
 // ─── 2. Periodic Trigger: triggerScheduledOffersJob (every 5 min) ────────────
+let triggerJobRunning = false;
 const triggerScheduledOffersJob = async () => {
+  if (triggerJobRunning) {
+    console.log("[triggerScheduledOffersJob] Previous activation still running; skipping overlap.");
+    return;
+  }
+  triggerJobRunning = true;
   console.log("[triggerScheduledOffersJob] Starting periodic Smart Offers activation job...");
   try {
     const now = new Date();
@@ -1415,7 +1432,8 @@ const triggerScheduledOffersJob = async () => {
       status: "prepared",
       scheduledNotifyAt: { $lte: now }
     })
-      .limit(TRIGGER_BATCH_SIZE)   // ← never processes more than N at a time
+      .sort({ scheduledNotifyAt: 1, _id: 1 })
+      .limit(TRIGGER_BATCH_SIZE)
       .populate("user rule")
       .lean();
 
@@ -1561,13 +1579,15 @@ const triggerScheduledOffersJob = async () => {
         }
       }
 
-      // ── Send emails (after push, non-blocking in series to avoid spam) ─────
-      for (const emailPayload of emailQueue) {
-        try {
-          await sendSmartOfferUninstalledEmail(emailPayload);
-        } catch (emailErr) {
-          console.error(`[triggerScheduledOffersJob] Email error for ${emailPayload.userId}:`, emailErr.message);
-        }
+      // Bounded concurrency prevents email delivery from blocking the entire wave.
+      for (let i = 0; i < emailQueue.length; i += 5) {
+        await Promise.all(emailQueue.slice(i, i + 5).map(async (emailPayload) => {
+          try {
+            await sendSmartOfferUninstalledEmail(emailPayload);
+          } catch (emailErr) {
+            console.error(`[triggerScheduledOffersJob] Email error for ${emailPayload.userId}:`, emailErr.message);
+          }
+        }));
       }
     }
 
@@ -1601,28 +1621,11 @@ const triggerScheduledOffersJob = async () => {
       }
     }
 
-    // ── 2. Expire stale "prepared" offers that were never triggered (> 48h) ───
-    // This happens when the server was down at the scheduled time, or the
-    // offer was never triggered for any other reason. We clean them up so the
-    // user is eligible for a fresh offer on the next nightly scan.
-    const stalePreparedCutoff = new Date(now.getTime() - 48 * 3600000);
-    const stalePreparedResult = await PersonalizedOffer.updateMany(
-      {
-        status:    "prepared",
-        createdAt: { $lt: stalePreparedCutoff },
-      },
-      { $set: { status: "expired" } }
-    );
-
-    if (stalePreparedResult.modifiedCount > 0) {
-      console.log(
-        `[triggerScheduledOffersJob] Cleaned up ${stalePreparedResult.modifiedCount} stale "prepared" offers (never triggered, > 48h old).`
-      );
-    }
-
     console.log("[triggerScheduledOffersJob] ✅ Periodic activation job finished.");
   } catch (error) {
     console.error("[triggerScheduledOffersJob] Error:", error);
+  } finally {
+    triggerJobRunning = false;
   }
 };
 
@@ -1819,8 +1822,8 @@ function startPersonalizedOffersJobs() {
   // Nightly scan: 00:00
   cron.schedule("0 0 * * *", async () => { await prepareDailyOffersJob(); }, { timezone: DEFAULT_TIMEZONE });
 
-  // Trigger & expire: every 5 minutes
-  cron.schedule("*/5 * * * *", async () => { await triggerScheduledOffersJob(); }, { timezone: DEFAULT_TIMEZONE });
+  // Trigger & expire: every minute
+  cron.schedule("* * * * *", async () => { await triggerScheduledOffersJob(); }, { timezone: DEFAULT_TIMEZONE });
 
   // Reminder scan: offset by 2 minutes to avoid overlapping activation work.
   cron.schedule("2-59/5 * * * *", async () => { await sendSmartOfferRemindersJob(); }, { timezone: DEFAULT_TIMEZONE });
@@ -1829,12 +1832,13 @@ function startPersonalizedOffersJobs() {
   cron.schedule("0 * * * *", async () => { await checkPushReceiptsJob(); }, { timezone: DEFAULT_TIMEZONE });
 
   console.log(`[personalizedOffersJobs] ✅ Nightly scan:     00:00 (${DEFAULT_TIMEZONE})`);
-  console.log(`[personalizedOffersJobs] ✅ Periodic trigger: every 5 min (${DEFAULT_TIMEZONE})`);
+  console.log(`[personalizedOffersJobs] ✅ Periodic trigger: every minute (${DEFAULT_TIMEZONE})`);
   console.log(`[personalizedOffersJobs] ✅ Offer reminders:  at 2/3 validity (${DEFAULT_TIMEZONE})`);
   console.log(`[personalizedOffersJobs] ✅ Receipt checker:  every hour (${DEFAULT_TIMEZONE})`);
 }
 
 module.exports = {
+  getScheduledNotifyAt,
   ensureSmartOfferRules,
   initializeBasketStrategyRules,
   getBasketStrategyBand,

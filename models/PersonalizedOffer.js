@@ -129,4 +129,6 @@ const personalizedOfferSchema = new Schema({
   timestamps: true,
 });
 
+personalizedOfferSchema.index({ status: 1, scheduledNotifyAt: 1 });
+
 module.exports = model("PersonalizedOffer", personalizedOfferSchema);

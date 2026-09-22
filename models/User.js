@@ -4,6 +4,10 @@ const PromoCode = require("./PromoCode");
 const userSchema = new Schema({
   name: String,
   email: String,
+  ismailsubscribed: {
+    type: Boolean,
+    default: true,
+  },
   phone_number: String,
   date_of_birth: Date,
   addresses: [

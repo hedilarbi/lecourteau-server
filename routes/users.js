@@ -24,6 +24,7 @@ const {
   banUser,
   nullifyDefaultBirthdates,
   populateAppInstalledFields,
+  unsubscribeFromMail,
 } = require("../controllers/users");
 const router = express.Router();
 
@@ -31,6 +32,7 @@ router.get("/", getUsers);
 router.get("/pagination", getUsersPagination);
 router.get("/userByToken", getUserByToken);
 router.get("/admin/populate-app-installed", populateAppInstalledFields);
+router.post("/desabonnement", unsubscribeFromMail);
 
 router.put("/admin/nullify-default-birthdates", nullifyDefaultBirthdates);
 router.put("/update/discount", updateUserDiscount);

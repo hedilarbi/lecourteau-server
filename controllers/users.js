@@ -152,6 +152,29 @@ const getUsers = async (req, res) => {
   }
 };
 
+const unsubscribeFromMail = async (req, res) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ success: false, message: "Adresse courriel invalide." });
+  }
+
+  try {
+    await User.updateMany(
+      { email: { $regex: `^${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" } },
+      {
+        $set: {
+          ismailsubscribed: false,
+          emailUnsubscribed: true,
+          emailUnsubscribedAt: new Date(),
+        },
+      },
+    );
+    return res.status(200).json({ success: true, message: "Vous êtes maintenant désabonné." });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Le désabonnement a échoué." });
+  }
+};
+
 const getUser = async (req, res) => {
   const { id } = req.params;
   try {
@@ -1095,4 +1118,5 @@ module.exports = {
   cleanupDuplicatePhones,
   forceMergeAccounts,
   populateAppInstalledFields,
+  unsubscribeFromMail,
 };

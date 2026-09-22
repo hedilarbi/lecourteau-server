@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "pm2 start index.js",
+    "users:init-mail-subscriptions": "node scripts/initializeMailSubscriptions.js",
     "smart-offers:migrate-names": "node scripts/migrateSmartOfferStrategyNames.js",
     "smart-offers:update-s10": "node scripts/updateS10Strategy.js",
     "smart-offers:update-s11-s12": "node scripts/updateS11S12Strategies.js",

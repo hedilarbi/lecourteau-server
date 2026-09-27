@@ -8,6 +8,7 @@ require("../models/MenuItem");
 const SmartOfferRule = require("../models/SmartOfferRule");
 const PersonalizedOffer = require("../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../models/PersonalizedOfferEvent");
+const { buildSmartOfferNotificationBody } = require("../utils/smartOfferNotificationBody");
 
 const OPEN_STATUSES = ["active", "viewed", "clicked"];
 
@@ -94,7 +95,10 @@ const run = async () => {
       to: offer.user.expo_token,
       sound: "default",
       title: personalize(offer.notificationTitle, offer),
-      body: personalize(offer.notificationBody, offer),
+      body: buildSmartOfferNotificationBody(
+        personalize(offer.notificationBody, offer),
+        offer.validUntil,
+      ),
       priority: "high",
       data: {
         type: "smart_offer",

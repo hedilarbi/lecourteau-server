@@ -4,6 +4,7 @@ const PersonalizedOffer = require("../../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../../models/PersonalizedOfferEvent");
 const SystemStat = require("../../models/SystemStat");
 const { sendSmartOfferUninstalledEmail } = require("../offersServices/smartOfferMailService");
+const { buildSmartOfferNotificationBody } = require("../../utils/smartOfferNotificationBody");
 
 const TRIGGER_BATCH_SIZE = 1000;
 const TRIGGER_BATCH_DELAY = 100;
@@ -50,20 +51,21 @@ const triggerScheduledOffersJob = async () => {
         
         const validFrom = new Date();
         const validUntil = new Date(validFrom.getTime() + ruleValidityHours * 3600000);
+        const notificationBody = buildSmartOfferNotificationBody(offer.notificationBody, validUntil);
 
         if (offer.user && offer.user.expo_token && Expo.isExpoPushToken(offer.user.expo_token) && offer.user.appIsInstalled !== false) {
           messages.push({
             to: offer.user.expo_token,
             sound: "default",
             title: offer.notificationTitle,
-            body: offer.notificationBody,
+            body: notificationBody,
             priority: "high",
             data: { type: "smart_offer", offerId: String(offer._id), userId: String(offer.user._id || offer.user) },
           });
-          tokenInfos.push({ offerId: offer._id, userId: offer.user._id, offerTitle: offer.notificationTitle, offerBody: offer.notificationBody, validFrom, validUntil });
+          tokenInfos.push({ offerId: offer._id, userId: offer.user._id, offerTitle: offer.notificationTitle, offerBody: notificationBody, validFrom, validUntil });
         } else {
           if (offer.user && offer.user.email && !offer.user.emailUnsubscribed) {
-            emailQueue.push({ userEmail: offer.user.email, userName: offer.user.name, offerTitle: offer.notificationTitle, offerBody: offer.notificationBody, userId: String(offer.user._id || offer.user) });
+            emailQueue.push({ userEmail: offer.user.email, userName: offer.user.name, offerTitle: offer.notificationTitle, offerBody: notificationBody, userId: String(offer.user._id || offer.user) });
           }
           await PersonalizedOffer.findByIdAndUpdate(offer._id, { status: "active", validFrom, validUntil });
           await new PersonalizedOfferEvent({ personalizedOffer: offer._id, user: offer.user?._id, eventType: "created" }).save();
@@ -194,7 +196,7 @@ const sendSmartOfferRemindersJob = async () => {
       let pushAccepted = false;
       try {
         const [ticket] = await expo.sendPushNotificationsAsync([{
-          to: token, sound: "default", title: `⏰ Rappel : ${offer.notificationTitle}`, body: offer.notificationBody, priority: "high",
+          to: token, sound: "default", title: `⏰ Rappel : ${offer.notificationTitle}`, body: buildSmartOfferNotificationBody(offer.notificationBody, offer.validUntil), priority: "high",
           data: { type: "smart_offer", offerId: String(offer._id), userId: String(offer.user._id || offer.user), isReminder: true },
         }]);
 

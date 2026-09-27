@@ -11,6 +11,7 @@ const PersonalizedOffer = require("../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../models/PersonalizedOfferEvent");
 const SmartOfferWaveReset = require("../models/SmartOfferWaveReset");
 const { sendSmartOfferUninstalledEmail } = require("../services/offersServices/smartOfferMailService");
+const { buildSmartOfferNotificationBody } = require("../utils/smartOfferNotificationBody");
 const SystemStat = require("../models/SystemStat");
 const { CANCELED } = require("../utils/constants");
 const { renderRuleNotifications, renderBasketStrategyNotification } = require("../services/offersServices/smartOfferTemplateService");
@@ -1452,6 +1453,7 @@ const triggerScheduledOffersJob = async () => {
         }
         const validFrom         = new Date();
         const validUntil        = new Date(validFrom.getTime() + ruleValidityHours * 3600000);
+        const notificationBody  = buildSmartOfferNotificationBody(offer.notificationBody, validUntil);
 
         if (
           offer.user &&
@@ -1463,7 +1465,7 @@ const triggerScheduledOffersJob = async () => {
             to:       offer.user.expo_token,
             sound:    "default",
             title:    offer.notificationTitle,
-            body:     offer.notificationBody,
+            body:     notificationBody,
             priority: "high",
             data: {
               type:    "smart_offer",
@@ -1475,7 +1477,7 @@ const triggerScheduledOffersJob = async () => {
             offerId:    offer._id,
             userId:     offer.user._id,
             offerTitle: offer.notificationTitle,
-            offerBody:  offer.notificationBody,
+            offerBody:  notificationBody,
             validFrom,
             validUntil,
           });
@@ -1486,7 +1488,7 @@ const triggerScheduledOffersJob = async () => {
               userEmail:  offer.user.email,
               userName:   offer.user.name,
               offerTitle: offer.notificationTitle,
-              offerBody:  offer.notificationBody,
+              offerBody:  notificationBody,
               userId:     String(offer.user._id || offer.user),
             });
           }
@@ -1708,7 +1710,7 @@ const sendSmartOfferRemindersJob = async () => {
           to: token,
           sound: "default",
           title: `⏰ Rappel : ${offer.notificationTitle}`,
-          body: offer.notificationBody,
+          body: buildSmartOfferNotificationBody(offer.notificationBody, offer.validUntil),
           priority: "high",
           data: {
             type: "smart_offer",

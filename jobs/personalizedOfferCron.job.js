@@ -11,7 +11,10 @@ const PersonalizedOffer = require("../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../models/PersonalizedOfferEvent");
 const SmartOfferWaveReset = require("../models/SmartOfferWaveReset");
 const { sendSmartOfferUninstalledEmail } = require("../services/offersServices/smartOfferMailService");
-const { buildSmartOfferNotificationBody } = require("../utils/smartOfferNotificationBody");
+const {
+  buildSmartOfferNotificationBody,
+  calculateSmartOfferValidUntil,
+} = require("../utils/smartOfferNotificationBody");
 const SystemStat = require("../models/SystemStat");
 const { CANCELED } = require("../utils/constants");
 const { renderRuleNotifications, renderBasketStrategyNotification } = require("../services/offersServices/smartOfferTemplateService");
@@ -1452,7 +1455,7 @@ const triggerScheduledOffersJob = async () => {
           continue;
         }
         const validFrom         = new Date();
-        const validUntil        = new Date(validFrom.getTime() + ruleValidityHours * 3600000);
+        const validUntil        = calculateSmartOfferValidUntil(validFrom, ruleValidityHours);
         const notificationBody  = buildSmartOfferNotificationBody(offer.notificationBody, validUntil);
 
         if (

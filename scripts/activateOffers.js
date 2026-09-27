@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 require("dotenv").config({ path: "/Users/hedilarbi/Desktop_Local/courteaux/lecourteau-server/.env" });
 const User = require("../models/User");
 const PersonalizedOffer = require("../models/PersonalizedOffer");
+const { calculateSmartOfferValidUntil } = require("../utils/smartOfferNotificationBody");
 
 const run = async () => {
   try {
@@ -9,7 +10,7 @@ const run = async () => {
     const user = await User.findOne({ phone_number: "+15550000099" }).lean();
     if (user) {
         const now = new Date();
-        const validUntil = new Date(now.getTime() + 24 * 3600000); // +24h
+        const validUntil = calculateSmartOfferValidUntil(now, 24);
         
         const result = await PersonalizedOffer.updateMany(
             { user: user._id, status: "active" }, // it's already active from previous script

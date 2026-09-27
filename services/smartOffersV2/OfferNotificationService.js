@@ -4,7 +4,10 @@ const PersonalizedOffer = require("../../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../../models/PersonalizedOfferEvent");
 const SystemStat = require("../../models/SystemStat");
 const { sendSmartOfferUninstalledEmail } = require("../offersServices/smartOfferMailService");
-const { buildSmartOfferNotificationBody } = require("../../utils/smartOfferNotificationBody");
+const {
+  buildSmartOfferNotificationBody,
+  calculateSmartOfferValidUntil,
+} = require("../../utils/smartOfferNotificationBody");
 
 const TRIGGER_BATCH_SIZE = 1000;
 const TRIGGER_BATCH_DELAY = 100;
@@ -50,7 +53,7 @@ const triggerScheduledOffersJob = async () => {
         }
         
         const validFrom = new Date();
-        const validUntil = new Date(validFrom.getTime() + ruleValidityHours * 3600000);
+        const validUntil = calculateSmartOfferValidUntil(validFrom, ruleValidityHours);
         const notificationBody = buildSmartOfferNotificationBody(offer.notificationBody, validUntil);
 
         if (offer.user && offer.user.expo_token && Expo.isExpoPushToken(offer.user.expo_token) && offer.user.appIsInstalled !== false) {

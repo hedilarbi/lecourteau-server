@@ -42,6 +42,19 @@ test("matches the JavaScript currency rounding used by checkout", () => {
   );
 });
 
+test("accepts a one-cent floating-point difference from a multi-line basket", () => {
+  assert.deepEqual(
+    selectDiscountOrderAmount({
+      discountPercent: 35,
+      orderSubtotal: 107.1,
+      receivedSubtotalAfterDiscount: 69.61,
+      eligibleItemsSubtotal: 72.85,
+      fullBasketSubtotal: 107.09999999999998,
+    }),
+    { mode: "full_basket", amount: 37.49 },
+  );
+});
+
 test("does not accept an arbitrary client discount", () => {
   const selected = selectDiscountOrderAmount({
     discountPercent: 35,

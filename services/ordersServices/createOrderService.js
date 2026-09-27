@@ -18,6 +18,7 @@ const {
 const {
   checkRestaurantOrderAvailabilityService,
 } = require("../restaurantsServices/checkRestaurantOrderAvailabilityService");
+const { selectDiscountOrderAmount } = require("../../utils/discountOrderAmount");
 
 require("dotenv/config");
 
@@ -775,6 +776,7 @@ const createOrderService = async (order, options = {}) => {
     let personalizedFreeItemBenefitAmount = 0;
     let personalizedOfferApplied = false;
     let smartOfferUsageStep = null;
+    let personalizedDiscountCalculationMode = null;
 
     if (personalizedOfferId) {
       if (requestedPromoCodeId) {
@@ -923,7 +925,10 @@ const createOrderService = async (order, options = {}) => {
           };
         }
       } else if (personalizedOfferDocument.offerType === "discount_order") {
-        // Exclude promo_locked items from the subtotal discount base (R06)
+        // Mobile applies discount_order to the complete basket. The web client
+        // still excludes promo-locked items and basket offers. Reconstruct
+        // both bases from the basket lines and select the one matching the
+        // checkout total, without accepting an arbitrary discount amount.
         const itemIds = orderItems.map(i => i.item).filter(Boolean);
         const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
         const promoLockedMap = {};
@@ -937,8 +942,23 @@ const createOrderService = async (order, options = {}) => {
             discountableBase += toSafeNumber(item.price, 0);
           }
         });
-        
-        personalizedDiscountAmount = discountableBase * (personalizedOfferDocument.discountValue / 100);
+
+        const fullBasketSubtotal =
+          buildOrderItemsSubtotal(orderItems) +
+          buildOrderOffersSubtotal(offers) +
+          rewardsList.reduce(
+            (sum, reward) => sum + toSafeNumber(reward?.extraPrice, 0),
+            0,
+          );
+        const selectedDiscount = selectDiscountOrderAmount({
+          discountPercent: personalizedOfferDocument.discountValue,
+          orderSubtotal: orderPayload.subTotal,
+          receivedSubtotalAfterDiscount: orderPayload.subTotalAfterDiscount,
+          eligibleItemsSubtotal: discountableBase,
+          fullBasketSubtotal,
+        });
+        personalizedDiscountAmount = selectedDiscount.amount;
+        personalizedDiscountCalculationMode = selectedDiscount.mode;
       } else if (personalizedOfferDocument.offerType === "split_discount") {
         const steps = Array.isArray(personalizedOfferDocument.discountSteps)
           ? personalizedOfferDocument.discountSteps
@@ -1012,7 +1032,7 @@ const createOrderService = async (order, options = {}) => {
         0,
       );
 
-      console.log("[PersonalizedOffer] subTotal:", orderPayload.subTotal, "| discountValue:", personalizedOfferDocument.discountValue, "| offerType:", personalizedOfferDocument.offerType, "| personalizedDiscountAmount:", personalizedDiscountAmount, "| expected subTotalAfterDiscount:", expectedSubTotalAfterDiscount, "| received subTotalAfterDiscount:", receivedSubTotalAfterDiscount);
+      console.log("[PersonalizedOffer] subTotal:", orderPayload.subTotal, "| discountValue:", personalizedOfferDocument.discountValue, "| offerType:", personalizedOfferDocument.offerType, "| calculationMode:", personalizedDiscountCalculationMode, "| personalizedDiscountAmount:", personalizedDiscountAmount, "| expected subTotalAfterDiscount:", expectedSubTotalAfterDiscount, "| received subTotalAfterDiscount:", receivedSubTotalAfterDiscount);
 
       if (Math.abs(expectedSubTotalAfterDiscount - receivedSubTotalAfterDiscount) > 0.01) {
         return {

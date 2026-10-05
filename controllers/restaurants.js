@@ -600,7 +600,9 @@ const setSettings = async (req, res) => {
 };
 const getRestaurantsSettings = async (req, res) => {
   try {
-    const response = await Restaurant.find().select(
+    const response = await Restaurant.find({
+      "settings.open": { $ne: false },
+    }).select(
       "settings name location address",
     );
 

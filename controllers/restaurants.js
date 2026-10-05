@@ -618,6 +618,18 @@ const getRestaurantsSettings = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+const getAllRestaurantsSettings = async (req, res) => {
+  try {
+    const response = await Restaurant.find().select(
+      "settings name location address",
+    );
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error getting all restaurant settings:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 const updateRestaurantSettings = async (req, res) => {
   const { id } = req.params;
   const staff = req.staff;
@@ -762,6 +774,7 @@ module.exports = {
   getRestaurantOffer,
   setSettings,
   getRestaurantsSettings,
+  getAllRestaurantsSettings,
   updateRestaurantSettings,
   getRestaurantsList,
   getRestaurantSettings,

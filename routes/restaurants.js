@@ -18,6 +18,7 @@ const {
   getRestaurantOffer,
   setSettings,
   getRestaurantsSettings,
+  getAllRestaurantsSettings,
   updateRestaurantSettings,
   getRestaurantsList,
   getRestaurantSettings,
@@ -28,6 +29,7 @@ const router = express.Router();
 
 router.post("/create", createRestaurant);
 router.get("/settings", getRestaurantsSettings);
+router.get("/admin/settings", authStaff, getAllRestaurantsSettings);
 router.get("/settings/:id", getRestaurantSettings);
 router.get("/", getRestaurants);
 router.put("/", setSettings);

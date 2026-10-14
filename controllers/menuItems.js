@@ -255,7 +255,7 @@ const getMenuItemsByCategory = async (req, res) => {
 
   try {
     const response = await MenuItem.find({ category: categoryId })
-      .select("name prices image is_available") // Specify the fields you want to return
+      .select("name slug prices image is_available") // Specify the fields you want to return
       .populate("category"); // Ensure you populate any relevant fields if needed
 
     // Check if any menu items were found

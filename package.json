@@ -7,13 +7,16 @@
     "dev": "nodemon index.js",
     "start": "pm2 start index.js",
     "users:init-mail-subscriptions": "node scripts/initializeMailSubscriptions.js",
+    "users:init-email-verified": "node scripts/initializeEmailVerified.js",
     "smart-offers:migrate-names": "node scripts/migrateSmartOfferStrategyNames.js",
     "smart-offers:update-s10": "node scripts/updateS10Strategy.js",
     "smart-offers:update-s11-s12": "node scripts/updateS11S12Strategies.js",
     "smart-offers:renotify-updated": "node scripts/renotifyUpdatedSmartOffers.js",
     "smart-offers:repair-live": "node scripts/repairLiveSmartOffers.js",
+    "smart-client:seed-test-scenarios": "node scripts/seedSmartClientTestScenarios.js",
     "smart-offers:backfill-notified": "node scripts/backfillSmartOfferNotificationDates.js",
-    "smart-offers:migrate-prod": "node scripts/migrateSmartOfferRulesToProd.js"
+    "smart-offers:migrate-prod": "node scripts/migrateSmartOfferRulesToProd.js",
+    "smart-client:migrate-v2": "node scripts/migrateSmartClientV2.js"
   },
   "repository": {
     "type": "git",
@@ -38,6 +41,7 @@
     "expo-server-sdk": "^3.7.0",
     "express": "^4.18.2",
     "firebase-admin": "^11.11.0",
+    "jsep": "^1.4.0",
     "jsonwebtoken": "^9.0.0",
     "log4js": "^6.9.1",
     "mongoose": "^7.2.2",

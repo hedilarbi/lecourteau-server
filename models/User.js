@@ -4,6 +4,20 @@ const PromoCode = require("./PromoCode");
 const userSchema = new Schema({
   name: String,
   email: String,
+  emailVerified: {
+    type: Boolean,
+    default: false,
+  },
+  emailVerifiedAt: {
+    type: Date,
+    default: null,
+  },
+  // Bonus de fidélité de la vérification du courriel : accordé UNE seule fois par compte
+  // (un changement d'adresse suivi d'une nouvelle vérification ne le redonne pas).
+  emailVerificationBonusAwardedAt: {
+    type: Date,
+    default: null,
+  },
   ismailsubscribed: {
     type: Boolean,
     default: true,
@@ -59,6 +73,10 @@ const userSchema = new Schema({
     default: false,
   },
   emailUnsubscribedAt: {
+    type: Date,
+    default: null,
+  },
+  smartOfferCooldownEndsAt: {
     type: Date,
     default: null,
   },

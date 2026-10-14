@@ -1,4 +1,5 @@
 const PersonalizedOffer = require("../../models/PersonalizedOffer");
+const { restoreDeferredCashbackOnCancel } = require("../smartOffersV2/DeferredCashbackService");
 
 /**
  * Rend son étape à un rabais divisé lorsqu'une commande est annulée.
@@ -17,6 +18,9 @@ const PersonalizedOffer = require("../../models/PersonalizedOffer");
 const restoreSplitDiscountStepOnCancel = async (order) => {
   const offerId = order?.personalizedOffer;
   if (!offerId) return;
+
+  // Même point d'entrée pour toutes les annulations : le cashback différé aussi.
+  await restoreDeferredCashbackOnCancel(order).catch(() => {});
 
   const usedStep = Number(order?.smartOfferUsageStep);
   if (!Number.isInteger(usedStep) || usedStep < 0) return;

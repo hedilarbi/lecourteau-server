@@ -121,17 +121,22 @@ const getActiveOffer = async (req, res) => {
     const now = new Date();
     
     // Find active offer (most recent first)
+    // validFrom doit aussi être respecté : une offre "active" avec une date de
+    // début future (ex: cashback différé programmé pour le weekend) ne doit pas
+    // être exposée/réclamable avant cette date.
     const activeOffer = await PersonalizedOffer.findOne({
       user: userId,
       status: { $in: ["active", "viewed", "clicked"] },
-      validUntil: { $gt: now }
+      validUntil: { $gt: now },
+      $or: [{ validFrom: null }, { validFrom: { $lte: now } }]
     })
       .sort({ createdAt: -1 })
       .populate("freeItem targetCategory targetMenuItem triggerItem")
       .populate({
         path: "freeItems.item",
         populate: { path: "category", select: "name slug" },
-      });
+      })
+      .populate("excludedCategories", "name");
 
     if (activeOffer) {
       const Order = require("../models/Order");
@@ -150,6 +155,39 @@ const getActiveOffer = async (req, res) => {
     }
 
     return res.status(200).json(activeOffer);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// 3.b Dernière offre du client si elle a EXPIRÉ : l'accueil continue de l'afficher ("Offre
+// expirée") tant qu'aucune offre plus récente n'est devenue active. Une offre utilisée
+// (applied) ou ignorée n'est pas "expirée" : rien à afficher dans ce cas.
+const getLastExpiredOffer = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const now = new Date();
+    const latestOffer = await PersonalizedOffer.findOne({
+      user: userId,
+      status: { $ne: "prepared" },
+      validFrom: { $ne: null, $lte: now },
+    })
+      .sort({ validFrom: -1, createdAt: -1 })
+      .populate("freeItem targetCategory targetMenuItem triggerItem")
+      .populate({
+        path: "freeItems.item",
+        populate: { path: "category", select: "name slug" },
+      })
+      .populate("excludedCategories", "name");
+
+    const isExpired =
+      latestOffer &&
+      (latestOffer.status === "expired" ||
+        (["active", "viewed", "clicked"].includes(latestOffer.status) &&
+          latestOffer.validUntil &&
+          latestOffer.validUntil <= now));
+
+    return res.status(200).json(isExpired ? latestOffer : null);
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -177,6 +215,9 @@ const logEvent = async (req, res) => {
       await offer.save();
     } else if (eventType === "clicked" && (offer.status === "active" || offer.status === "viewed")) {
       offer.status = "clicked";
+      await offer.save();
+    } else if (eventType === "ignored" && ["active", "viewed", "clicked"].includes(offer.status)) {
+      offer.status = "ignored";
       await offer.save();
     }
 
@@ -247,8 +288,13 @@ const getOffersHistory = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 20));
     const search = (req.query.search || req.query.q || "").trim();
+    const status = (req.query.status || "").trim();
+    const source = (req.query.source || "").trim(); // "v1" | "v2"
 
     const query = {};
+    if (status) query.status = status;
+    if (source === "v1") query.rule = { $ne: null };
+    if (source === "v2") query.dynamicRule = { $ne: null };
     if (search) {
       const User = require("../models/User");
       const matchingUsers = await User.find({
@@ -272,6 +318,8 @@ const getOffersHistory = async (req, res) => {
     const history = await PersonalizedOffer.find(query)
       .populate("user", "name phone_number email")
       .populate("rule", "segment offerType")
+      .populate("dynamicRule", "name distributionMethod")
+      .populate("campaign", "name")
       .populate("freeItem", "name")
       .populate("targetCategory", "name")
       .populate("targetMenuItem", "name")
@@ -281,8 +329,14 @@ const getOffersHistory = async (req, res) => {
       .lean();
 
     const Order = require("../models/Order");
+    // Un rabais divisé est utilisé sur PLUSIEURS commandes (une par étape), y compris tant que
+    // l'offre est encore "active" : on additionne toutes ses commandes, pas seulement une.
     const usedOfferIds = history
-      .filter((h) => h.status === "used" || h.status === "applied")
+      .filter(
+        (h) =>
+          h.status === "applied" ||
+          (h.offerType === "split_discount" && Number(h.currentStep) > 0),
+      )
       .map((h) => h._id);
 
     const orders = await Order.find({
@@ -290,27 +344,31 @@ const getOffersHistory = async (req, res) => {
       status: { $ne: "Annulé" },
     }).select("personalizedOffer sub_total_after_discount sub_total total_price confirmed personalizedOfferApplied hediShareAmount");
 
-    const ordersMap = {};
+    const getOrderSubtotal = (o) =>
+      o.sub_total_after_discount != null && Number.isFinite(Number(o.sub_total_after_discount))
+        ? Number(o.sub_total_after_discount)
+        : Number(o.sub_total || o.total_price || 0);
+
+    const totalsByOffer = {};
     orders.forEach((o) => {
-      if (o.personalizedOffer) {
-        ordersMap[String(o.personalizedOffer)] = o;
+      if (!o.personalizedOffer) return;
+      const key = String(o.personalizedOffer);
+      const totals = totalsByOffer[key] || { orderAmount: 0, hediRoyalty: 0, ordersCount: 0 };
+      totals.orderAmount += getOrderSubtotal(o);
+      totals.ordersCount += 1;
+      if (o.confirmed && o.personalizedOfferApplied) {
+        totals.hediRoyalty += Math.round(getOrderSubtotal(o) * 5) / 100;
       }
+      totalsByOffer[key] = totals;
     });
 
     const historyWithOrder = history.map((h) => {
-      const order = ordersMap[String(h._id)];
+      const totals = totalsByOffer[String(h._id)];
       return {
         ...h,
-        orderAmount: order ? (order.sub_total_after_discount || order.sub_total || order.total_price || 0) : 0,
-        hediRoyalty:
-          order?.confirmed && order?.personalizedOfferApplied
-            ? Math.round(
-                (order.sub_total_after_discount != null &&
-                Number.isFinite(Number(order.sub_total_after_discount))
-                  ? Number(order.sub_total_after_discount)
-                  : Number(order.sub_total || 0)) * 5,
-              ) / 100
-            : 0,
+        orderAmount: totals ? Math.round(totals.orderAmount * 100) / 100 : 0,
+        hediRoyalty: totals ? Math.round(totals.hediRoyalty * 100) / 100 : 0,
+        ordersCount: totals ? totals.ordersCount : 0,
       };
     });
 
@@ -680,7 +738,12 @@ const deleteRule = async (req, res) => {
 };
 
 // 8. Trigger manual scan
-const { prepareDailyOffersJob, triggerScheduledOffersJob, initializeBasketStrategyRules } = require("../jobs/personalizedOfferCron.job");
+// V1 (SmartOfferRule) est retiré du scan manuel : le profiling passe désormais par V2
+// (Campaign/DynamicRule, services/smartOffersV2/ProfilingService.js). triggerScheduledOffersJob
+// reste importé de jobs/personalizedOfferCron.job.js : c'est le job générique d'activation/
+// expiration des PersonalizedOffer, indépendant de V1 ou V2.
+const { triggerScheduledOffersJob, initializeBasketStrategyRules } = require("../jobs/personalizedOfferCron.job");
+const { prepareDailyOffersJob } = require("../services/smartOffersV2/ProfilingService");
 const initializeBasketRules = async (req, res) => {
   try {
     const createdStrategyIds = await initializeBasketStrategyRules();
@@ -691,8 +754,17 @@ const initializeBasketRules = async (req, res) => {
 };
 const triggerScan = async (req, res) => {
   try {
-    console.log("[triggerScan] Manual scan triggered via admin dashboard API.");
-    await prepareDailyOffersJob(true);
+    console.log("[triggerScan] Manual scan triggered via admin dashboard API (V2 profiling).");
+    try {
+      await prepareDailyOffersJob(true);
+    } catch (scanError) {
+      if (scanError?.message === "SMART_OFFERS_SYSTEM_STOPPED") {
+        return res.status(409).json({
+          error: "Le système smart offers est arrêté : réactivez-le pour lancer un scan.",
+        });
+      }
+      throw scanError;
+    }
     await triggerScheduledOffersJob();
     return res.status(200).json({ success: true, message: "Le scan RFM et la génération des offres ont été exécutés avec succès." });
   } catch (error) {
@@ -727,8 +799,8 @@ const toggleCron = async (req, res) => {
       success: true,
       isEnabled: nextStatus,
       message: nextStatus
-        ? "Le Cron des offres a été activé."
-        : "Le Cron des offres a été désactivé."
+        ? "Système smart offers activé : profilage et création d'offres relancés."
+        : "Système smart offers arrêté : plus de profilage ni de nouvelle offre. Les offres en cours continuent."
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -972,6 +1044,7 @@ module.exports = {
   getRules,
   createOrUpdateRule,
   getActiveOffer,
+  getLastExpiredOffer,
   logEvent,
   getUserProfiles,
   getOffersHistory,

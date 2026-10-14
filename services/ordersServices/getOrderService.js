@@ -8,7 +8,9 @@ const getOrderService = async (id) => {
         populate: [
           {
             path: "item",
-            select: "name customization_group",
+            // category + promo_locked : l'écran restaurant calcule le prix remisé de chaque
+            // article d'une offre sur catégorie / produit.
+            select: "name customization_group category promo_locked",
             populate: {
               path: "customization_group",
               select: "name selectionRule toppings",

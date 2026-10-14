@@ -1844,6 +1844,14 @@ const createSubscription = async (req, res) => {
       });
     }
 
+    if (user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Votre compte est désactivé. Veuillez contacter le support client.",
+      });
+    }
+
     if (!user.email) {
       return res.status(400).json({
         success: false,
@@ -2115,6 +2123,14 @@ const confirmSubscriptionPayment = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Utilisateur introuvable.",
+      });
+    }
+
+    if (user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Votre compte est désactivé. Veuillez contacter le support client.",
       });
     }
 
@@ -2401,6 +2417,14 @@ const setSubscriptionAutoRenew = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Aucun abonnement actif pour cet utilisateur.",
+      });
+    }
+
+    if (user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Votre compte est désactivé. Veuillez contacter le support client.",
       });
     }
 

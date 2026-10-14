@@ -188,6 +188,11 @@ const orderSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  smartClientExposure: {
+    type: Schema.Types.ObjectId,
+    ref: "SmartClientExposure",
+    default: null,
+  },
   smartOfferUsageStep: {
     type: Number,
     min: 0,
@@ -197,6 +202,13 @@ const orderSchema = new Schema({
     type: Number,
     min: 0,
     default: 0,
+  },
+  // Nom du cadeau surprise débloqué par une offre "mystery_gift" : aucune valeur
+  // monétaire n'est configurée pour ce type (c'est un article physique préparé
+  // par le restaurant), donc on communique son nom via ce champ.
+  smartOfferMysteryGiftName: {
+    type: String,
+    default: null,
   },
   subscriptionBenefits: {
     isApplied: {

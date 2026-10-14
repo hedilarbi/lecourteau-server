@@ -99,6 +99,14 @@ const createPlatformPaymentIntent = async (req, res) => {
       });
     }
 
+    if (user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Votre compte est désactivé. Veuillez contacter le support client.",
+      });
+    }
+
     const lastOrder = user.orders?.[user.orders.length - 1];
     if (lastOrder?.createdAt) {
       const elapsedMinutes =
@@ -163,22 +171,32 @@ const createPayment = async (req, res) => {
         error: "Le montant, l'email et la méthode de paiement sont requis.",
       });
     }
-    if (userId) {
-      const user = await mongoose.models.User.findById(userId).populate(
-        "orders"
-      );
-      if (user.orders.length > 0) {
-        const lastOrder = user.orders[user.orders.length - 1];
-        const lastOrderTime = new Date(lastOrder.createdAt).getTime();
-        const currentTime = new Date().getTime();
-        const timeDifference = (currentTime - lastOrderTime) / 1000 / 60; // time difference in minutes
-        if (timeDifference <= 1) {
-          return res.status(400).json({
-            success: false,
-            error:
-              "Vous avez déjà passé une commande il y a moins d'une minute. Veuillez attendre avant de passer une nouvelle commande.",
-          });
-        }
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const user = userId
+      ? await mongoose.models.User.findById(userId).populate("orders")
+      : await mongoose.models.User.findOne({ email: normalizedEmail }).populate(
+          "orders"
+        );
+
+    if (user?.isBanned) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Votre compte est désactivé. Veuillez contacter le support client.",
+      });
+    }
+
+    if (user && user.orders && user.orders.length > 0) {
+      const lastOrder = user.orders[user.orders.length - 1];
+      const lastOrderTime = new Date(lastOrder.createdAt).getTime();
+      const currentTime = new Date().getTime();
+      const timeDifference = (currentTime - lastOrderTime) / 1000 / 60; // time difference in minutes
+      if (timeDifference <= 1) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Vous avez déjà passé une commande il y a moins d'une minute. Veuillez attendre avant de passer une nouvelle commande.",
+        });
       }
     }
     const existingPendingRequest = getPendingPaymentIntentEntry(requestKey);
@@ -307,6 +325,19 @@ const createPayment = async (req, res) => {
 const confirmPayment = async (req, res) => {
   const { paymentIntentId } = req.body;
   try {
+    if (paymentIntentId) {
+      const existingPi = await stripe.paymentIntents.retrieve(paymentIntentId);
+      if (existingPi?.metadata?.userId) {
+        const user = await User.findById(existingPi.metadata.userId);
+        if (user?.isBanned) {
+          return res.status(403).json({
+            success: false,
+            error:
+              "Votre compte est désactivé. Veuillez contacter le support client.",
+          });
+        }
+      }
+    }
     const pi = await stripe.paymentIntents.confirm(paymentIntentId);
     res.json({ success: true, data: pi });
   } catch (e) {

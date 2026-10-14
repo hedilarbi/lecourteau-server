@@ -14,6 +14,8 @@ const { CANCELED } = require("../../utils/constants");
 const { renderBasketStrategyNotification } = require("../offersServices/smartOfferTemplateService");
 const RuleEvaluatorService = require("./RuleEvaluatorService");
 const OfferDistributionService = require("./OfferDistributionService");
+const { computeAssignmentCooldownEnd, resolveCooldownDays } = require("./OfferCooldownService");
+const { getExcludedFavoriteCategoryIds, pickFavoriteCategoryId } = require("../../utils/favoriteCategory");
 
 const DEFAULT_TIMEZONE = "America/Toronto";
 const CANCELED_ORDER_STATUSES = [CANCELED, "cancelled", "canceled"];
@@ -248,6 +250,7 @@ const ensureSmartOfferRules = async ({ cachedDessertItem, cachedDrinkItem, strat
       bonusPoints: config.bonusPoints || 0,
       discountSteps: config.discountSteps,
       followupValidityDays: config.followupValidityDays,
+      excludedCategories: config.excludedCategories || [],
       triggerItem: config.triggerItem || null,
       triggerItemSize: config.triggerItemSize || "",
       giftItemSize: config.giftItemSize || "",
@@ -268,24 +271,38 @@ const ensureSmartOfferRules = async ({ cachedDessertItem, cachedDrinkItem, strat
 
 const initializeBasketStrategyRules = () => ensureSmartOfferRules({ strategyIds: new Set(BASKET_STRATEGY_BANDS.map((band) => band.strategyId)) });
 
-const prepareDailyOffersJob = async (isManualTrigger = false) => {
-  console.log("[prepareDailyOffersJob] Starting Smart Offers scan job...");
+// options.userIds : scan limité à ces utilisateurs (déclenchement post-commande), avec exactement
+// les mêmes règles que le scan de nuit (éligibilité, offre en cours, cooldown, programmation).
+// options.reconsiderPrepared (post-commande) : l'offre EN ATTENTE d'activation du client est
+// réévaluée avec ses nouvelles données : gardée si la même règle le choisit encore, remplacée si
+// une autre règle le prend, annulée si plus aucune règle (statut "replaced", jamais activée).
+const prepareDailyOffersJob = async (
+  isManualTrigger = false,
+  { userIds: targetUserIds = null, reconsiderPrepared = false } = {},
+) => {
+  const isTargetedScan = Array.isArray(targetUserIds) && targetUserIds.length > 0;
+  // Scan post-commande (un client) : aucun log de déroulement, il tourne à chaque commande.
+  if (!isTargetedScan) console.log("[prepareDailyOffersJob] Starting Smart Offers scan job...");
   const jobStart = Date.now();
 
   try {
-    if (!isManualTrigger) {
-      const cronStat = await SystemStat.findOne({ key: "smartOfferCronEnabled" }).lean();
-      const cronEnabled = cronStat?.value !== undefined ? Boolean(cronStat.value) : true;
-      if (!cronEnabled) {
-        console.log("[prepareDailyOffersJob] ⏸️ Smart Offer Cron is currently DISABLED in settings. Skipping nightly scan.");
-        return;
-      }
+    // Système smart offers arrêté (bouton de l'admin) : aucun profilage ni création d'offre,
+    // que le scan soit automatique, post-commande ou manuel. Les offres déjà créées continuent
+    // de vivre (activation, rappels, cashback, rabais divisé).
+    const cronStat = await SystemStat.findOne({ key: "smartOfferCronEnabled" }).lean();
+    const cronEnabled = cronStat?.value !== undefined ? Boolean(cronStat.value) : true;
+    if (!cronEnabled) {
+      if (!isTargetedScan) console.log("[prepareDailyOffersJob] ⏸️ Système smart offers ARRÊTÉ : profilage et création d'offres ignorés.");
+      if (isManualTrigger) throw new Error("SMART_OFFERS_SYSTEM_STOPPED");
+      return;
     }
     
     const allCategories = await Category.find().lean();
+    // Catégorie remisée par une offre « catégorie favorite » : jamais PROMOS, on prend la suivante
+    // (voir utils/favoriteCategory.js). Le critère de règle « catégorie favorite », lui, la garde.
+    const excludedFavoriteCategoryIds = getExcludedFavoriteCategoryIds(allCategories);
     const allMenuItems = await MenuItem.find().lean();
     const availableMenuItems = allMenuItems.filter((item) => item.is_available);
-    let allRules = await SmartOfferRule.find().lean();
 
     const cachedDessertItem = await findItemFromCategoryKeyword("dessert", allCategories, availableMenuItems);
     const cachedDrinkItem = await findItemFromCategoryKeyword("boisson", allCategories, availableMenuItems) || await findItemFromCategoryKeyword("drink", allCategories, availableMenuItems);
@@ -297,8 +314,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       menuItemToCategoryMap[String(item._id)] = item.category ? String(item.category._id || item.category) : null;
     });
 
+    // Catégorie la plus vendue (statistique globale) : inutile de la recalculer pour un seul client.
     const date90dAgo = new Date(Date.now() - 90 * 86400000);
-    const topItemDocs = await Order.aggregate([
+    const topItemDocs = isTargetedScan ? [] : await Order.aggregate([
       { $match: { createdAt: { $gte: date90dAgo }, status: { $nin: CANCELED_ORDER_STATUSES } } },
       { $unwind: "$orderItems" },
       { $group: { _id: "$orderItems.item", count: { $sum: 1 } } },
@@ -328,15 +346,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       console.log(`[prepareDailyOffersJob] Top category computed: ${topCategoryDoc.name}`);
     }
 
-    const createdRuleIds = await ensureSmartOfferRules({ cachedDessertItem, cachedDrinkItem });
-    if (createdRuleIds.length) {
-      allRules = await SmartOfferRule.find().lean();
-    }
-
-    const ruleByStrategyId = {};
-    for (const rule of allRules) {
-      ruleByStrategyId[rule.strategyId] = rule;
-    }
+    // V1 (SmartOfferRule) est retiré du système : ce job ne crée/lit plus ces documents.
+    // ensureSmartOfferRules()/SmartOfferRule.find() ont été retirés d'ici volontairement —
+    // les garder aurait continué à créer/entretenir des règles V1 à chaque exécution.
 
     const activeCampaigns = await Campaign.find({ isActive: true }).lean();
     const activeCampaignIds = activeCampaigns.map(c => c._id);
@@ -352,8 +364,16 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       }
     }
 
-    const userCursor = User.find({ isBanned: { $ne: true } })
-      .select("_id name email expo_token appIsInstalled emailUnsubscribed createdAt")
+    // fidelity_points et subscriptionIsActive doivent être sélectionnés : RuleEvaluatorService
+    // les lit sur userContext.user (critères "fidelity_points" et "is_subscribed"). Sans ça,
+    // ces champs valent undefined -> traités comme 0/false pour absolument tous les users,
+    // faussant silencieusement toute règle qui s'appuie dessus. Idem pour smartOfferCooldownEndsAt :
+    // sans lui, aucun client n'est jamais considéré en cooldown.
+    const userCursor = User.find({
+      isBanned: { $ne: true },
+      ...(isTargetedScan ? { _id: { $in: targetUserIds } } : {}),
+    })
+      .select("_id name email expo_token appIsInstalled emailUnsubscribed createdAt fidelity_points subscriptionIsActive smartOfferCooldownEndsAt")
       .lean()
       .cursor();
 
@@ -369,8 +389,13 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
 
       // Trié du plus récent au plus ancien : RuleEvaluatorService.extractCriteriaValue("recency_days")
       // et le calcul du cooldown supposent que le premier élément par utilisateur est la commande la plus récente.
+      // .populate("orderItems.item", "category") est nécessaire pour que
+      // RuleEvaluatorService.computeFavoriteCategory (critère "favorite_category") puisse lire
+      // item.item.category ; sans ça orderItems.item reste un ObjectId brut et le critère
+      // retourne toujours null.
       const batchOrders = await Order.find({ user: { $in: userIds }, status: { $nin: CANCELED_ORDER_STATUSES } })
         .select("user createdAt sub_total total_price orderItems offers discount personalizedOffer")
+        .populate("orderItems.item", "category")
         .sort({ createdAt: -1 })
         .lean();
 
@@ -404,12 +429,39 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
 
       const usersWithActiveOffer = new Set();
       const offersToExpire = [];
+      const preparedToReconsider = new Map();
+      // Étape suivante d'un scénario (pas son étape de départ) : le client est déjà engagé dans
+      // le scénario, elle n'est jamais réévaluée.
+      const isScenarioContinuationStep = (offer) => {
+        const rule = activeDynamicRules.find(
+          (r) => r.distributionMethod === "scenario_journey" && String(r._id) === String(offer.dynamicRule),
+        );
+        if (!rule?.offers?.length) return false;
+        const rootOffer = rule.offers.find((o) => o.isRoot) || rule.offers[0];
+        return String(rootOffer._id) !== String(offer.offerConfigId);
+      };
 
       activeOffers.forEach(offer => {
         const uid = String(offer.user);
+        // Offre en attente d'activation : le client ne l'a jamais vue, une commande ne la rend
+        // donc jamais « ignorée ». Post-commande, elle est réévaluée (sauf étape suivante d'un
+        // scénario et récompense de cashback, qui suivent leur cours). L'étape de départ d'un
+        // scénario est réévaluée comme toute autre offre.
+        if (offer.status === "prepared") {
+          if (reconsiderPrepared && !offer.isDeferredReward && !isScenarioContinuationStep(offer)) {
+            preparedToReconsider.set(uid, offer);
+          } else {
+            usersWithActiveOffer.add(uid);
+          }
+          return;
+        }
         const orders = ordersByUser[uid] || [];
         const hasOrderedSince = orders.some(o => new Date(o.createdAt) > new Date(offer.createdAt));
-        if (hasOrderedSince && !offer.isDeferredReward) {
+        // Un rabais divisé déjà entamé a forcément une commande "depuis sa création" (celle qui a
+        // utilisé l'étape 1) : ce n'est pas une offre ignorée. Les commandes passées sans l'utiliser
+        // sont déjà traitées au moment de la commande (createOrderService / confirmOrderService).
+        const isSplitInProgress = offer.offerType === "split_discount" && Number(offer.currentStep) > 0;
+        if (hasOrderedSince && !offer.isDeferredReward && !isSplitInProgress) {
           offersToExpire.push(offer._id);
         } else {
           usersWithActiveOffer.add(uid);
@@ -417,7 +469,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       });
 
       if (offersToExpire.length > 0) {
-        await PersonalizedOffer.updateMany({ _id: { $in: offersToExpire } }, { $set: { status: "expired" } });
+        // R15 : commande passée sans utiliser l'offre active → "ignored", pas "expired"
+        // (réservé à la fenêtre de validité écoulée sans aucune commande).
+        await PersonalizedOffer.updateMany({ _id: { $in: offersToExpire } }, { $set: { status: "ignored" } });
       }
 
       const profileUpserts = [];
@@ -466,8 +520,11 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             orders.forEach(o => {
               const parts = getPartsInTimezone(o.createdAt);
               const orderDate = new Date(o.createdAt);
+              // orderItems.item est populé (catégorie, pour le critère « catégorie favorite ») : on
+              // reprend son _id, sinon la table article → catégorie ne trouve rien et la catégorie
+              // favorite des offres reste vide pour tout le monde.
               const purchasedItemIds = [
-                ...(o.orderItems || []).map((item) => item.item),
+                ...(o.orderItems || []).map((item) => item.item?._id || item.item),
                 ...(o.offers || []).flatMap((offer) => (offer.items || []).map((item) => item.item)),
               ].filter(Boolean);
               
@@ -540,16 +597,15 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           }
 
           const segment = determineSegment({ recencyDays, ordersLast7d, ordersLast14d, ordersLast30d, ordersLast60d });
-          let favoriteCategory = null;
-          let favoriteCategoryCount = 0;
-          for (const [categoryId, count] of categoryPurchaseCounts.entries()) {
-            if (count > favoriteCategoryCount) {
-              favoriteCategoryCount = count;
-              favoriteCategory = allCategories.find((category) => String(category._id) === String(categoryId)) || null;
-            }
-          }
+          const favoriteCategoryId = pickFavoriteCategoryId(categoryPurchaseCounts, excludedFavoriteCategoryIds);
+          const favoriteCategory = favoriteCategoryId
+            ? allCategories.find((category) => String(category._id) === favoriteCategoryId) || null
+            : null;
           const reactivationProfiling = determineReactivationProfile({ orderCount, recencyDays, medianOrderIntervalDays });
-          const basketStrategyId = totals90d.length >= 3 ? resolveBasketStrategyId(rawAvgBasket90d, (strategyId) => ruleByStrategyId[strategyId]?.isActive === true) : null;
+          // basketStrategyId référençait une SmartOfferRule (V1) active pour valider la bande —
+          // V1 étant retiré, on garde juste la bande elle-même (utile comme label analytics),
+          // sans filtre "règle V1 active".
+          const basketStrategyId = totals90d.length >= 3 ? resolveBasketStrategyId(rawAvgBasket90d, () => true) : null;
 
           profileUpserts.push({
             updateOne: {
@@ -589,7 +645,9 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             continue;
           }
 
-          const isInCooldown = user.smartOfferCooldownEndsAt && new Date(user.smartOfferCooldownEndsAt) > now;
+          // Le délai en cours a été posé par l'offre en attente qu'on réévalue : il ne compte pas.
+          const pendingOffer = preparedToReconsider.get(uid) || null;
+          const isInCooldown = !pendingOffer && user.smartOfferCooldownEndsAt && new Date(user.smartOfferCooldownEndsAt) > now;
 
           if (isInCooldown) {
             totalSkipped++;
@@ -605,17 +663,47 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
              user, orders, preferredHour, preferredDay, segment, lastOrderAt, orderCount,
              ordersLast7d, ordersLast14d, ordersLast30d, ordersLast60d, ordersLast90d,
              averageBasketSize, basketSizeStdDev, avgBasket90d, basketSizeStdDev90d,
-             medianOrderIntervalDays, categoryPurchaseCounts, favoriteCategory, accountAgeDays, openRate, userOffers
+             medianOrderIntervalDays, categoryPurchaseCounts, favoriteCategory, accountAgeDays, openRate, userOffers,
+             // recencyToCadenceRatio est déjà calculé juste au-dessus (reactivationProfiling) mais
+             // n'était pas passé ici : RuleEvaluatorService.extractCriteriaValue("recency_to_cadence_ratio")
+             // retombait donc toujours sur son fallback 0, quel que soit l'utilisateur.
+             recencyDays, recencyToCadenceRatio: reactivationProfiling.recencyToCadenceRatio,
           };
 
-          for (const rule of activeDynamicRules) {
+          // Scénario en cours : le client reçoit l'étape suivante sans réévaluation, aucune autre
+          // règle ne peut le prendre. Scénario terminé : évaluation normale (il recommence le
+          // scénario s'il y correspond encore, sinon il passe à la règle qui lui correspond).
+          const scenarioContinuation = await OfferDistributionService.getScenarioContinuation(
+            userStatsContext,
+            activeDynamicRules,
+          );
+          if (scenarioContinuation) {
+            const { rule, offer: nextStep } = scenarioContinuation;
+            candidates.push({
+              ...nextStep,
+              score: rule.weight || 0,
+              dynamicRuleId: rule._id,
+              campaignId: rule.campaign?._id,
+              useFavoriteCategory: nextStep.useFavoriteCategory,
+              targetCategory: nextStep.targetCategory,
+              categoryName: nextStep.categoryName,
+            });
+          }
+
+          for (const rule of scenarioContinuation ? [] : activeDynamicRules) {
              if (RuleEvaluatorService.evaluate(userStatsContext, rule)) {
+                 // Le client correspond toujours à la règle de son offre en attente : elle sera
+                 // gardée (un scénario ne redonnerait rien, l'offre en attente étant sa dernière).
+                 if (pendingOffer && String(rule._id) === String(pendingOffer.dynamicRule)) {
+                     candidates.push({ score: rule.weight || 0, dynamicRuleId: rule._id });
+                     continue;
+                 }
                  const selectedOffer = await OfferDistributionService.selectOffer(userStatsContext, rule);
                  if (selectedOffer) {
-                     candidates.push({ 
-                       ...selectedOffer, 
-                       score: rule.weight || 0, 
-                       dynamicRuleId: rule._id, 
+                     candidates.push({
+                       ...selectedOffer,
+                       score: rule.weight || 0,
+                       dynamicRuleId: rule._id,
                        campaignId: rule.campaign?._id,
                        useFavoriteCategory: selectedOffer.useFavoriteCategory,
                        targetCategory: selectedOffer.targetCategory,
@@ -631,12 +719,30 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             .map((candidate) => candidate.useFavoriteCategory ? { ...candidate, targetCategory: favoriteCategory._id, categoryName: favoriteCategory.name } : candidate);
 
           if (filtered.length === 0) {
+            // Offre en attente : le client ne correspond plus à aucune règle → annulée, et le délai
+            // qu'elle avait posé est retiré.
+            if (pendingOffer) {
+              await PersonalizedOffer.updateOne({ _id: pendingOffer._id, status: "prepared" }, { $set: { status: "replaced" } });
+              await User.updateOne({ _id: user._id }, { $set: { smartOfferCooldownEndsAt: null } });
+              console.log(`[prepareDailyOffersJob] Offre en attente annulée (plus aucune règle) : ${pendingOffer._id}`);
+            }
             totalSkipped++;
             continue;
           }
 
           filtered.sort((a, b) => b.score - a.score);
           const selected = filtered[0];
+
+          if (pendingOffer) {
+            // Même règle qu'avant la commande : l'offre en attente est gardée telle quelle.
+            if (String(selected.dynamicRuleId) === String(pendingOffer.dynamicRule)) {
+              totalSkipped++;
+              continue;
+            }
+            // Autre règle : l'offre en attente est remplacée par celle de la nouvelle règle.
+            await PersonalizedOffer.updateOne({ _id: pendingOffer._id, status: "prepared" }, { $set: { status: "replaced" } });
+            console.log(`[prepareDailyOffersJob] Offre en attente remplacée (nouvelle règle) : ${pendingOffer._id}`);
+          }
 
           let notifyHour = preferredHour - 1;
           if (notifyHour < 8 || notifyHour > 21) notifyHour = 11;
@@ -678,10 +784,12 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
           const finalBody = personalizeText(selected.notificationBody, user, offerDetails);
           const selectedFreeItems = selected.freeItems || [];
 
-          // Calcul de smartOfferCooldownEndsAt : date d'activation + durée + cooldown
-          const validityHours = selected.validityHours || 24;
-          const cooldownDays = selected.cooldownDays || selected.campaign?.defaultCooldownDays || 7;
-          const smartOfferCooldownEndsAt = new Date(scheduledNotifyAt.getTime() + (validityHours * 3600000) + (cooldownDays * 86400000));
+          // Cooldown à l'attribution : date d'expiration de l'offre (23:59 Toronto) + cooldown de l'offre.
+          const smartOfferCooldownEndsAt = computeAssignmentCooldownEnd(
+            scheduledNotifyAt,
+            selected.validityHours,
+            resolveCooldownDays(selected),
+          );
 
           newOffersToInsert.push({
             user: user._id,
@@ -696,6 +804,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
             bonusPoints: selected.bonusPoints,
             discountSteps: selected.discountSteps,
             followupValidityDays: selected.followupValidityDays,
+            excludedCategories: selected.excludedCategories || [],
             triggerItem: selected.triggerItem,
             triggerItemSize: selected.triggerItemSize,
             giftItemSize: selected.giftItemSize,
@@ -754,7 +863,6 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       }
 
       totalProcessed += users.length;
-      console.log(`[prepareDailyOffersJob] Batch done — processed: ${totalProcessed}, prepared: ${totalPrepared}, skipped: ${totalSkipped}, failed: ${totalFailed}`);
     };
 
     for await (const user of userCursor) {
@@ -770,7 +878,7 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
     }
 
     const elapsed = ((Date.now() - jobStart) / 1000).toFixed(1);
-    console.log(`[prepareDailyOffersJob] ✅ Finished in ${elapsed}s — total: ${totalProcessed}, prepared: ${totalPrepared}, skipped: ${totalSkipped}, failed: ${totalFailed}`);
+    if (!isTargetedScan) console.log(`[prepareDailyOffersJob] ✅ Finished in ${elapsed}s — total: ${totalProcessed}, prepared: ${totalPrepared}, skipped: ${totalSkipped}, failed: ${totalFailed}`);
     if (totalFailed > 0) throw new Error(`${totalFailed} utilisateur(s) n'ont pas pu être traités pendant le scan Smart Offers.`);
   } catch (error) {
     console.error("[prepareDailyOffersJob] Fatal error:", error);

@@ -5,11 +5,11 @@ const mongoose = require("mongoose");
 
 const loginStaffService = async (username, password, expoToken) => {
   try {
-    const staff = await Staff.findOne({ username });
+    const staff = await Staff.findOne({ username }).select("+password");
     if (!staff) {
       return { error: "staff not found" };
     }
-    const verify = bcrypt.compare(password, staff.password);
+    const verify = await bcrypt.compare(String(password || ""), staff.password);
 
     if (!verify) {
       return { error: "wrong password" };

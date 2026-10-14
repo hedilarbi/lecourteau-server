@@ -2,6 +2,8 @@ const { default: mongoose } = require("mongoose");
 const Order = require("../../models/Order");
 const PromoCode = require("../../models/PromoCode");
 const PersonalizedOffer = require("../../models/PersonalizedOffer");
+const SmartClientExposure = require("../../modules/smart-client/smartClientExposure.model");
+const SmartClientRule = require("../../modules/smart-client/smartClient.model");
 const { ON_GOING, SCHEDULED, CANCELED } = require("../../utils/constants");
 const { Expo } = require("expo-server-sdk");
 const generateRandomCode = require("../../utils/generateOrderCode");
@@ -19,6 +21,9 @@ const {
   checkRestaurantOrderAvailabilityService,
 } = require("../restaurantsServices/checkRestaurantOrderAvailabilityService");
 const { selectDiscountOrderAmount } = require("../../utils/discountOrderAmount");
+const { checkPersonalizedOfferAmount } = require("../../utils/personalizedOfferAmountCheck");
+const { endOfQuebecDay } = require("../../utils/smartOfferNotificationBody");
+const { validateOrderOfferChoices } = require("../../utils/offerItemsToChoose");
 
 require("dotenv/config");
 
@@ -48,6 +53,19 @@ const roundMoney = (value, fallback = 0) => {
 };
 
 const normalizeId = (value) => String(value || "").trim();
+
+// Renvoie un prédicat "cette ligne de commande appartient à une catégorie exclue de l'offre".
+const loadExcludedCategoryMatcher = async (offer, orderItems = []) => {
+  const excludedIds = (offer?.excludedCategories || []).map((id) => String(id?._id || id));
+  if (!excludedIds.length) return () => false;
+  const itemIds = orderItems.map((item) => item.item).filter(Boolean);
+  const menuItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } }).select("category").lean();
+  const categoryByItem = {};
+  menuItems.forEach((menuItem) => {
+    categoryByItem[String(menuItem._id)] = String(menuItem.category?._id || menuItem.category || "");
+  });
+  return (line) => excludedIds.includes(categoryByItem[String(line?.item)] || "");
+};
 
 const buildOrderItemsSubtotal = (orderItems = []) =>
   orderItems.reduce((acc, item) => acc + toSafeNumber(item?.price, 0), 0);
@@ -160,7 +178,7 @@ const calculatePromoDiscountAmount = (promoCode, eligibleSubtotal, orderItems = 
   if (promoCode.type === "free_item") {
     const freeItemId = String(promoCode.freeItem?._id || promoCode.freeItem || "").trim();
     if (!freeItemId) return 0;
-    
+
     const matchingItem = orderItems.find(
       (item) => String(item?.item || "").trim() === freeItemId
     );
@@ -348,6 +366,19 @@ const createOrderService = async (order, options = {}) => {
       return { error: "User not found" };
     }
 
+    if (user.isBanned) {
+      return {
+        error:
+          "Votre compte est désactivé. Veuillez contacter le support client.",
+      };
+    }
+
+    // Offres à choix (Offer.itemsToChoose) : le bon nombre d'articles, tous issus de l'offre.
+    const offerChoiceError = await validateOrderOfferChoices(offers, require("../../models/Offer"));
+    if (offerChoiceError) {
+      return { error: offerChoiceError };
+    }
+
     const setting = await getOrCreateSettingDocument();
     const configuredFreeItemId = normalizeId(
       setting?.subscription?.freeItemMenuItemId,
@@ -512,7 +543,7 @@ const createOrderService = async (order, options = {}) => {
       return {
         error:
           String(availabilityError?.message || availabilityError) ===
-          "Restaurant not found"
+            "Restaurant not found"
             ? "Restaurant not found."
             : String(availabilityError?.message || availabilityError),
       };
@@ -528,14 +559,23 @@ const createOrderService = async (order, options = {}) => {
 
     const subscriptionActive = isSubscriptionCurrentlyActive(user);
     const firstOrderDiscountEligible = !Boolean(user?.firstOrderDiscountApplied);
+    // Une offre personnalisée remplace la remise 1re commande / abonnement… sauf l'étape 1 d'un
+    // cashback (deferred_cashback) : elle ne remise rien sur cette commande, les autres remises
+    // continuent donc de s'appliquer (et le seuil se calcule après elles).
+    const requestedPersonalizedOfferId = orderPayload.personalizedOfferId || orderPayload.personalizedOffer;
+    const requestedPersonalizedOfferType = requestedPersonalizedOfferId
+      ? (await PersonalizedOffer.findById(requestedPersonalizedOfferId).select("offerType").lean())?.offerType || null
+      : null;
+    const personalizedOfferReplacesOtherDiscounts =
+      Boolean(requestedPersonalizedOfferId) && requestedPersonalizedOfferType !== "deferred_cashback";
     const requestedPromoCodeId = orderPayload.promoCode
       ? normalizeId(orderPayload.promoCode.promoCodeId)
       : null;
     const promoCodeRequested = Boolean(requestedPromoCodeId);
-    const firstOrderDiscountApplies =
+    let firstOrderDiscountApplies =
       firstOrderDiscountEligible &&
       !promoCodeRequested &&
-      !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer);
+      !personalizedOfferReplacesOtherDiscounts;
     const requestedSubscriptionBenefits = orderPayload.subscriptionBenefits || {};
     const shouldApplySubscriptionBenefits =
       subscriptionActive && Boolean(requestedSubscriptionBenefits?.isApplied);
@@ -545,7 +585,7 @@ const createOrderService = async (order, options = {}) => {
     );
     const usedFreeItemCountThisCycle =
       String(user?.subscriptionFreeItemCycleKey || "").trim() ===
-      currentSubscriptionCycleKey
+        currentSubscriptionCycleKey
         ? Math.max(0, Math.floor(toSafeNumber(user?.subscriptionFreeItemUsedCount, 0)))
         : 0;
     const freeItemRemaining = Math.max(0, 1 - usedFreeItemCountThisCycle);
@@ -585,66 +625,66 @@ const createOrderService = async (order, options = {}) => {
 
     const appliedSubscriptionDiscountPercent =
       shouldApplySubscriptionBenefits &&
-      !firstOrderDiscountApplies &&
-      !promoCodeRequested &&
-      !Boolean(orderPayload.personalizedOfferId || orderPayload.personalizedOffer)
+        !firstOrderDiscountApplies &&
+        !promoCodeRequested &&
+        !personalizedOfferReplacesOtherDiscounts
         ? SUBSCRIPTION_DISCOUNT_PERCENT
         : 0;
     const appliedSubscriptionDiscountAmount =
       appliedSubscriptionDiscountPercent > 0
         ? roundMoney(
-            toSafeNumber(orderPayload.subTotal, 0) *
-              (appliedSubscriptionDiscountPercent / 100),
-            0,
-          )
+          toSafeNumber(orderPayload.subTotal, 0) *
+          (appliedSubscriptionDiscountPercent / 100),
+          0,
+        )
         : 0;
 
     const subscriptionBenefits = shouldApplySubscriptionBenefits
       ? {
-          isApplied: true,
-          discountPercent: appliedSubscriptionDiscountPercent,
-          discountAmount: appliedSubscriptionDiscountAmount,
-          freeDeliveryApplied: Boolean(
-            requestedSubscriptionBenefits.freeDeliveryApplied,
-          ),
-          freeDeliveryAmount: toSafeNumber(
-            requestedSubscriptionBenefits.freeDeliveryAmount,
-            0,
-          ),
-          freeItemApplied: canApplyConfiguredFreeItem,
-          freeItemAmount: canApplyConfiguredFreeItem
-            ? toSafeNumber(requestedSubscriptionBenefits.freeItemAmount, 0)
-            : 0,
-          freeItemBasePrice: canApplyConfiguredFreeItem
-            ? toSafeNumber(requestedSubscriptionBenefits.freeItemBasePrice, 0)
-            : 0,
-          freeItemMenuItemId: canApplyConfiguredFreeItem
-            ? configuredFreeItemId
-            : null,
-          freeItemLabel: canApplyConfiguredFreeItem
-            ? configuredFreeItemName ||
-              String(requestedSubscriptionBenefits.freeItemLabel || "")
-            : "",
-          cycleKey: canApplyConfiguredFreeItem ? currentSubscriptionCycleKey : "",
-          monthlyPriceSnapshot: toSafeNumber(
-            requestedSubscriptionBenefits.monthlyPriceSnapshot,
-            user.subscriptionMonthlyPrice || 11.99,
-          ),
-        }
+        isApplied: true,
+        discountPercent: appliedSubscriptionDiscountPercent,
+        discountAmount: appliedSubscriptionDiscountAmount,
+        freeDeliveryApplied: Boolean(
+          requestedSubscriptionBenefits.freeDeliveryApplied,
+        ),
+        freeDeliveryAmount: toSafeNumber(
+          requestedSubscriptionBenefits.freeDeliveryAmount,
+          0,
+        ),
+        freeItemApplied: canApplyConfiguredFreeItem,
+        freeItemAmount: canApplyConfiguredFreeItem
+          ? toSafeNumber(requestedSubscriptionBenefits.freeItemAmount, 0)
+          : 0,
+        freeItemBasePrice: canApplyConfiguredFreeItem
+          ? toSafeNumber(requestedSubscriptionBenefits.freeItemBasePrice, 0)
+          : 0,
+        freeItemMenuItemId: canApplyConfiguredFreeItem
+          ? configuredFreeItemId
+          : null,
+        freeItemLabel: canApplyConfiguredFreeItem
+          ? configuredFreeItemName ||
+          String(requestedSubscriptionBenefits.freeItemLabel || "")
+          : "",
+        cycleKey: canApplyConfiguredFreeItem ? currentSubscriptionCycleKey : "",
+        monthlyPriceSnapshot: toSafeNumber(
+          requestedSubscriptionBenefits.monthlyPriceSnapshot,
+          user.subscriptionMonthlyPrice || 11.99,
+        ),
+      }
       : {
-          isApplied: false,
-          discountPercent: 0,
-          discountAmount: 0,
-          freeDeliveryApplied: false,
-          freeDeliveryAmount: 0,
-          freeItemApplied: false,
-          freeItemAmount: 0,
-          freeItemBasePrice: 0,
-          freeItemMenuItemId: null,
-          freeItemLabel: "",
-          cycleKey: "",
-          monthlyPriceSnapshot: 0,
-        };
+        isApplied: false,
+        discountPercent: 0,
+        discountAmount: 0,
+        freeDeliveryApplied: false,
+        freeDeliveryAmount: 0,
+        freeItemApplied: false,
+        freeItemAmount: 0,
+        freeItemBasePrice: 0,
+        freeItemMenuItemId: null,
+        freeItemLabel: "",
+        cycleKey: "",
+        monthlyPriceSnapshot: 0,
+      };
 
     const birthdaySummary = getBirthdayBenefitSummary(user, new Date());
     const requestedBirthdayBenefits = orderPayload.birthdayBenefits || {};
@@ -684,25 +724,25 @@ const createOrderService = async (order, options = {}) => {
     );
     const hasExistingBirthdayGiftOrderThisCycle = containsBirthdayGiftInOrderItems
       ? Boolean(
-          await Order.exists({
-            user: user._id,
-            status: { $ne: CANCELED },
-            $or: [
-              {
-                "birthdayBenefits.isApplied": true,
-                "birthdayBenefits.freeItemApplied": true,
-                "birthdayBenefits.cycleYear": birthdaySummary.cycleYear,
+        await Order.exists({
+          user: user._id,
+          status: { $ne: CANCELED },
+          $or: [
+            {
+              "birthdayBenefits.isApplied": true,
+              "birthdayBenefits.freeItemApplied": true,
+              "birthdayBenefits.cycleYear": birthdaySummary.cycleYear,
+            },
+            {
+              "orderItems.isBirthdayFreeItem": true,
+              createdAt: {
+                $gte: cycleYearStart,
+                $lte: cycleYearEnd,
               },
-              {
-                "orderItems.isBirthdayFreeItem": true,
-                createdAt: {
-                  $gte: cycleYearStart,
-                  $lte: cycleYearEnd,
-                },
-              },
-            ],
-          }),
-        )
+            },
+          ],
+        }),
+      )
       : false;
 
     if (containsBirthdayGiftInOrderItems && !birthdaySummary.canClaimFreeItem) {
@@ -738,44 +778,61 @@ const createOrderService = async (order, options = {}) => {
 
     const birthdayBenefits = shouldApplyBirthdayBenefits
       ? {
-          isApplied: true,
-          freeItemApplied: canApplyConfiguredBirthdayFreeItem,
-          freeItemAmount: canApplyConfiguredBirthdayFreeItem
-            ? toSafeNumber(requestedBirthdayBenefits.freeItemAmount, 0)
-            : 0,
-          freeItemBasePrice: canApplyConfiguredBirthdayFreeItem
-            ? toSafeNumber(requestedBirthdayBenefits.freeItemBasePrice, 0)
-            : 0,
-          freeItemMenuItemId: canApplyConfiguredBirthdayFreeItem
-            ? configuredBirthdayFreeItemId
-            : null,
-          freeItemLabel: canApplyConfiguredBirthdayFreeItem
-            ? configuredBirthdayFreeItemName ||
-              String(requestedBirthdayBenefits.freeItemLabel || "")
-            : "",
-          cycleYear: Math.floor(
-            toSafeNumber(
-              requestedBirthdayBenefits.cycleYear,
-              birthdaySummary.cycleYear,
-            ),
+        isApplied: true,
+        freeItemApplied: canApplyConfiguredBirthdayFreeItem,
+        freeItemAmount: canApplyConfiguredBirthdayFreeItem
+          ? toSafeNumber(requestedBirthdayBenefits.freeItemAmount, 0)
+          : 0,
+        freeItemBasePrice: canApplyConfiguredBirthdayFreeItem
+          ? toSafeNumber(requestedBirthdayBenefits.freeItemBasePrice, 0)
+          : 0,
+        freeItemMenuItemId: canApplyConfiguredBirthdayFreeItem
+          ? configuredBirthdayFreeItemId
+          : null,
+        freeItemLabel: canApplyConfiguredBirthdayFreeItem
+          ? configuredBirthdayFreeItemName ||
+          String(requestedBirthdayBenefits.freeItemLabel || "")
+          : "",
+        cycleYear: Math.floor(
+          toSafeNumber(
+            requestedBirthdayBenefits.cycleYear,
+            birthdaySummary.cycleYear,
           ),
-        }
+        ),
+      }
       : {
-          isApplied: false,
-          freeItemApplied: false,
-          freeItemAmount: 0,
-          freeItemBasePrice: 0,
-          freeItemMenuItemId: null,
-          freeItemLabel: "",
-          cycleYear: birthdaySummary.cycleYear,
+        isApplied: false,
+        freeItemApplied: false,
+        freeItemAmount: 0,
+        freeItemBasePrice: 0,
+        freeItemMenuItemId: null,
+        freeItemLabel: "",
+        cycleYear: birthdaySummary.cycleYear,
       };
 
     const personalizedOfferId = orderPayload.personalizedOfferId || orderPayload.personalizedOffer;
+    const smartClientExposureId = orderPayload.smartClientExposureId || null;
+    let smartClientExposure = null;
+    let smartClientRule = null;
+    if (smartClientExposureId) {
+      smartClientExposure = await SmartClientExposure.findOne({ _id: smartClientExposureId, user: user._id, group: "exposed" });
+      if (!smartClientExposure || !["displayed", "accepted"].includes(smartClientExposure.status) || (smartClientExposure.expiresAt && smartClientExposure.expiresAt <= new Date())) {
+        return { error: "L'exposition Smart Client est invalide ou expirée." };
+      }
+      smartClientRule = await SmartClientRule.findOne({ _id: smartClientExposure.rule, status: "active", version: smartClientExposure.ruleVersion }).lean();
+      if (!smartClientRule) return { error: "La règle Smart Client n'est plus valide." };
+    }
     let personalizedOfferDocument = null;
     let personalizedDiscountAmount = 0;
     let personalizedFreeItemBenefitAmount = 0;
     let personalizedOfferApplied = false;
     let smartOfferUsageStep = null;
+    // "mystery_gift" n'a pas de valeur monétaire configurée (c'est un cadeau physique
+    // préparé par le restaurant) : on ne peut donc pas se fier à personalizedDiscountAmount > 0
+    // pour savoir si l'offre a été appliquée, contrairement aux autres types.
+    let mysteryGiftUnlocked = false;
+    let mysteryGiftName = null;
+    let deferredCashbackUnlocked = false;
     let personalizedDiscountCalculationMode = null;
 
     if (personalizedOfferId) {
@@ -784,7 +841,7 @@ const createOrderService = async (order, options = {}) => {
           error: "Vous ne pouvez pas combiner un code promo et une offre personnalisée.",
         };
       }
-      
+
       const now = new Date();
       personalizedOfferDocument = await PersonalizedOffer.findById(personalizedOfferId);
       if (!personalizedOfferDocument || String(personalizedOfferDocument.user) !== String(user._id)) {
@@ -793,7 +850,11 @@ const createOrderService = async (order, options = {}) => {
         };
       }
 
-      if (!["active", "viewed", "clicked"].includes(personalizedOfferDocument.status) || (personalizedOfferDocument.validUntil && personalizedOfferDocument.validUntil < now)) {
+      if (
+        !["active", "viewed", "clicked"].includes(personalizedOfferDocument.status) ||
+        (personalizedOfferDocument.validUntil && personalizedOfferDocument.validUntil < now) ||
+        (personalizedOfferDocument.validFrom && personalizedOfferDocument.validFrom > now)
+      ) {
         return {
           error: "Cette offre personnalisée a expiré ou n'est plus active.",
         };
@@ -836,7 +897,7 @@ const createOrderService = async (order, options = {}) => {
           catMap[String(i._id)] = String(i.category);
           promoLockedMap[String(i._id)] = !!i.promo_locked;
         });
-        
+
         orderItems.forEach(item => {
           if (catMap[String(item.item)] === targetCatId && !promoLockedMap[String(item.item)]) {
             personalizedDiscountAmount += toSafeNumber(item.price, 0) * (personalizedOfferDocument.discountValue / 100);
@@ -846,7 +907,7 @@ const createOrderService = async (order, options = {}) => {
         const targetItemId = String(personalizedOfferDocument.targetMenuItem);
         const dbItem = await mongoose.models.MenuItem.findById(targetItemId);
         const isLocked = dbItem ? !!dbItem.promo_locked : false;
-        
+
         if (!isLocked) {
           orderItems.forEach(item => {
             if (String(item.item) === targetItemId) {
@@ -918,17 +979,24 @@ const createOrderService = async (order, options = {}) => {
       } else if (personalizedOfferDocument.offerType === "bonus_basket") {
         const subtotal = buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers);
         if (subtotal >= personalizedOfferDocument.bonusThreshold) {
-          personalizedDiscountAmount = personalizedOfferDocument.discountValue;
+          // Rabais fixe plafonné à la part non exclue du panier : panier 100 % exclu → 0.
+          const isExcludedLine = await loadExcludedCategoryMatcher(personalizedOfferDocument, orderItems);
+          const excludedSubtotal = orderItems.reduce(
+            (sum, item) => (isExcludedLine(item) ? sum + toSafeNumber(item.price, 0) : sum),
+            0,
+          );
+          personalizedDiscountAmount = Math.min(
+            toSafeNumber(personalizedOfferDocument.discountValue, 0),
+            Math.max(0, subtotal - excludedSubtotal),
+          );
         } else {
           return {
             error: `Le sous-total doit être d'au moins $${personalizedOfferDocument.bonusThreshold} pour bénéficier de cette offre.`,
           };
         }
       } else if (personalizedOfferDocument.offerType === "discount_order") {
-        // Mobile applies discount_order to the complete basket. The web client
-        // still excludes promo-locked items and basket offers. Reconstruct
-        // both bases from the basket lines and select the one matching the
-        // checkout total, without accepting an arbitrary discount amount.
+        // Rabais global : seuls les articles remisables comptent (ni offres du panier, ni
+        // catégories exclues, ni articles verrouillés promo), comme le rabais divisé et les paliers.
         const itemIds = orderItems.map(i => i.item).filter(Boolean);
         const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
         const promoLockedMap = {};
@@ -936,26 +1004,16 @@ const createOrderService = async (order, options = {}) => {
           promoLockedMap[String(i._id)] = !!i.promo_locked;
         });
 
-        let discountableBase = 0;
-        orderItems.forEach(item => {
-          if (!promoLockedMap[String(item.item)]) {
-            discountableBase += toSafeNumber(item.price, 0);
-          }
-        });
-
-        const fullBasketSubtotal =
-          buildOrderItemsSubtotal(orderItems) +
-          buildOrderOffersSubtotal(offers) +
-          rewardsList.reduce(
-            (sum, reward) => sum + toSafeNumber(reward?.extraPrice, 0),
-            0,
-          );
+        const isExcludedLine = await loadExcludedCategoryMatcher(personalizedOfferDocument, orderItems);
+        const discountableBase = orderItems.reduce(
+          (sum, item) => (promoLockedMap[String(item.item)] || isExcludedLine(item) ? sum : sum + toSafeNumber(item.price, 0)),
+          0,
+        );
         const selectedDiscount = selectDiscountOrderAmount({
           discountPercent: personalizedOfferDocument.discountValue,
           orderSubtotal: orderPayload.subTotal,
           receivedSubtotalAfterDiscount: orderPayload.subTotalAfterDiscount,
           eligibleItemsSubtotal: discountableBase,
-          fullBasketSubtotal,
         });
         personalizedDiscountAmount = selectedDiscount.amount;
         personalizedDiscountCalculationMode = selectedDiscount.mode;
@@ -971,8 +1029,9 @@ const createOrderService = async (order, options = {}) => {
         const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
         const promoLockedMap = {};
         dbItems.forEach(item => { promoLockedMap[String(item._id)] = !!item.promo_locked; });
+        const isExcludedLine = await loadExcludedCategoryMatcher(personalizedOfferDocument, orderItems);
         const discountableBase = orderItems.reduce(
-          (sum, item) => promoLockedMap[String(item.item)] ? sum : sum + toSafeNumber(item.price, 0),
+          (sum, item) => promoLockedMap[String(item.item)] || isExcludedLine(item) ? sum : sum + toSafeNumber(item.price, 0),
           0,
         );
         personalizedDiscountAmount = discountableBase * (currentPercent / 100);
@@ -1007,6 +1066,76 @@ const createOrderService = async (order, options = {}) => {
           return { error: "Le nombre de points bonus configuré est invalide." };
         }
         personalizedDiscountAmount = 0;
+      } else if (personalizedOfferDocument.offerType === "tiered_discount") {
+        // Réduction à paliers progressifs : on applique le palier le plus élevé
+        // dont le seuil est atteint par le sous-total.
+        const subtotal = buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers);
+        const tiers = Array.isArray(personalizedOfferDocument.tieredDiscounts)
+          ? personalizedOfferDocument.tieredDiscounts
+          : [];
+        const eligibleTier = tiers
+          .filter((tier) => subtotal >= toSafeNumber(tier?.threshold, Infinity))
+          .sort((a, b) => toSafeNumber(b?.threshold, 0) - toSafeNumber(a?.threshold, 0))[0];
+
+        if (!eligibleTier) {
+          const lowestThreshold = tiers.length
+            ? Math.min(...tiers.map((tier) => toSafeNumber(tier?.threshold, Infinity)))
+            : null;
+          return {
+            error: Number.isFinite(lowestThreshold)
+              ? `Le sous-total de votre commande doit être d'au moins $${lowestThreshold} pour bénéficier de cette offre.`
+              : "Aucun palier n'est configuré pour cette offre.",
+          };
+        }
+
+        const itemIds = orderItems.map((item) => item.item).filter(Boolean);
+        const dbItems = await mongoose.models.MenuItem.find({ _id: { $in: itemIds } });
+        const promoLockedMap = {};
+        dbItems.forEach((item) => { promoLockedMap[String(item._id)] = !!item.promo_locked; });
+        const isExcludedLine = await loadExcludedCategoryMatcher(personalizedOfferDocument, orderItems);
+        const discountableBase = orderItems.reduce(
+          (sum, item) => (promoLockedMap[String(item.item)] || isExcludedLine(item) ? sum : sum + toSafeNumber(item.price, 0)),
+          0,
+        );
+        personalizedDiscountAmount = discountableBase * (toSafeNumber(eligibleTier.discountValue, 0) / 100);
+      } else if (personalizedOfferDocument.offerType === "deferred_cashback") {
+        // Pas de rabais sur CETTE commande : atteindre le seuil débloque la récompense future,
+        // créée à la confirmation (DeferredCashbackService).
+        // Seuil évalué sur le sous-total APRÈS la remise 1re commande / abonnement.
+        const subtotalBeforeDiscount = buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers);
+        const subtotal = firstOrderDiscountApplies
+          ? subtotalBeforeDiscount * 0.8
+          : subtotalBeforeDiscount * (1 - appliedSubscriptionDiscountPercent / 100);
+        const threshold = toSafeNumber(personalizedOfferDocument.deferredThreshold, 0)
+          || toSafeNumber(personalizedOfferDocument.bonusThreshold, 0);
+        if (roundMoney(subtotal, 0) + 0.005 < threshold) {
+          return {
+            error: `Le sous-total après rabais de votre commande doit être d'au moins $${threshold} pour débloquer votre cashback.`,
+          };
+        }
+        personalizedDiscountAmount = 0;
+        deferredCashbackUnlocked = true;
+      } else if (personalizedOfferDocument.offerType === "mystery_gift") {
+        // Cadeau surprise sans article catalogue ni valeur monétaire configurée :
+        // le restaurant le prépare manuellement, communiqué via smartOfferMysteryGiftName.
+        const subtotal = buildOrderItemsSubtotal(orderItems) + buildOrderOffersSubtotal(offers);
+        const threshold = toSafeNumber(personalizedOfferDocument.mysteryThreshold, 0);
+        if (subtotal < threshold) {
+          return {
+            error: `Le sous-total de votre commande doit être d'au moins $${threshold} pour débloquer le cadeau mystère.`,
+          };
+        }
+        personalizedDiscountAmount = 0;
+        mysteryGiftUnlocked = true;
+        // Cadeau lié à un vrai article du menu (ajouté au panier par le client) : c'est son nom
+        // qui doit apparaître (restaurant, détail de commande), pas le libellé générique de l'offre.
+        const giftLine = orderItems.find((item) => item?.isSmartOfferFreeItem);
+        if (giftLine?.item) {
+          const giftMenuItem = await mongoose.models.MenuItem.findById(giftLine.item).select("name").lean();
+          const giftSize = String(giftLine.size?.size || giftLine.size || "").trim();
+          mysteryGiftName = giftMenuItem?.name ? `${giftMenuItem.name}${giftSize ? ` (${giftSize})` : ""}` : null;
+        }
+        mysteryGiftName = mysteryGiftName || personalizedOfferDocument.mysteryItemName || null;
       }
 
       personalizedDiscountAmount = roundMoney(personalizedDiscountAmount, 0);
@@ -1014,33 +1143,83 @@ const createOrderService = async (order, options = {}) => {
       personalizedOfferApplied = Boolean(
         personalizedOfferDocument.offerType === "free_delivery"
           ? order.type === "delivery" &&
-            requestedDeliveryFee > 0 &&
-            normalizedDeliveryFee === 0
+          requestedDeliveryFee > 0 &&
+          normalizedDeliveryFee === 0
           : ["free_item", "buy_one_get_one"].includes(personalizedOfferDocument.offerType)
             ? personalizedFreeItemBenefitAmount > 0
             : personalizedOfferDocument.offerType === "loyalty_points"
               ? Math.floor(toSafeNumber(personalizedOfferDocument.bonusPoints, 0)) > 0
-              : personalizedDiscountAmount > 0,
+              : personalizedOfferDocument.offerType === "mystery_gift"
+                ? mysteryGiftUnlocked
+                : personalizedOfferDocument.offerType === "deferred_cashback"
+                ? deferredCashbackUnlocked
+                : personalizedDiscountAmount > 0,
       );
 
+      // Étape 1 du cashback : aucune remise de l'offre, mais la remise 1re commande / abonnement
+      // reste appliquée sur la commande.
+      const otherDiscountAmount =
+        personalizedOfferDocument.offerType === "deferred_cashback"
+          ? firstOrderDiscountApplies
+            ? roundMoney(toSafeNumber(orderPayload.subTotal, 0) * 0.2, 0)
+            : appliedSubscriptionDiscountAmount
+          : 0;
       const expectedSubTotalAfterDiscount = roundMoney(
-        Math.max(0, toSafeNumber(orderPayload.subTotal, 0) - personalizedDiscountAmount),
+        Math.max(0, toSafeNumber(orderPayload.subTotal, 0) - personalizedDiscountAmount - otherDiscountAmount),
         0,
       );
-      const receivedSubTotalAfterDiscount = roundMoney(
-        orderPayload.subTotalAfterDiscount,
-        0,
-      );
+      const amountCheck = checkPersonalizedOfferAmount({
+        subTotal: orderPayload.subTotal,
+        receivedSubTotalAfterDiscount: orderPayload.subTotalAfterDiscount,
+        expectedSubTotalWithOffer: expectedSubTotalAfterDiscount,
+        offerType: personalizedOfferDocument.offerType,
+        offerApplied: personalizedOfferApplied,
+        offerReplacesOtherDiscounts: personalizedOfferReplacesOtherDiscounts,
+        firstOrderDiscountEligible,
+        subscriptionDiscountAvailable: shouldApplySubscriptionBenefits,
+        subscriptionDiscountPercent: SUBSCRIPTION_DISCOUNT_PERCENT,
+        promoCodeRequested,
+      });
+      const amountLog = {
+        userId: String(user?._id || ""),
+        personalizedOfferId: String(personalizedOfferId),
+        offerType: personalizedOfferDocument.offerType,
+        subTotal: roundMoney(orderPayload.subTotal, 0),
+        expectedSubTotalAfterDiscount,
+        receivedSubTotalAfterDiscount: roundMoney(orderPayload.subTotalAfterDiscount, 0),
+        regularDiscountAmount: amountCheck.regularDiscountAmount,
+      };
 
-      console.log("[PersonalizedOffer] subTotal:", orderPayload.subTotal, "| discountValue:", personalizedOfferDocument.discountValue, "| offerType:", personalizedOfferDocument.offerType, "| calculationMode:", personalizedDiscountCalculationMode, "| personalizedDiscountAmount:", personalizedDiscountAmount, "| expected subTotalAfterDiscount:", expectedSubTotalAfterDiscount, "| received subTotalAfterDiscount:", receivedSubTotalAfterDiscount);
-
-      if (Math.abs(expectedSubTotalAfterDiscount - receivedSubTotalAfterDiscount) > 0.01) {
+      if (amountCheck.result === "regular_discounts") {
+        // Commande passée SANS l'offre, avec les remises habituelles : l'offre n'est pas liée à la
+        // commande (à la confirmation elle suit la règle normale : « ignorée »).
+        logWithTimestamp("Personalized offer not applied (checkout used regular discounts)", amountLog);
+        personalizedOfferDocument = null;
+        personalizedOfferApplied = false;
+        personalizedDiscountAmount = 0;
+        personalizedFreeItemBenefitAmount = 0;
+        firstOrderDiscountApplies = amountCheck.regularFirstOrderDiscount;
+        if (subscriptionBenefits.isApplied) {
+          subscriptionBenefits.discountPercent = amountCheck.regularSubscriptionPercent;
+          subscriptionBenefits.discountAmount = amountCheck.regularFirstOrderDiscount
+            ? 0
+            : amountCheck.regularDiscountAmount;
+        }
+      } else if (amountCheck.result === "mismatch") {
+        logWithTimestamp("Personalized offer amount mismatch", amountLog);
         return {
           error: "Le montant de l'offre personnalisée ne correspond pas aux articles du panier.",
         };
       }
     }
 
+    // Aucune validation de prix n'est faite sur les lignes : sans ce garde-fou, un cadeau
+    // envoyé à 0$ sans offre appliquée (offre désactivée, expirée…) serait accepté gratuitement.
+    if (!personalizedOfferApplied && orderItems.some((item) => item?.isSmartOfferFreeItem)) {
+      return {
+        error: "L'article offert n'est valable qu'avec votre offre personnalisée. Retirez-le du panier ou réactivez l'offre.",
+      };
+    }
 
     let promoCodeId = requestedPromoCodeId;
 
@@ -1115,11 +1294,11 @@ const createOrderService = async (order, options = {}) => {
         ];
         const relatedMenuItems = orderMenuItemIds.length
           ? await mongoose.models.MenuItem.find({
-              _id: { $in: orderMenuItemIds },
-            })
-              .select("_id category")
-              .populate({ path: "category", select: "name" })
-              .lean()
+            _id: { $in: orderMenuItemIds },
+          })
+            .select("_id category")
+            .populate({ path: "category", select: "name" })
+            .lean()
           : [];
         const menuItemsById = new Map(
           relatedMenuItems.map((item) => [normalizeId(item?._id), item]),
@@ -1210,16 +1389,16 @@ const createOrderService = async (order, options = {}) => {
     const normalizedDiscount = firstOrderDiscountApplies
       ? 20
       : subscriptionBenefits.isApplied &&
-          toSafeNumber(subscriptionBenefits?.discountPercent, 0) > 0
+        toSafeNumber(subscriptionBenefits?.discountPercent, 0) > 0
         ? toSafeNumber(subscriptionBenefits.discountPercent, 0)
-      : subscriptionActive
-        ? 0
-      : requestedDiscount;
+        : subscriptionActive
+          ? 0
+          : requestedDiscount;
 
     const requestedDeliveryFee = toSafeNumber(orderPayload.deliveryFee, 0);
     const normalizedDeliveryFee =
       (subscriptionBenefits.isApplied && subscriptionBenefits.freeDeliveryApplied) ||
-      (personalizedOfferDocument && personalizedOfferDocument.offerType === "free_delivery")
+        (personalizedOfferDocument && personalizedOfferDocument.offerType === "free_delivery")
         ? 0
         : requestedDeliveryFee;
 
@@ -1347,12 +1526,18 @@ const createOrderService = async (order, options = {}) => {
       // current order remains a normal order and must not consume the offer.
       personalizedOffer: personalizedOfferApplied ? personalizedOfferId : null,
       personalizedOfferApplied,
+      smartClientExposure: smartClientExposure?.status === "accepted" ? smartClientExposure._id : null,
       smartOfferUsageStep: personalizedOfferApplied ? smartOfferUsageStep : null,
       smartOfferBonusPoints:
         personalizedOfferApplied &&
-        personalizedOfferDocument?.offerType === "loyalty_points"
+          personalizedOfferDocument?.offerType === "loyalty_points"
           ? Math.floor(toSafeNumber(personalizedOfferDocument.bonusPoints, 0))
           : 0,
+      smartOfferMysteryGiftName:
+        personalizedOfferApplied &&
+        personalizedOfferDocument?.offerType === "mystery_gift"
+          ? mysteryGiftName
+          : null,
       subscriptionBenefits,
       birthdayBenefits,
       scheduled: {
@@ -1391,6 +1576,30 @@ const createOrderService = async (order, options = {}) => {
     }
 
     const response = await newOrder.save();
+    if (smartClientExposure) {
+      if (smartClientExposure.status === "accepted") {
+        const subtotal = toSafeNumber(orderPayload.subTotal, 0);
+        const offer = smartClientRule.offer || {};
+        const maxPct = toSafeNumber(smartClientRule.safeguards?.maxDiscountPct, 100);
+        let discountCost = 0;
+        if (["discount", "rescue"].includes(offer.mechanic)) {
+          discountCost = offer.valueType === "discount_pct"
+            ? subtotal * (Math.min(toSafeNumber(offer.value, 0), maxPct) / 100)
+            : Math.min(subtotal, toSafeNumber(offer.value, 0));
+        } else if (offer.mechanic === "fixed_price" || offer.valueType === "fixed_price") {
+          discountCost = Math.max(0, subtotal - toSafeNumber(offer.value, subtotal));
+        }
+        await SmartClientExposure.updateOne(
+          { _id: smartClientExposure._id, status: "accepted" },
+          { $set: { status: "converted", convertedAt: new Date(), order: response._id, revenue: toSafeNumber(orderPayload.total, 0), discountCost: roundMoney(discountCost, 0) } },
+        );
+      } else {
+        await SmartClientExposure.updateOne(
+          { _id: smartClientExposure._id, status: "displayed" },
+          { $set: { status: "ignored", ignoredAt: new Date(), order: response._id, revenue: toSafeNumber(orderPayload.total, 0) } },
+        );
+      }
+    }
     if (!isPickupOrderType(normalizedOrderTypeValue)) {
       appendDeliveryAddressIfMissing(user, resolvedOrderAddress);
     }
@@ -1406,34 +1615,25 @@ const createOrderService = async (order, options = {}) => {
           currentStep: nextStep,
           status: isComplete ? "applied" : "active",
         };
+        // followupValidityDays = délai max ENTRE deux commandes : chaque étape utilisée relance
+        // le compte à rebours pour la suivante (et non un délai global depuis la 1re commande).
+        const appliedAt = new Date();
         if (smartOfferUsageStep === 0) {
-          const firstAppliedAt = new Date();
-          progressionUpdate.firstAppliedAt = firstAppliedAt;
-          progressionUpdate.validUntil = new Date(
-            firstAppliedAt.getTime() + (personalizedOfferDocument.followupValidityDays || 7) * 86400000,
+          progressionUpdate.firstAppliedAt = appliedAt;
+        }
+        if (!isComplete) {
+          // Toute offre expire à 23:59 (heure de Toronto) de son dernier jour.
+          progressionUpdate.validUntil = endOfQuebecDay(
+            new Date(appliedAt.getTime() + (personalizedOfferDocument.followupValidityDays || 7) * 86400000),
           );
         }
-        await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, { $set: progressionUpdate }).catch(() => {});
+        await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, { $set: progressionUpdate }).catch(() => { });
       } else {
-        await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, { status: "applied" }).catch(() => {});
+        await PersonalizedOffer.findByIdAndUpdate(personalizedOfferId, { status: "applied" }).catch(() => { });
       }
-      await PersonalizedOffer.updateMany(
-        {
-          user: user._id,
-          status: { $in: ["prepared", "active", "viewed", "clicked"] },
-          _id: { $ne: personalizedOfferId }
-        },
-        { $set: { status: "expired" } }
-      ).catch(() => {});
-    } else if (!personalizedOfferId) {
-      await PersonalizedOffer.updateMany(
-        {
-          user: user._id,
-          status: { $in: ["prepared", "active", "viewed", "clicked"] }
-        },
-        { $set: { status: "expired" } }
-      ).catch(() => {});
     }
+    // Les offres non utilisées passent en « ignorée » à la CONFIRMATION de la commande seulement
+    // (confirmOrderService) : un paiement refusé ne doit rien faire perdre au client.
     const restaurant = await mongoose.models.Restaurant.findById(
       order.restaurant,
     );

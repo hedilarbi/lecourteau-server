@@ -135,7 +135,12 @@ const loginStaff = async (req, res) => {
 };
 
 const getStaffByToken = async (req, res) => {
-  const token = req.headers.authorization.split(" ")[1];
+  // Sans en-tête Authorization, `.split` levait une erreur hors du try : rejet de promesse non
+  // géré, qui arrête le processus Node.
+  const token = String(req.headers.authorization || "").split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ message: "Token manquant" });
+  }
 
   try {
     const { response, error } = await getStaffByTokenService(token);
@@ -203,7 +208,7 @@ const updatePassword = async (req, res) => {
 
   try {
     const hashedPasword = await bcrypt.hash(password, saltRounds);
-    const staff = await Staff.findById(id);
+    const staff = await Staff.findById(id).select("+password");
     if (!staff) {
       return res.status(404).json({ message: "Staff not found" });
     }

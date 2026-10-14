@@ -19,6 +19,13 @@ const offerSchema = new Schema({
     },
   ],
   price: Number,
+  // Nombre d'articles que le client choisit parmi `items` (prix de l'offre inchangé).
+  // null = tous les articles sont inclus (fonctionnement historique).
+  // Un article avec quantity > 1 (ex. Frites ×2) compte pour UN choix.
+  itemsToChoose: {
+    type: Number,
+    default: null,
+  },
   createdAt: Date,
   expireAt: Date,
 });

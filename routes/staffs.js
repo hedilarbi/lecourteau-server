@@ -19,26 +19,47 @@ const {
 } = require("../firebase");
 const Multer = require("../middlewares/multer");
 const { optimizeImage } = require("../middlewares/imageOptimizor");
+const authStaff = require("../middlewares/authStaff");
+const requireStaffRole = require("../middlewares/requireStaffRole");
+const { requireStaffSelfOrRole } = requireStaffRole;
 const router = express.Router();
 
-router.get("/", getStaffMembers);
+router.get("/", authStaff, requireStaffRole("admin"), getStaffMembers);
 
 router.get("/available", getAvailableDrivers);
-router.put("/update/:id", Multer.single("file"), updateStaffMember);
+router.put(
+  "/update/:id",
+  authStaff,
+  requireStaffRole("admin"),
+  Multer.single("file"),
+  updateStaffMember
+);
 router.post(
   "/create",
+  authStaff,
+  requireStaffRole("admin"),
   Multer.single("file"),
 
   uploadImageToFirebase,
   createStaff
 );
 router.get("/:id/order", getStaffOrder);
-router.put("/affectOrder/:id", affectOrderToStaff);
-router.put("/updatePassword/:id", updatePassword);
+router.put("/affectOrder/:id", authStaff, requireStaffRole(), affectOrderToStaff);
+router.put(
+  "/updatePassword/:id",
+  authStaff,
+  requireStaffRole("admin"),
+  updatePassword
+);
 router.post("/login", loginStaff);
 router.get("/driver/orders/:id", getDriverOrders);
 router.get("/staffByToken", getStaffByToken);
-router.delete("/delete/:id", deleteStaffMember);
-router.get("/:id", getStaffMember);
+router.delete(
+  "/delete/:id",
+  authStaff,
+  requireStaffRole("admin"),
+  deleteStaffMember
+);
+router.get("/:id", authStaff, requireStaffSelfOrRole("admin"), getStaffMember);
 
 module.exports = router;

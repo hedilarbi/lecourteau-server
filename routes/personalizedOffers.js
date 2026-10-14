@@ -4,6 +4,7 @@ const {
   getRules,
   createOrUpdateRule,
   getActiveOffer,
+  getLastExpiredOffer,
   logEvent,
   getUserProfiles,
   getOffersHistory,
@@ -18,6 +19,7 @@ const {
   unsubscribeEmail,
 } = require("../controllers/personalizedOffer");
 const authStaff = require("../middlewares/authStaff");
+const requireStaffRole = require("../middlewares/requireStaffRole");
 
 // Unsubscribe route (Public/Unsecured so email links work directly without login)
 router.get("/unsubscribe", unsubscribeEmail);
@@ -32,13 +34,15 @@ router.delete("/rules/:id", deleteRule);
 router.get("/profiles", getUserProfiles);
 router.get("/history", getOffersHistory);
 router.get("/monitoring-stats", getMonitoringStats);
-router.post("/trigger-scan", triggerScan);
+router.post("/trigger-scan", authStaff, requireStaffRole("admin"), triggerScan);
 router.post("/rules/initialize-basket", authStaff, initializeBasketRules);
-router.get("/cron/status", getCronStatus);
-router.post("/cron/toggle", toggleCron);
+// Arrêt / reprise du système smart offers : réservé aux admins.
+router.get("/cron/status", authStaff, requireStaffRole("admin"), getCronStatus);
+router.post("/cron/toggle", authStaff, requireStaffRole("admin"), toggleCron);
 
 // Client API
 router.get("/active/:userId", getActiveOffer);
+router.get("/last-expired/:userId", getLastExpiredOffer);
 router.post("/event", logEvent);
 
 // Admin Hedi Royalties & Payouts

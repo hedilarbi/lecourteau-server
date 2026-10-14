@@ -7,7 +7,8 @@ const createOfferService = async (
   itemList,
   price,
 
-  firebaseUrl
+  firebaseUrl,
+  itemsToChoose = null
 ) => {
   try {
     const { error: normalizeError } = await normalizeOffersOrderService();
@@ -28,6 +29,7 @@ const createOfferService = async (
       items: itemList,
       slug,
       price: parseFloat(price),
+      itemsToChoose,
       createdAt: new Date(),
       order: offersCount + 1,
     });

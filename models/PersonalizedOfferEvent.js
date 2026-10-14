@@ -13,7 +13,7 @@ const personalizedOfferEventSchema = new Schema({
   },
   eventType: {
     type: String,
-    enum: ["created", "notified", "reminder_notified", "notif_clicked", "viewed", "clicked", "applied", "expired"],
+    enum: ["created", "notified", "reminder_notified", "notif_clicked", "viewed", "clicked", "applied", "expired", "ignored"],
     required: true,
   },
   timestamp: {

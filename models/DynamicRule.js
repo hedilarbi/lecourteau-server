@@ -24,6 +24,9 @@ const offerConfigSchema = new Schema({
   bonusPoints: { type: Number, default: 0 },
   discountSteps: [Number],
   followupValidityDays: { type: Number, default: 7 },
+  // Rabais globaux (discount_order, split_discount, bonus_basket) : les articles de ces
+  // catégories ne sont pas remisés. Panier 100 % exclu → aucun rabais.
+  excludedCategories: [{ type: Schema.Types.ObjectId, ref: "Category" }],
   
   triggerItem: { type: Schema.Types.ObjectId, ref: "MenuItem" },
   triggerItemSize: String,
@@ -150,6 +153,21 @@ const dynamicRuleSchema = new Schema({
     default: 0, // Plus le poids est élevé, plus la règle est prioritaire lors de l'évaluation
   },
   offers: [offerConfigSchema],
+  // A/B Testing IA (multi_armed_bandit) : dernière évaluation, refaite toutes les 2 semaines
+  // (BanditOptimizationService). winnerOfferConfigId reste null tant que chaque version
+  // n'a pas assez de résultats.
+  banditEvaluation: {
+    evaluatedAt: { type: Date, default: null },
+    winnerOfferConfigId: { type: Schema.Types.ObjectId, default: null },
+    stats: [{
+      _id: false,
+      offerConfigId: Schema.Types.ObjectId,
+      offerType: String,
+      resolved: Number,
+      used: Number,
+      rate: Number,
+    }],
+  },
   createdAt: {
     type: Date,
     default: Date.now,

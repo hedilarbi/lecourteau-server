@@ -6,6 +6,7 @@ const updateOfferService = require("../services/offersServices/updateOfferServic
 const triOffersService = require("../services/offersServices/triOffersService");
 const initializeOffersOrderService = require("../services/offersServices/initializeOffersOrderService");
 const Offer = require("../models/Offer");
+const { parseItemsToChoose } = require("../utils/offerItemsToChoose");
 const logWithTimestamp = (message) => {
   const timeStamp = new Date().toISOString();
   console.error(`${timeStamp} - ${message}`);
@@ -33,13 +34,19 @@ const createOffer = async (req, res) => {
       size: item.size,
     }));
 
+    const itemsToChoose = parseItemsToChoose(req.body.itemsToChoose, itemList.length);
+    if (itemsToChoose.error) {
+      return res.status(400).json({ success: false, message: itemsToChoose.error, error: itemsToChoose.error });
+    }
+
     const { response, error } = await createOfferService(
       name,
       expireAt,
       itemList,
       price,
 
-      firebaseUrl
+      firebaseUrl,
+      itemsToChoose.value
     );
 
     if (error) {
@@ -113,6 +120,17 @@ const updateOffer = async (req, res) => {
       size: item.size,
       quantity: item.quantity,
     }));
+
+    // Champ absent (client pas encore à jour) : on ne touche pas à la valeur enregistrée.
+    let itemsToChoose;
+    if (req.body.itemsToChoose !== undefined) {
+      const parsed = parseItemsToChoose(req.body.itemsToChoose, newItems.length);
+      if (parsed.error) {
+        return res.status(400).json({ success: false, message: parsed.error, error: parsed.error });
+      }
+      itemsToChoose = parsed.value;
+    }
+
     const { response, error } = await updateOfferService(
       id,
       name,
@@ -120,7 +138,8 @@ const updateOffer = async (req, res) => {
 
       price,
       expireAt,
-      firebaseUrl
+      firebaseUrl,
+      itemsToChoose
     );
 
     if (error) {

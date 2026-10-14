@@ -70,6 +70,12 @@ const settingSchema = new Schema({
       default: 10,
     },
   },
+  smartClient: {
+    isActive: {
+      type: Boolean,
+      default: false, // Inactive by default for passive journaling
+    }
+  }
 });
 
 module.exports = model("Setting", settingSchema);

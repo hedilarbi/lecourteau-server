@@ -94,6 +94,30 @@ router.delete("/rules/:id", authStaff, async (req, res) => {
 });
 
 // ─── ANALYTICS (BI & MONITORING) ───
+// BI & ROI (données réelles) : ?from=YYYY-MM-DD&to=YYYY-MM-DD&campaignId=&includeTests=1
+router.get("/bi", authStaff, async (req, res) => {
+  try {
+    const { getSmartOffersBI } = require("../services/smartOffersV2/SmartOffersBIService");
+    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999-04:00`) : new Date();
+    const from = req.query.from
+      ? new Date(`${req.query.from}T00:00:00-04:00`)
+      : new Date(to.getTime() - 30 * 86400000);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) {
+      return res.status(400).json({ error: "Période invalide." });
+    }
+    const data = await getSmartOffersBI({
+      from,
+      to,
+      campaignId: req.query.campaignId || null,
+      includeTests: ["1", "true"].includes(String(req.query.includeTests || "")),
+    });
+    res.json(data);
+  } catch (error) {
+    console.error("[smartOffersV2/bi]", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get("/analytics", authStaff, async (req, res) => {
   try {
     const { campaignId } = req.query;

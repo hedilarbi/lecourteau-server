@@ -74,9 +74,25 @@ const formatSmartOfferExpiry = (validUntil) => {
   return quebecDateTimeFormatter.format(expiry);
 };
 
+const quebecDeadlineDayFormatter = new Intl.DateTimeFormat("fr-CA", {
+  timeZone: QUEBEC_TIME_ZONE,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+/** Échéance lisible avec jour ET heure exacte, ex. « jeudi 9 octobre à 23 h 59 ». */
+const formatSmartOfferDeadline = (date) => {
+  const target = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(target.getTime())) return null;
+  const { hour, minute } = getQuebecDateParts(target);
+  return `${quebecDeadlineDayFormatter.format(target)} à ${hour} h ${String(minute).padStart(2, "0")}`;
+};
+
 const buildSmartOfferNotificationBody = (body, validUntil) => {
   const originalBody = String(body || "").trim();
-  const formattedExpiry = formatSmartOfferExpiry(validUntil);
+  // Jour + date + heure exacte, ex. « mercredi 14 octobre à 23 h 59 » (activation et rappel).
+  const formattedExpiry = formatSmartOfferDeadline(validUntil);
   if (!formattedExpiry) return originalBody;
 
   const expiryLine = `Offre valide jusqu’au ${formattedExpiry}.`;
@@ -90,5 +106,6 @@ module.exports = {
   calculateSmartOfferValidUntil,
   endOfQuebecDay,
   formatSmartOfferExpiry,
+  formatSmartOfferDeadline,
   buildSmartOfferNotificationBody,
 };

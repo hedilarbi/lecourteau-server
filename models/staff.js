@@ -4,7 +4,11 @@ const { Schema } = mongoose;
 const staffSchema = new Schema({
   username: String,
   name: String,
-  password: String,
+  // Jamais renvoyé par l'API : il faut le demander avec .select("+password").
+  password: {
+    type: String,
+    select: false,
+  },
   createdAt: Date,
   role: String,
   image: String,
@@ -22,6 +26,13 @@ const staffSchema = new Schema({
   is_available: {
     type: Boolean,
     default: true,
+  },
+});
+
+staffSchema.set("toJSON", {
+  transform: (doc, ret) => {
+    delete ret.password;
+    return ret;
   },
 });
 

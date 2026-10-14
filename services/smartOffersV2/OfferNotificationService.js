@@ -25,7 +25,6 @@ const triggerScheduledOffersJob = async () => {
     return;
   }
   triggerJobRunning = true;
-  console.log("[triggerScheduledOffersJob] Starting periodic Smart Offers activation job...");
   
   try {
     const now = new Date();
@@ -152,7 +151,6 @@ const triggerScheduledOffersJob = async () => {
         }
       }
     }
-    console.log("[triggerScheduledOffersJob] ✅ Periodic activation job finished.");
   } catch (error) {
     console.error("[triggerScheduledOffersJob] Error:", error);
   } finally {
@@ -163,13 +161,13 @@ const triggerScheduledOffersJob = async () => {
 const sendSmartOfferRemindersJob = async () => {
   const now = new Date();
   try {
-    const cronStat = await SystemStat.findOne({ key: "smartOfferCronEnabled" }).lean();
-    const cronEnabled = cronStat?.value !== undefined ? Boolean(cronStat.value) : true;
-    if (!cronEnabled) return;
-
+    // L'arrêt du système smart offers (smartOfferCronEnabled = false) ne coupe que le profilage
+    // et la création d'offres : les rappels des offres déjà en cours continuent.
     const candidates = await PersonalizedOffer.find({
       status: { $in: ["active", "viewed", "clicked"] },
       initialNotificationSentAt: { $ne: null },
+      // Un rabais divisé entamé a ses propres rappels par étape (SplitDiscountNotificationService).
+      $nor: [{ offerType: "split_discount", currentStep: { $gt: 0 } }],
       reminderSentAt: null,
       reminderSkippedAt: null,
       reminderClaimedAt: null,

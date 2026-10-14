@@ -1,4 +1,9 @@
 require("dotenv/config");
+require("./utils/devDeliveryGuard").installDevDeliveryGuard();
+
+if (!process.env.STAFF_SECRET_KEY || process.env.STAFF_SECRET_KEY === process.env.SECRET_KEY) {
+  console.error("STAFF_SECRET_KEY manquante ou identique à SECRET_KEY : la connexion staff est désactivée.");
+}
 
 const express = require("express");
 const mongoose = require("mongoose");
@@ -22,6 +27,7 @@ const appRoutes = require("./routes/app");
 const sizesRoutes = require("./routes/sizes");
 const PromoCodesRoutes = require("./routes/promoCodes");
 const personalizedOffersRoutes = require("./routes/personalizedOffers");
+const smartOffersV2Routes = require("./routes/smartOffersV2");
 const VedetteRoutes = require("./routes/vedettes");
 const auditRoutes = require("./routes/audit");
 const sizesGroupesRoutes = require("./routes/sizeGroups");
@@ -31,6 +37,7 @@ const homeSettingsRoutes = require("./routes/homeSettings");
 const homeRoutes = require("./routes/home");
 const subscriptionsRoutes = require("./routes/subscriptions");
 const recipesRoutes = require("./routes/recipes");
+const smartClientRoutes = require("./modules/smart-client/smartClient.routes");
 const openingMatchMailRoutes = require("./routes/openingMatchMail");
 const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
 const {
@@ -42,6 +49,9 @@ const {
 const {
   startPersonalizedOffersJobs,
 } = require("./jobs/personalizedOfferCron.job");
+const {
+  startSmartOffersV2Jobs,
+} = require("./jobs/smartOffersV2Cron.job");
 
 const { createServer } = require("http");
 
@@ -84,6 +94,7 @@ app.use("/api/sizes", sizesRoutes);
 app.use("/api/app", appRoutes);
 app.use("/api/promoCodes", PromoCodesRoutes);
 app.use("/api/personalized-offers", personalizedOffersRoutes);
+app.use("/api/smart-offers-v2", smartOffersV2Routes);
 app.use("/api/vedettes", VedetteRoutes);
 app.use("/api/audits", auditRoutes);
 app.use("/api/sizeGroups", sizesGroupesRoutes);
@@ -94,6 +105,7 @@ app.use("/api/home-settings", homeSettingsRoutes);
 app.use("/api/home", homeRoutes);
 app.use("/api/subscriptions", subscriptionsRoutes);
 app.use("/api/recipes", recipesRoutes);
+app.use("/api/smart-client", smartClientRoutes);
 app.use("/api/opening-match-mail", openingMatchMailRoutes);
 
 mongoose.connect(
@@ -106,6 +118,7 @@ startScheduledOrdersJob();
 startBirthdayNotificationsJob();
 startResetRestaurantItemsAvailabilityJob();
 startPersonalizedOffersJobs();
+startSmartOffersV2Jobs();
 
 httpServer.listen(process.env.PORT, () => {
   console.log("listening on port 5000");

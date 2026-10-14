@@ -820,7 +820,8 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
         const uid = String(offer.user);
         const orders = ordersByUser[uid] || [];
         const hasOrderedSince = orders.some(o => new Date(o.createdAt) > new Date(offer.createdAt));
-        if (hasOrderedSince) {
+        const isSplitInProgress = offer.offerType === "split_discount" && Number(offer.currentStep) > 0;
+        if (hasOrderedSince && !isSplitInProgress) {
           offersToExpire.push(offer._id);
         } else {
           usersWithActiveOffer.add(uid);
@@ -828,9 +829,11 @@ const prepareDailyOffersJob = async (isManualTrigger = false) => {
       });
 
       if (offersToExpire.length > 0) {
+        // R15 : ces offres étaient actives/en attente et le client a commandé sans les utiliser
+        // → "ignored", distinct de "expired" (fenêtre de validité écoulée sans aucune commande).
         await PersonalizedOffer.updateMany(
           { _id: { $in: offersToExpire } },
-          { $set: { status: "expired" } }
+          { $set: { status: "ignored" } }
         );
       }
 
@@ -1426,7 +1429,6 @@ const triggerScheduledOffersJob = async () => {
     return;
   }
   triggerJobRunning = true;
-  console.log("[triggerScheduledOffersJob] Starting periodic Smart Offers activation job...");
   try {
     const now = new Date();
 
@@ -1626,7 +1628,6 @@ const triggerScheduledOffersJob = async () => {
       }
     }
 
-    console.log("[triggerScheduledOffersJob] ✅ Periodic activation job finished.");
   } catch (error) {
     console.error("[triggerScheduledOffersJob] Error:", error);
   } finally {
@@ -1639,13 +1640,13 @@ const sendSmartOfferRemindersJob = async () => {
   const now = new Date();
 
   try {
-    const cronStat = await SystemStat.findOne({ key: "smartOfferCronEnabled" }).lean();
-    const cronEnabled = cronStat?.value !== undefined ? Boolean(cronStat.value) : true;
-    if (!cronEnabled) return;
-
+    // L'arrêt du système smart offers (smartOfferCronEnabled = false) ne coupe que le profilage
+    // et la création d'offres : les rappels des offres déjà en cours continuent.
     const candidates = await PersonalizedOffer.find({
       status: { $in: ["active", "viewed", "clicked"] },
       initialNotificationSentAt: { $ne: null },
+      // Un rabais divisé entamé a ses propres rappels par étape (SplitDiscountNotificationService).
+      $nor: [{ offerType: "split_discount", currentStep: { $gt: 0 } }],
       reminderSentAt: null,
       reminderSkippedAt: null,
       reminderClaimedAt: null,
@@ -1823,10 +1824,12 @@ const checkPushReceiptsJob = async () => {
 };
 
 // ─── Scheduler registration ───────────────────────────────────────────────────
+// Le scan nocturne V1 (prepareDailyOffersJob de ce fichier, matching SmartOfferRule) a été
+// retiré volontairement : V1 est remplacé par V2 (voir jobs/smartOffersV2Cron.job.js).
+// Les jobs ci-dessous restent : ils gèrent le cycle de vie GÉNÉRIQUE de PersonalizedOffer
+// (activation, expiration, rappels, reçus push) — indépendant de l'origine de l'offre
+// (V1 historique ou V2) — donc nécessaires pour ne pas couper les offres déjà en cours.
 function startPersonalizedOffersJobs() {
-  // Nightly scan: 00:00
-  cron.schedule("0 0 * * *", async () => { await prepareDailyOffersJob(); }, { timezone: DEFAULT_TIMEZONE });
-
   // Trigger & expire: every minute
   cron.schedule("* * * * *", async () => { await triggerScheduledOffersJob(); }, { timezone: DEFAULT_TIMEZONE });
 
@@ -1836,7 +1839,7 @@ function startPersonalizedOffersJobs() {
   // Receipt checker: every hour
   cron.schedule("0 * * * *", async () => { await checkPushReceiptsJob(); }, { timezone: DEFAULT_TIMEZONE });
 
-  console.log(`[personalizedOffersJobs] ✅ Nightly scan:     00:00 (${DEFAULT_TIMEZONE})`);
+  console.log(`[personalizedOffersJobs] ⏸️  V1 nightly matching (prepareDailyOffersJob): DÉSACTIVÉ, remplacé par V2.`);
   console.log(`[personalizedOffersJobs] ✅ Periodic trigger: every minute (${DEFAULT_TIMEZONE})`);
   console.log(`[personalizedOffersJobs] ✅ Offer reminders:  at 2/3 validity (${DEFAULT_TIMEZONE})`);
   console.log(`[personalizedOffersJobs] ✅ Receipt checker:  every hour (${DEFAULT_TIMEZONE})`);

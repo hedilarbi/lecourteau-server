@@ -18,29 +18,36 @@ const {
   updateUserExpoToken,
   dismissBirthdayDobPrompt,
   dismissFirstOrderDiscountPrompt,
-  updateUserDiscount,
   savePayementDetails,
   getUsersPagination,
   banUser,
-  nullifyDefaultBirthdates,
-  populateAppInstalledFields,
   unsubscribeFromMail,
+  sendEmailVerificationOtp,
+  verifyEmailOtp,
 } = require("../controllers/users");
+const authUser = require("../middlewares/authUser");
+const authStaff = require("../middlewares/authStaff");
+const requireStaffRole = require("../middlewares/requireStaffRole");
+const authUserOrStaffRole = require("../middlewares/authUserOrStaffRole");
 const router = express.Router();
 
-router.get("/", getUsers);
-router.get("/pagination", getUsersPagination);
+router.get("/", authStaff, requireStaffRole("admin", "Caissier"), getUsers);
+router.get(
+  "/pagination",
+  authStaff,
+  requireStaffRole("admin", "Caissier"),
+  getUsersPagination,
+);
 router.get("/userByToken", getUserByToken);
-router.get("/admin/populate-app-installed", populateAppInstalledFields);
 router.post("/desabonnement", unsubscribeFromMail);
+router.post("/email-verification/send", authUser, sendEmailVerificationOtp);
+router.post("/email-verification/verify", authUser, verifyEmailOtp);
 
-router.put("/admin/nullify-default-birthdates", nullifyDefaultBirthdates);
-router.put("/update/discount", updateUserDiscount);
 router.post("/create", createUser);
 router.get("/favorites/:id", getFavorites);
 router.put("/favorites/update/add/:id", addToFavorites);
 router.put("/card/add/:id", savePayementDetails);
-router.put("/ban/:id", banUser);
+router.put("/ban/:id", authStaff, requireStaffRole("admin"), banUser);
 router.put("/favorites/update/remove/:id", removeFromFavorites);
 router.put("/addresses/update/add/:id", addToAddresses);
 router.put("/update/expoToken/:id", updateUserExpoToken);
@@ -52,10 +59,10 @@ router.put(
 router.put("/:id/delete/addresses/:addressId", deleteFromAddresses);
 router.delete("/:id/addresses/:addressId", deleteFromAddresses);
 router.get("/orders/:id", getOrdersList);
-router.put("/update/:id", updateUser);
-router.put("/set/:id", setUserInfo);
-router.delete("/delete/:id", deleteUser);
+router.put("/update/:id", authUser, updateUser);
+router.put("/set/:id", authUser, setUserInfo);
+router.delete("/delete/:id", authUserOrStaffRole("admin"), deleteUser);
 router.get("/stats/:id", getUserStats);
-router.get("/:id", getUser);
+router.get("/:id", authUserOrStaffRole(), getUser);
 
 module.exports = router;

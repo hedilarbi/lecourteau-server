@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 require("dotenv/config");
+const getStaffSecretKey = require("./staffSecretKey");
 
 const generateStaffToken = (id, username) => {
   return jwt.sign(
@@ -7,7 +8,7 @@ const generateStaffToken = (id, username) => {
       id,
       username,
     },
-    process.env.SECRET_KEY
+    getStaffSecretKey()
   );
 };
 

@@ -1,4 +1,5 @@
 require("dotenv").config();
+require("../utils/devDeliveryGuard").installDevDeliveryGuard();
 const mongoose = require("mongoose");
 const { Expo } = require("expo-server-sdk");
 

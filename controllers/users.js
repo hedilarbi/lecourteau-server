@@ -39,6 +39,10 @@ const {
 const {
   addToFavoritesService,
 } = require("../services/usersServices/addToFavoritesService");
+const {
+  sendEmailVerificationOtpService,
+  verifyEmailOtpService,
+} = require("../services/usersServices/emailVerificationService");
 const User = require("../models/User");
 const Order = require("../models/Order");
 const Stripe = require("stripe");
@@ -336,7 +340,11 @@ const deleteFromAddresses = async (req, res) => {
 };
 
 const getUserByToken = async (req, res) => {
-  const token = req.headers.authorization.split(" ")[1];
+  // Sans en-tête Authorization, `.split` levait une erreur hors du try (processus arrêté).
+  const token = String(req.headers.authorization || "").split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ error: "Token manquant" });
+  }
 
   try {
     const { error, user } = await getUserByTokenService(token);
@@ -347,6 +355,52 @@ const getUserByToken = async (req, res) => {
     res.status(200).json(user);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const EMAIL_VERIFICATION_ERRORS = {
+  USER_NOT_FOUND: [404, "Utilisateur introuvable."],
+  INVALID_EMAIL: [400, "Adresse courriel invalide."],
+  ALREADY_VERIFIED: [409, "Cette adresse courriel est déjà vérifiée."],
+  EMAIL_TAKEN: [409, "Cette adresse courriel est déjà utilisée."],
+  RESEND_TOO_SOON: [429, "Veuillez patienter avant de demander un nouveau code."],
+  TOO_MANY_REQUESTS: [429, "Trop de codes envoyés. Réessayez plus tard."],
+  MAIL_FAILED: [502, "Impossible d'envoyer le courriel pour le moment. Réessayez plus tard."],
+  OTP_INVALID: [400, "Code incorrect."],
+  OTP_EXPIRED: [400, "Ce code a expiré. Demandez un nouveau code."],
+  TOO_MANY_ATTEMPTS: [429, "Trop de tentatives. Demandez un nouveau code."],
+};
+
+const sendEmailVerificationError = (res, error, extra = {}) => {
+  const [status, message] = EMAIL_VERIFICATION_ERRORS[error] || [400, error];
+  return res.status(status).json({ success: false, error, message, ...extra });
+};
+
+const sendEmailVerificationOtp = async (req, res) => {
+  try {
+    const { error, ...result } = await sendEmailVerificationOtpService(
+      req.user.id,
+      req.body?.email,
+    );
+    if (error) return sendEmailVerificationError(res, error, result);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const verifyEmailOtp = async (req, res) => {
+  try {
+    const { error, ...result } = await verifyEmailOtpService(
+      req.user.id,
+      req.body?.code,
+    );
+    if (error) return sendEmailVerificationError(res, error, result);
+
+    const { user } = await getUserByTokenService(req.user.token);
+    return res.status(200).json({ success: true, email: result.email, pointsAwarded: result.pointsAwarded || 0, user });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -415,18 +469,6 @@ const dismissFirstOrderDiscountPrompt = async (req, res) => {
   }
 };
 
-const updateUserDiscount = async (req, res) => {
-  try {
-    const response = await User.updateMany(
-      {},
-      { firstOrderDiscountApplied: false },
-    );
-    res.status(200).json(response);
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-
 const savePayementDetails = async (req, res) => {
   try {
     const { customerId, paymentMethodId } = req.body;
@@ -485,45 +527,6 @@ const banUser = async (req, res) => {
     res.status(200).json({ success: true, user });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-const nullifyDefaultBirthdates = async (req, res) => {
-  try {
-    const start = new Date(Date.UTC(2007, 0, 1, 0, 0, 0, 0));
-    const end = new Date(Date.UTC(2007, 0, 1, 23, 59, 59, 999));
-    const filter = {
-      date_of_birth: {
-        $gte: start,
-        $lte: end,
-      },
-    };
-
-    const matched = await User.countDocuments(filter);
-    const updateResult = await User.updateMany(filter, {
-      $set: {
-        date_of_birth: null,
-      },
-    });
-    const remaining = await User.countDocuments(filter);
-
-    return res.status(200).json({
-      success: true,
-      message:
-        "Les dates de naissance par défaut au 2007-01-01 ont été remises à null.",
-      data: {
-        targetDate: "2007-01-01",
-        matched,
-        modified:
-          updateResult?.modifiedCount ?? updateResult?.nModified ?? 0,
-        remaining,
-      },
-    });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
   }
 };
 
@@ -1046,49 +1049,6 @@ const cleanupDuplicatePhones = async (req, res) => {
   }
 };
 
-const populateAppInstalledFields = async (req, res) => {
-  try {
-    if (req.query.force === "true") {
-      const forceResult = await User.updateMany(
-        {},
-        { $set: { appIsInstalled: true, appUninstalledAt: null } }
-      );
-      return res.status(200).json({
-        success: true,
-        message: "Tous les utilisateurs ont été réinitialisés avec appIsInstalled = true et appUninstalledAt = null (force=true).",
-        data: {
-          modified: forceResult?.modifiedCount ?? forceResult?.nModified ?? 0,
-        },
-      });
-    }
-
-    const updateResult = await User.updateMany(
-      { $or: [{ appIsInstalled: { $exists: false } }, { appIsInstalled: null }] },
-      { $set: { appIsInstalled: true, appUninstalledAt: null } }
-    );
-
-    const totalUsers = await User.countDocuments({});
-    const installedCount = await User.countDocuments({ appIsInstalled: true });
-    const uninstalledCount = await User.countDocuments({ appIsInstalled: false });
-
-    return res.status(200).json({
-      success: true,
-      message: "Les champs appIsInstalled et appUninstalledAt ont été populés pour les utilisateurs où ils étaient absents.",
-      data: {
-        totalUsers,
-        installedCount,
-        uninstalledCount,
-        modified: updateResult?.modifiedCount ?? updateResult?.nModified ?? 0,
-      },
-    });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
-  }
-};
-
 module.exports = {
   createUser,
   updateUser,
@@ -1107,16 +1067,15 @@ module.exports = {
   updateUserExpoToken,
   dismissBirthdayDobPrompt,
   dismissFirstOrderDiscountPrompt,
-  updateUserDiscount,
   savePayementDetails,
   getUsersPagination,
   banUser,
-  nullifyDefaultBirthdates,
   seedReferralCodes,
   getDuplicatePhoneAccounts,
   normalizePhoneNumbers,
   cleanupDuplicatePhones,
   forceMergeAccounts,
-  populateAppInstalledFields,
   unsubscribeFromMail,
+  sendEmailVerificationOtp,
+  verifyEmailOtp,
 };

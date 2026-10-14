@@ -45,7 +45,9 @@ class OfferDistributionService {
     // 2. Trouver la dernière offre envoyée à cet utilisateur pour cette campagne/règle
     const lastOfferDoc = await PersonalizedOffer.findOne({
       user: userContext.user._id,
-      dynamicRule: rule._id
+      dynamicRule: rule._id,
+      // Offre annulée avant activation : le client ne l'a jamais reçue.
+      status: { $ne: "replaced" },
     }).sort({ createdAt: -1 });
 
     if (!lastOfferDoc) {
@@ -54,7 +56,7 @@ class OfferDistributionService {
     }
 
     // A-t-il converti la dernière offre ?
-    if (["used", "applied"].includes(lastOfferDoc.status)) {
+    if (["applied"].includes(lastOfferDoc.status)) {
       // Retour à la case départ
       return sortedOffers[0];
     }
@@ -92,7 +94,9 @@ class OfferDistributionService {
     // 2. Trouver la dernière offre envoyée
     const lastOfferDoc = await PersonalizedOffer.findOne({
       user: userContext.user._id,
-      dynamicRule: rule._id
+      dynamicRule: rule._id,
+      // Offre annulée avant activation : le client ne l'a jamais reçue.
+      status: { $ne: "replaced" },
     }).sort({ createdAt: -1 });
 
     if (!lastOfferDoc) {
@@ -105,7 +109,7 @@ class OfferDistributionService {
     );
 
     // S'il l'a utilisée, on donne le follow-up (N+1)
-    if (["used", "applied"].includes(lastOfferDoc.status)) {
+    if (["applied"].includes(lastOfferDoc.status)) {
       const nextIndex = lastConfigIndex + 1;
       // S'il est arrivé à la fin, on peut décider de recommencer ou de s'arrêter.
       // Par défaut, on recommence la boucle de follow-up.
@@ -131,7 +135,9 @@ class OfferDistributionService {
     // 1. Trouver la dernière offre envoyée pour ce scénario
     const lastOfferDoc = await PersonalizedOffer.findOne({
       user: userContext.user._id,
-      dynamicRule: rule._id
+      dynamicRule: rule._id,
+      // Offre annulée avant activation : le client ne l'a jamais reçue.
+      status: { $ne: "replaced" },
     }).sort({ createdAt: -1 });
 
     if (!lastOfferDoc) {
@@ -149,7 +155,7 @@ class OfferDistributionService {
     }
 
     // Vérifier l'état de la dernière offre
-    const isUsed = ["used", "applied"].includes(lastOfferDoc.status);
+    const isUsed = ["applied"].includes(lastOfferDoc.status);
     
     // Si l'offre est toujours valide (ni utilisée ni expirée), on renvoie null pour ne pas en recréer
     // En supposant qu'une offre "préparée", "active", "viewed" n'est pas encore finie
@@ -165,15 +171,49 @@ class OfferDistributionService {
 
     // L'offre a été utilisée ou le délai est dépassé (considérée comme ignorée)
     const nextStepId = isUsed ? lastConfig.nextStepOnAccept : lastConfig.nextStepOnIgnore;
+    const nextOffer = nextStepId ? rule.offers.find((o) => o.stepId === nextStepId) : null;
+    if (nextOffer) return nextOffer;
 
-    if (!nextStepId) {
-      // Le scénario s'arrête ici
-      return null;
-    }
+    // Scénario terminé : on n'arrive ici que si le client correspond ENCORE à la règle (la suite
+    // d'un scénario en cours est donnée sans réévaluation, voir getScenarioContinuation) → le
+    // scénario recommence depuis le début.
+    return rule.offers.find((o) => o.isRoot) || rule.offers[0];
+  }
 
-    // Trouver l'offre suivante via son stepId
-    const nextOffer = rule.offers.find((o) => o.stepId === nextStepId);
-    return nextOffer || null;
+  /**
+   * Scénario en cours : si la DERNIÈRE offre reçue par le client vient d'un scénario actif qui a
+   * une étape suivante, cette étape lui est donnée directement, SANS réévaluer les conditions de
+   * la règle ni le comparer aux autres règles. Le client va ainsi au bout de son scénario.
+   * Renvoie { rule, offer } ou null (pas de scénario en cours, ou scénario terminé).
+   */
+  static async getScenarioContinuation(userContext, activeRules = []) {
+    const userId = userContext?.user?._id;
+    if (!userId) return null;
+    const lastOffer = await PersonalizedOffer.findOne({
+      user: userId,
+      dynamicRule: { $ne: null },
+      isDeferredReward: { $ne: true },
+      status: { $ne: "replaced" },
+    })
+      .sort({ createdAt: -1 })
+      .select("dynamicRule offerConfigId status")
+      .lean();
+    if (!lastOffer) return null;
+
+    const rule = activeRules.find(
+      (r) => String(r._id) === String(lastOffer.dynamicRule) && r.distributionMethod === "scenario_journey",
+    );
+    if (!rule?.offers?.length) return null;
+    const lastConfig = rule.offers.find((o) => String(o._id) === String(lastOffer.offerConfigId));
+    if (!lastConfig) return null;
+
+    // Offre encore en cours (préparée, active…) : le scan ignore déjà ce client.
+    const isUsed = lastOffer.status === "applied";
+    if (!isUsed && !["expired", "ignored"].includes(lastOffer.status)) return null;
+
+    const nextStepId = isUsed ? lastConfig.nextStepOnAccept : lastConfig.nextStepOnIgnore;
+    const nextOffer = nextStepId ? rule.offers.find((o) => o.stepId === nextStepId) : null;
+    return nextOffer ? { rule, offer: nextOffer } : null;
   }
 
   /**
@@ -200,18 +240,19 @@ class OfferDistributionService {
     // et reste toujours null pour les offres V2, ce qui rendait cette requête toujours vide)
     const recentOffers = await PersonalizedOffer.find({
       user: userContext.user._id,
-      dynamicRule: rule._id
+      dynamicRule: rule._id,
+      status: { $ne: "replaced" },
     }).sort({ createdAt: -1 }).limit(3);
 
     if (recentOffers.length >= 2) {
       const last = recentOffers[0];
       const prev = recentOffers[1];
 
-      // Si les deux dernières offres étaient identiques et ignorées (status != used/applied)
+      // Si les deux dernières offres étaient identiques et non converties (status "ignored" ou "expired")
       if (
         String(last.offerConfigId) === String(prev.offerConfigId) &&
-        !["used", "applied"].includes(last.status) &&
-        !["used", "applied"].includes(prev.status)
+        !["applied"].includes(last.status) &&
+        !["applied"].includes(prev.status)
       ) {
         // Force une offre différente
         const alternativeOffers = rule.offers.filter((o) => String(o._id) !== String(last.offerConfigId));
@@ -243,53 +284,25 @@ class OfferDistributionService {
   }
 
   /**
-   * Multi-Armed Bandit (MAB)
-   * En temps réel, évalue quelle offre convertit le mieux.
-   * Ceci est une version simplifiée (Epsilon-Greedy).
+   * Multi-Armed Bandit (A/B Testing IA, Epsilon-Greedy).
+   * La version gagnante est désignée toutes les 2 semaines par BanditOptimizationService et
+   * enregistrée sur la règle : elle est donnée dans 85 % des cas, les 15 % restants testent
+   * une autre version. Tant qu'aucune gagnante n'est désignée (pas assez de données), toutes
+   * les versions sont données à parts égales.
    */
-  static async handleMultiArmedBandit(rule) {
-    // En production, ces stats devraient être mises en cache (ex: Redis ou dans le modèle Rule)
-    // Ici on simule une agrégation à la volée.
-    
-    // Epsilon détermine le taux d'exploration (ex: 15% de chance de tester au hasard)
+  static handleMultiArmedBandit(rule) {
     const EPSILON = 0.15;
-    
+    const pickRandom = (offers) => offers[Math.floor(Math.random() * offers.length)];
+
+    const winnerId = rule.banditEvaluation?.winnerOfferConfigId;
+    const winner = winnerId ? rule.offers.find((o) => String(o._id) === String(winnerId)) : null;
+    if (!winner) return pickRandom(rule.offers);
+
     if (Math.random() < EPSILON) {
-      // Exploration : choix aléatoire
-      return rule.offers[Math.floor(Math.random() * rule.offers.length)];
+      const others = rule.offers.filter((o) => o !== winner);
+      return others.length ? pickRandom(others) : winner;
     }
-
-    // Exploitation : trouver l'offre qui a le meilleur taux de conversion
-    let bestOffer = rule.offers[0];
-    let bestConversionRate = -1;
-
-    for (const offer of rule.offers) {
-      // Compter le nombre de fois que cette offre a été générée
-      // (dynamicRule, pas rule : voir handleFatigueControl ci-dessus pour la même correction)
-      const totalSent = await PersonalizedOffer.countDocuments({
-        dynamicRule: rule._id,
-        offerConfigId: offer._id
-      });
-
-      if (totalSent < 20) {
-        // Pas assez de données, on force l'exploration pour cette offre
-        return offer;
-      }
-
-      const totalUsed = await PersonalizedOffer.countDocuments({
-        dynamicRule: rule._id,
-        offerConfigId: offer._id,
-        status: { $in: ["used", "applied"] }
-      });
-
-      const rate = totalUsed / totalSent;
-      if (rate > bestConversionRate) {
-        bestConversionRate = rate;
-        bestOffer = offer;
-      }
-    }
-
-    return bestOffer;
+    return winner;
   }
 }
 

@@ -1,4 +1,5 @@
 const jsep = require("jsep");
+const { pickFavoriteCategoryId } = require("../../utils/favoriteCategory");
 
 /**
  * Moteur d'évaluation des règles dynamiques.
@@ -118,15 +119,24 @@ class RuleEvaluatorService {
       case "open_rate":
         return userContext.openRate || 0;
       
+      // PersonalizedOffer.status n'a jamais les valeurs "used"/"redeemed" (absentes de l'enum du
+      // schéma) : "applied" est le seul statut posé quand une offre a servi sur une commande
+      // (voir createOrderService.js). Les deux issues "non utilisée" sont "expired" (fenêtre de
+      // validité écoulée sans commande) et "ignored" (le client a commandé sans l'utiliser, R15).
       case "rewards_claimed":
       case "smart_offers_used":
-        return (userContext.userOffers || []).filter(o => o.status === "used" || o.status === "redeemed").length;
-        
+        return (userContext.userOffers || []).filter(o => o.status === "applied").length;
+
       case "smart_offers_conversion_rate": {
-        const offers = userContext.userOffers || [];
-        if (offers.length === 0) return 0;
-        const used = offers.filter(o => o.status === "used" || o.status === "redeemed").length;
-        return (used / offers.length) * 100;
+        // Ratio calculé sur les offres résolues (applied, expired, ignored) ; les offres encore
+        // en attente (prepared/active/viewed/clicked) ne comptent pas encore comme une conversion
+        // ratée et fausseraient le taux si on les incluait au dénominateur.
+        const resolvedOffers = (userContext.userOffers || []).filter((o) =>
+          ["applied", "expired", "ignored"].includes(o.status)
+        );
+        if (resolvedOffers.length === 0) return 0;
+        const used = resolvedOffers.filter((o) => o.status === "applied").length;
+        return (used / resolvedOffers.length) * 100;
       }
 
       case "favorite_category":
@@ -166,8 +176,9 @@ class RuleEvaluatorService {
     return sorted.length > 0 ? sorted[0][0] : null;
   }
 
+  // Vraie catégorie la plus commandée, PROMOS comprise : une règle peut viser les clients dont
+  // c'est la favorite. Seul le ciblage d'une offre « catégorie favorite » l'ignore (ProfilingService).
   static computeFavoriteCategory(orders) {
-    // Une implémentation simple pour trouver la catégorie la plus commandée
     const catCounts = {};
     for (const order of orders) {
       for (const item of (order.orderItems || [])) {
@@ -178,8 +189,7 @@ class RuleEvaluatorService {
         }
       }
     }
-    const sorted = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
-    return sorted.length > 0 ? sorted[0][0] : null;
+    return pickFavoriteCategoryId(catCounts);
   }
 
   static getPartsInTimezone(date, timezone = "America/Toronto") {

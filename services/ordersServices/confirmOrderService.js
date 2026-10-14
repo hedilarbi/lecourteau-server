@@ -3,6 +3,9 @@ const Order = require("../../models/Order");
 const PromoCode = require("../../models/PromoCode");
 const PersonalizedOffer = require("../../models/PersonalizedOffer");
 const PersonalizedOfferEvent = require("../../models/PersonalizedOfferEvent");
+const { sendSplitStepConfirmedNotification } = require("../smartOffersV2/SplitDiscountNotificationService");
+const { createDeferredCashbackReward } = require("../smartOffersV2/DeferredCashbackService");
+const { evaluateUserSmartOffers } = require("../smartOffersV2/PostOrderTriggerService");
 const { default: mongoose } = require("mongoose");
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_PRIVATE_KEY, {
@@ -474,6 +477,10 @@ async function finalizeLoyaltyAndPromo(order) {
     const confirmedOffer = await PersonalizedOffer.findById(order.personalizedOffer).select("offerType currentStep discountSteps");
     if (confirmedOffer?.offerType !== "split_discount") {
       await PersonalizedOffer.findByIdAndUpdate(order.personalizedOffer, { status: "applied" });
+    } else {
+      sendSplitStepConfirmedNotification(order.personalizedOffer).catch((error) =>
+        console.error("[confirmOrder] Notification rabais divisé:", error.message),
+      );
     }
     await new PersonalizedOfferEvent({
       personalizedOffer: order.personalizedOffer,
@@ -482,20 +489,38 @@ async function finalizeLoyaltyAndPromo(order) {
     }).save();
   }
 
-  // Cancel any other obsolete active/prepared offers for this user (R15)
+  // R15 : offre DÉJÀ ENVOYÉE (active, vue, cliquée) non utilisée par cette commande → « ignorée ».
+  // Une offre encore en attente d'activation n'a jamais été vue : elle n'est pas ignorée, le
+  // post-commande la réévalue (gardée, remplacée ou annulée selon les nouvelles données).
   await PersonalizedOffer.updateMany(
     {
       user: user._id,
-      status: { $in: ["prepared", "active", "viewed", "clicked"] },
+      status: { $in: ["active", "viewed", "clicked"] },
       _id: { $ne: order.personalizedOffer }
     },
-    { $set: { status: "expired" } }
+    { $set: { status: "ignored" } }
   );
+
+  if (order.personalizedOffer && order.personalizedOfferApplied) {
+    try {
+      await createDeferredCashbackReward(order.personalizedOffer);
+    } catch (error) {
+      console.error("[confirmOrder] Récompense cashback différé:", error.message);
+    }
+  }
 
   await user.save();
   await applyConfirmedOrderSubscriptionBenefits(order);
   await applyConfirmedOrderBirthdayBenefits(order);
   await handleReferralReward(user);
+
+  // Post-commande Smart Offers : cooldown + ré-évaluation du client. Lancé après la mise à
+  // jour des offres et des points (critères des règles), sans retarder la confirmation.
+  setImmediate(() => {
+    evaluateUserSmartOffers(order).catch((error) =>
+      console.error("[confirmOrder] Post-commande Smart Offers:", error.message),
+    );
+  });
 }
 
 async function handleReferralReward(user) {

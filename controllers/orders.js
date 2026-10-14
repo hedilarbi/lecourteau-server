@@ -143,7 +143,8 @@ const createOrder = async (req, res) => {
         `Error creating order service: userId ${order.order.user_id}, error: ${error}`,
       );
 
-      return res.status(400).json({ success: false, message: error });
+      const statusCode = String(error).toLowerCase().includes("désactivé") ? 403 : 400;
+      return res.status(statusCode).json({ success: false, message: error });
     }
 
     res.status(201).json({ success: true, orderId: response._id });
@@ -167,7 +168,8 @@ const createZeroTotalSubscriptionOrder = async (req, res) => {
       logWithTimestamp(
         `Error creating zero-total subscription order: userId ${order?.order?.user_id || "-"}, error: ${error}`,
       );
-      return res.status(400).json({ success: false, message: error });
+      const statusCode = String(error).toLowerCase().includes("désactivé") ? 403 : 400;
+      return res.status(statusCode).json({ success: false, message: error });
     }
 
     return res.status(201).json({ success: true, orderId: response._id });
@@ -189,7 +191,8 @@ const createZeroTotalReferralOrder = async (req, res) => {
       logWithTimestamp(
         `Error creating zero-total referral order: userId ${order?.order?.user_id || "-"}, error: ${error}`,
       );
-      return res.status(400).json({ success: false, message: error });
+      const statusCode = String(error).toLowerCase().includes("désactivé") ? 403 : 400;
+      return res.status(statusCode).json({ success: false, message: error });
     }
 
     return res.status(201).json({ success: true, orderId: response._id });
@@ -211,7 +214,8 @@ const createZeroTotalPromoOrder = async (req, res) => {
       logWithTimestamp(
         `Error creating zero-total promo order: userId ${order?.order?.user_id || "-"}, error: ${error}`,
       );
-      return res.status(400).json({ success: false, message: error });
+      const statusCode = String(error).toLowerCase().includes("désactivé") ? 403 : 400;
+      return res.status(statusCode).json({ success: false, message: error });
     }
 
     return res.status(201).json({ success: true, orderId: response._id });

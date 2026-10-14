@@ -55,6 +55,16 @@ const updateUserService = async (
       email: normalizedEmail || email,
     };
 
+    // Un courriel modifié depuis le profil doit être vérifié à nouveau.
+    if (email !== undefined) {
+      const currentUser = await User.findById(id).select("email").lean();
+      const currentEmail = String(currentUser?.email || "").trim().toLowerCase();
+      if (normalizedEmail !== currentEmail) {
+        updateData.emailVerified = false;
+        updateData.emailVerifiedAt = null;
+      }
+    }
+
     if (hasDateOfBirthField) {
       updateData.date_of_birth = normalizeDateOfBirth(date_of_birth);
     }

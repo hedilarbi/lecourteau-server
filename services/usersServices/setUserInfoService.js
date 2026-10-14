@@ -70,6 +70,12 @@ const setUserInfoService = async (
       },
     };
 
+    // Un courriel modifié doit être vérifié à nouveau.
+    if (normalizedEmail !== String(user.email || "").trim().toLowerCase()) {
+      updateQuery.$set.emailVerified = false;
+      updateQuery.$set.emailVerifiedAt = null;
+    }
+
     if (hasAddress) {
       updateQuery.$push = {
         addresses: {

@@ -1,8 +1,9 @@
 const jwt = require("jsonwebtoken");
 const Staff = require("../../models/staff");
+const getStaffSecretKey = require("../../utils/staffSecretKey");
 const getStaffByTokenService = async (token) => {
   try {
-    const decodedData = jwt.verify(token, process.env.SECRET_KEY);
+    const decodedData = jwt.verify(token, getStaffSecretKey());
     const rawStaffId =
       decodedData?.id ||
       decodedData?._id ||

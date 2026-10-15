@@ -34,6 +34,7 @@ const {
 const saltRounds = 10;
 const bcrypt = require("bcrypt");
 const Audit = require("../models/Audit");
+const Staff = require("../models/staff");
 const createStaff = async (req, res) => {
   let firebaseUrl = null;
   if (req.file) {
@@ -204,7 +205,10 @@ const getDriverOrders = async (req, res) => {
 
 const updatePassword = async (req, res) => {
   const { id } = req.params;
-  const { password } = req.body;
+  const password = String(req.body?.password || "").trim();
+  if (!password) {
+    return res.status(400).json({ message: "Mot de passe manquant" });
+  }
 
   try {
     const hashedPasword = await bcrypt.hash(password, saltRounds);
@@ -216,7 +220,7 @@ const updatePassword = async (req, res) => {
     await staff.save();
     res.status(200).json({ message: "Password updated successfully" });
   } catch (error) {
-    res.json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 

@@ -38,7 +38,7 @@ const homeRoutes = require("./routes/home");
 const subscriptionsRoutes = require("./routes/subscriptions");
 const recipesRoutes = require("./routes/recipes");
 const smartClientRoutes = require("./modules/smart-client/smartClient.routes");
-const openingMatchMailRoutes = require("./routes/openingMatchMail");
+const mailCampaignRoutes = require("./routes/mailCampaign");
 const { startScheduledOrdersJob } = require("./jobs/scheduledOrders.job");
 const {
   startBirthdayNotificationsJob,
@@ -106,7 +106,7 @@ app.use("/api/home", homeRoutes);
 app.use("/api/subscriptions", subscriptionsRoutes);
 app.use("/api/recipes", recipesRoutes);
 app.use("/api/smart-client", smartClientRoutes);
-app.use("/api/opening-match-mail", openingMatchMailRoutes);
+app.use("/api/mail-campaign", mailCampaignRoutes);
 
 mongoose.connect(
   process.env.DEV_DB_CONNECTION,

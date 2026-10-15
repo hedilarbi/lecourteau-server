@@ -37,7 +37,12 @@ class RuleEvaluatorService {
    * Évalue une condition spécifique en fonction du contexte utilisateur.
    */
   static evaluateCondition(userContext, condition) {
-    const { criteria, operator, value, periodDays } = condition;
+    const { criteria, operator, periodDays } = condition;
+    // L'admin enregistre les valeurs en texte : « 1,25 » (virgule française) doit valoir 1.25,
+    // sinon la comparaison avec un nombre est toujours fausse.
+    const value = typeof condition.value === "string" && /^\s*-?\d+(?:[.,]\d+)?\s*$/.test(condition.value)
+      ? Number(condition.value.trim().replace(",", "."))
+      : condition.value;
     
     // Obtenir la valeur réelle de l'utilisateur pour ce critère
     const userValue = this.extractCriteriaValue(userContext, criteria, periodDays);

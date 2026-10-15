@@ -8,6 +8,7 @@ const {
 const updateStatusService = require("../services/ordersServices/updateStatusService");
 const Restaurant = require("../models/Restaurant");
 const Order = require("../models/Order");
+const { computeUberCourierTip, getOrderAmountForCourierTip } = require("../utils/uberCourierTip");
 const {
   getAddressFromCoords,
 } = require("../services/uberDirectServices/geocodeService");
@@ -99,7 +100,7 @@ const getUberDirectAccessToken = async (req, res) => {
 
 const getRestaurantCustomerId = async (restaurantId) => {
   const restaurant = await Restaurant.findById(restaurantId).select(
-    "uberCustomerId name phone_number address location",
+    "uberCustomerId name phone_number address location settings.uber_courier_tip",
   );
 
   if (!restaurant) {
@@ -1528,6 +1529,13 @@ const createUberDirectDeliveryForOrder = async ({
       });
     }
 
+    // Pourboire du livreur, selon la configuration du restaurant (utils/uberCourierTip.js).
+    // Uber l'attend en cents et l'ajoute à ses frais.
+    const courierTip = computeUberCourierTip(
+      order.tip,
+      restaurant.settings?.uber_courier_tip?.toObject?.() || restaurant.settings?.uber_courier_tip,
+      getOrderAmountForCourierTip(order),
+    );
     const basePayload = compactObject({
       pickup_name: restaurant.name || "Pickup",
       pickup_address,
@@ -1542,15 +1550,39 @@ const createUberDirectDeliveryForOrder = async ({
       ...buildCoordinateFields("pickup", restaurant.location),
       ...buildCoordinateFields("dropoff", order.coords),
       dropoff_notes: order.instructions,
+      tip: courierTip > 0 ? Math.round(courierTip * 100) : undefined,
     });
 
     const body = stringifyAddressFields(basePayload);
 
-    const result = await uberDirectRequest({
+    let result = await uberDirectRequest({
       method: "POST",
       path: `/customers/${customerId}/deliveries`,
       body,
     });
+    let sentCourierTip = courierTip;
+
+    // Pourboire refusé par Uber (plafond dépassé…) : la livraison passe quand même, sans pourboire.
+    const tipRefused =
+      result.error &&
+      courierTip > 0 &&
+      /tip/i.test(JSON.stringify([result.error, result.details] || ""));
+    if (tipRefused) {
+      logUberDirectAutoDeliveryError("Uber tip refused, retrying without tip", {
+        orderId,
+        restaurantId,
+        courierTip,
+        error: result.error || null,
+        details: result.details || null,
+      });
+      const { tip: refusedTip, ...bodyWithoutTip } = body;
+      result = await uberDirectRequest({
+        method: "POST",
+        path: `/customers/${customerId}/deliveries`,
+        body: bodyWithoutTip,
+      });
+      sentCourierTip = 0;
+    }
 
     if (!result.error) {
       const responsePayload =
@@ -1562,6 +1594,22 @@ const createUberDirectDeliveryForOrder = async ({
       order.delivery_provider = "uber_direct";
       if (deliveryId) {
         order.uber_delivery_id = deliveryId;
+      }
+      // Pourboire confirmé par Uber dans sa réponse (en cents) : c'est la preuve qu'il a été accepté.
+      const confirmedTipCents = Number(responsePayload?.tip);
+      order.uber_courier_tip = Number.isFinite(confirmedTipCents)
+        ? confirmedTipCents / 100
+        : sentCourierTip;
+      if (
+        Number.isFinite(confirmedTipCents) &&
+        confirmedTipCents !== Math.round(sentCourierTip * 100)
+      ) {
+        logUberDirectAutoDeliveryError("Uber courier tip differs from the requested tip", {
+          orderId,
+          restaurantId,
+          requestedTipCents: Math.round(sentCourierTip * 100),
+          confirmedTipCents,
+        });
       }
       order.uber_status = extractUberStatusFromPayload(responsePayload) || null;
       order.uber_courier_imminent =

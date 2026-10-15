@@ -216,10 +216,11 @@ const logEvent = async (req, res) => {
     } else if (eventType === "clicked" && (offer.status === "active" || offer.status === "viewed")) {
       offer.status = "clicked";
       await offer.save();
-    } else if (eventType === "ignored" && ["active", "viewed", "clicked"].includes(offer.status)) {
-      offer.status = "ignored";
-      await offer.save();
     }
+    // « ignored » envoyé par l'app (offre désactivée, cadeau retiré, paiement lancé sans l'offre…)
+    // est seulement journalisé : le statut « ignorée » n'est posé qu'à la confirmation d'une
+    // commande (R15, confirmOrderService). Sinon l'offre — ou une récompense de cashback déjà
+    // gagnée — serait perdue avant même la commande, et une commande qui la réactive refusée.
 
     // Log event
     const event = new PersonalizedOfferEvent({

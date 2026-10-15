@@ -1,3 +1,4 @@
+const { normalizeUberCourierTipConfig } = require("../utils/uberCourierTip");
 const e = require("cors");
 const Restaurant = require("../models/Restaurant");
 const App = require("../models/App");
@@ -680,7 +681,22 @@ const updateRestaurantSettings = async (req, res) => {
       auditData.action.push(string);
     }
 
-    restaurant.settings = settings;
+    // Pourboire du livreur Uber : une version d'app qui ne l'envoie pas ne doit pas l'effacer.
+    const previousCourierTip = normalizeUberCourierTipConfig(
+      restaurant.settings?.uber_courier_tip?.toObject?.() || restaurant.settings?.uber_courier_tip,
+    );
+    const nextCourierTip =
+      settings.uber_courier_tip === undefined
+        ? previousCourierTip
+        : normalizeUberCourierTipConfig(settings.uber_courier_tip);
+    if (JSON.stringify(nextCourierTip) !== JSON.stringify(previousCourierTip)) {
+      const { mode, value } = nextCourierTip.with_customer_tip;
+      auditData.action.push(
+        `modification pourboire livreur Uber : ${mode === "percent" ? `${value} % du pourboire client` : `${value} $`} (pourboire client ≥ 1 $), ${nextCourierTip.without_customer_tip_amount} $ (pourboire client < 1 $), seuil commande ${nextCourierTip.min_order_amount} $`,
+      );
+    }
+
+    restaurant.settings = { ...settings, uber_courier_tip: nextCourierTip };
     await restaurant.save();
 
     res.status(200).json({

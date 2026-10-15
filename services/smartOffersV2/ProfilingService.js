@@ -16,6 +16,7 @@ const RuleEvaluatorService = require("./RuleEvaluatorService");
 const OfferDistributionService = require("./OfferDistributionService");
 const { computeAssignmentCooldownEnd, resolveCooldownDays } = require("./OfferCooldownService");
 const { getExcludedFavoriteCategoryIds, pickFavoriteCategoryId } = require("../../utils/favoriteCategory");
+const { getOfferTextValues, personalizeOfferText } = require("../../utils/offerNotificationText");
 
 const DEFAULT_TIMEZONE = "America/Toronto";
 const CANCELED_ORDER_STATUSES = [CANCELED, "cancelled", "canceled"];
@@ -24,22 +25,6 @@ const PREPARE_BATCH_SIZE   = 100;
 const PREPARE_BATCH_DELAY  = 200;
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
-
-const personalizeText = (text, user, offerDetails = {}) => {
-  if (!text) return "";
-  const name = user.name ? user.name.trim() : "cher client";
-  let result = text.replace(/{{name}}/g, name).replace(/{name}/g, name);
-
-  if (offerDetails.categoryName) result = result.replace(/{category}/g, offerDetails.categoryName);
-  if (offerDetails.itemName) result = result.replace(/{item}/g, offerDetails.itemName);
-  if (offerDetails.discount) result = result.replace(/{discount}/g, offerDetails.discount);
-  if (offerDetails.points) result = result.replace(/{points}/g, String(offerDetails.points));
-  if (offerDetails.threshold !== undefined && offerDetails.threshold !== null && offerDetails.threshold !== "") {
-    result = result.replace(/{threshold}/g, String(offerDetails.threshold));
-  }
-  result = result.replace(/{threshold}/g, "30");
-  return result;
-};
 
 const getPartsInTimezone = (date, timezone = DEFAULT_TIMEZONE) => {
   try {
@@ -302,6 +287,8 @@ const prepareDailyOffersJob = async (
     // (voir utils/favoriteCategory.js). Le critère de règle « catégorie favorite », lui, la garde.
     const excludedFavoriteCategoryIds = getExcludedFavoriteCategoryIds(allCategories);
     const allMenuItems = await MenuItem.find().lean();
+    // Noms des articles pour la variable {item} des notifications.
+    const menuItemNamesById = new Map(allMenuItems.map((item) => [String(item._id), item.name]));
     const availableMenuItems = allMenuItems.filter((item) => item.is_available);
 
     const cachedDessertItem = await findItemFromCategoryKeyword("dessert", allCategories, availableMenuItems);
@@ -773,15 +760,12 @@ const prepareDailyOffersJob = async (
           }
 
           const selectedCategory = selected.targetCategory ? allCategories.find((category) => String(category._id) === String(selected.targetCategory)) : null;
-          const offerDetails = {
+          const textValues = getOfferTextValues(selected, {
             categoryName: selected.categoryName || selectedCategory?.name || "",
-            itemName: selected.itemName || "",
-            discount: selected.discountValue ? (selected.offerType === "bonus_basket" ? `${selected.discountValue}$` : `${selected.discountValue}%`) : "",
-            points: selected.bonusPoints || "",
-            threshold: selected.bonusThreshold || "",
-          };
-          const finalTitle = personalizeText(selected.notificationTitle, user, offerDetails);
-          const finalBody = personalizeText(selected.notificationBody, user, offerDetails);
+            menuItemsById: menuItemNamesById,
+          });
+          const finalTitle = personalizeOfferText(selected.notificationTitle, user, textValues);
+          const finalBody = personalizeOfferText(selected.notificationBody, user, textValues);
           const selectedFreeItems = selected.freeItems || [];
 
           // Cooldown à l'attribution : date d'expiration de l'offre (23:59 Toronto) + cooldown de l'offre.

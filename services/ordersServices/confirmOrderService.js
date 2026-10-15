@@ -492,10 +492,13 @@ async function finalizeLoyaltyAndPromo(order) {
   // R15 : offre DÉJÀ ENVOYÉE (active, vue, cliquée) non utilisée par cette commande → « ignorée ».
   // Une offre encore en attente d'activation n'a jamais été vue : elle n'est pas ignorée, le
   // post-commande la réévalue (gardée, remplacée ou annulée selon les nouvelles données).
+  // Jamais une récompense de cashback : elle est déjà gagnée et reste valable jusqu'à sa date de
+  // fin, même si le client commande entre-temps sans l'utiliser (code promo, panier non remisable…).
   await PersonalizedOffer.updateMany(
     {
       user: user._id,
       status: { $in: ["active", "viewed", "clicked"] },
+      isDeferredReward: { $ne: true },
       _id: { $ne: order.personalizedOffer }
     },
     { $set: { status: "ignored" } }

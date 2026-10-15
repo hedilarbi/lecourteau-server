@@ -128,6 +128,12 @@ const orderSchema = new Schema({
     index: true,
   },
   uber_status: String,
+  // Pourboire envoyé au livreur Uber Direct à la création de la livraison, en dollars
+  // (configuré par restaurant ; voir utils/uberCourierTip.js). Uber l'ajoute à ses frais.
+  uber_courier_tip: {
+    type: Number,
+    default: null,
+  },
   uber_courier_imminent: Boolean,
   uber_tracking_url: String,
   uber_pickup_eta: Date,

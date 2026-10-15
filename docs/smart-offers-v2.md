@@ -259,6 +259,7 @@ Si rien n'est remisable, l'offre ne donne rien, et l'app comme le site l'indique
     - `next_weekend` : samedi 10h, ou tout de suite si on est déjà le week-end.
   - **Validité :** `deferredValidityDays` jours (7 par défaut) à partir de l'activation, jusqu'à 23h59 du dernier jour. Exemple : activation mardi 10h + 2 jours = jusqu'au jeudi 23h59.
   - **Notifications :** une confirmation tout de suite si l'activation est différée (« utilisable du … au … »), puis une notification le jour de l'activation (« Grâce à votre commande du … »).
+- **La promesse est tenue :** la récompense reste valable jusqu'à sa date de fin, même si le client commande entre-temps sans l'utiliser (code promo, panier sans article remisable, offre désactivée au checkout). Elle ne s'arrête que si elle est utilisée ou expire.
 - **Commande annulée :** la récompense en attente est supprimée, et l'offre de départ redevient active si elle est encore valide.
 
 **`free_item`** :
@@ -331,7 +332,7 @@ prepared ──(heure de notification)──▶ active ──▶ viewed ──�
 | **Activation** (job chaque minute) | L'offre passe en `active`, avec `validFrom` = maintenant et `validUntil` = maintenant + validité (23h59). **Envoi : push** si le client a un jeton valide et l'app installée, **sinon courriel** s'il en a un et ne s'est pas désabonné. |
 | **Rappel** (job toutes les 5 min) | Un push unique aux **2/3 de la validité**, si l'offre n'est ni utilisée ni expirée. Sans push possible, pas de rappel. |
 | **Vue / cliquée** | Événements envoyés par l'app et le site |
-| **Ignorée** | À la **confirmation d'une commande** qui n'utilise pas une offre déjà envoyée (active, vue ou cliquée). Le scan suivant fait la même vérification, en filet de sécurité. Une offre encore en attente n'est jamais ignorée. |
+| **Ignorée** | Uniquement à la **confirmation d'une commande** qui n'utilise pas une offre déjà envoyée (active, vue ou cliquée). Le scan suivant fait la même vérification, en filet de sécurité. Ne sont jamais ignorées : une offre encore en attente, et une **récompense de cashback**. L'événement « ignorée » envoyé par l'app (offre désactivée, cadeau retiré…) est seulement enregistré, il ne change pas le statut. |
 | **Expirée** | Au-delà de `validUntil` |
 | **Reçus push** (job horaire) | Un appareil désinscrit marque l'app comme désinstallée. Les envois suivants passent par courriel. |
 

@@ -110,6 +110,18 @@ const restaurantSchema = new Schema({
     open: Boolean,
     delivery_fee: Number,
     delivery_range: Number,
+    // Pourboire du livreur Uber Direct (voir utils/uberCourierTip.js).
+    uber_courier_tip: {
+      // Pourboire du client de 1 $ ou plus : montant fixe ou % du pourboire du client.
+      with_customer_tip: {
+        mode: { type: String, enum: ["fixed", "percent"], default: "fixed" },
+        value: { type: Number, default: 0 },
+      },
+      // Pourboire du client sous 1 $ : montant fixe.
+      without_customer_tip_amount: { type: Number, default: 0 },
+      // Commande sous ce montant (sous-total après rabais) : aucun pourboire. 0 = pas de seuil.
+      min_order_amount: { type: Number, default: 0 },
+    },
   },
 });
 

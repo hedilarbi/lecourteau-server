@@ -81,7 +81,7 @@ const sendMailCampaign = async ({ mail, subject }, onProgress = () => {}) => {
           subject: mailSubject,
           html: buildHtml(kit.html, user.email),
           text: buildText(kit.html, user.email),
-          list: { unsubscribe: [unsubscribeUrl(user.email), `mailto:${MAIL_REPLY_TO}?subject=desabonnement`] },
+          headers: { "List-Unsubscribe": `<${unsubscribeUrl(user.email)}>, <mailto:${MAIL_REPLY_TO}?subject=desabonnement>` },
         });
         if (mail) acceptedMessages.push({ email: user.email, messageId: info.messageId, response: info.response });
         sent++;

@@ -54,7 +54,14 @@ const getTorontoWallClockUtc = (date, hour) => {
   return new Date(wallClockUtc.getTime() - offsetMinutes * 60000);
 };
 
-const getScheduledNotifyAt = (now, notifyHour) => {
+// Midi (Toronto) du lendemain : +24 h depuis midi tombe toujours sur le jour calendaire suivant,
+// même un jour de changement d'heure.
+const getTorontoTomorrow = (now) => new Date(getTorontoWallClockUtc(now, 12).getTime() + 86400000);
+
+// notBeforeTomorrow (profilage après commande) : jamais le jour même, sinon le client recevrait
+// la notification quelques secondes après avoir payé et croirait avoir raté l'offre.
+const getScheduledNotifyAt = (now, notifyHour, { notBeforeTomorrow = false } = {}) => {
+  if (notBeforeTomorrow) return getTorontoWallClockUtc(getTorontoTomorrow(now), notifyHour);
   const scheduled = getTorontoWallClockUtc(now, notifyHour);
   return scheduled <= now ? new Date(now) : scheduled;
 };
@@ -263,7 +270,7 @@ const initializeBasketStrategyRules = () => ensureSmartOfferRules({ strategyIds:
 // une autre règle le prend, annulée si plus aucune règle (statut "replaced", jamais activée).
 const prepareDailyOffersJob = async (
   isManualTrigger = false,
-  { userIds: targetUserIds = null, reconsiderPrepared = false } = {},
+  { userIds: targetUserIds = null, reconsiderPrepared = false, notifyNotBeforeTomorrow = false } = {},
 ) => {
   const isTargetedScan = Array.isArray(targetUserIds) && targetUserIds.length > 0;
   // Scan post-commande (un client) : aucun log de déroulement, il tourne à chaque commande.
@@ -739,7 +746,7 @@ const prepareDailyOffersJob = async (
             notifyHour = Number(selected.notifyAtHour);
           }
           
-          let scheduledNotifyAt = getScheduledNotifyAt(now, notifyHour);
+          let scheduledNotifyAt = getScheduledNotifyAt(now, notifyHour, { notBeforeTomorrow: notifyNotBeforeTomorrow });
           let validFrom = null;
 
           if (selected.notifyOnDays && selected.notifyOnDays.length > 0) {
@@ -748,7 +755,7 @@ const prepareDailyOffersJob = async (
 
             for (const d of selected.notifyOnDays) {
               let diff = (d - today + 7) % 7;
-              if (diff === 0 && currentHour >= notifyHour) {
+              if (diff === 0 && (currentHour >= notifyHour || notifyNotBeforeTomorrow)) {
                 diff = 7;
               }
               if (diff < daysToAdd) daysToAdd = diff;

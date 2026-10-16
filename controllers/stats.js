@@ -4,6 +4,7 @@ const { Expo } = require("expo-server-sdk");
 const {
   resolveDateRange,
   buildOrdersAnalytics,
+  getZonedDayBoundary,
   toObjectId,
   DEFAULT_TIMEZONE,
 } = require("../services/statsServices/analyticsHelpers");
@@ -15,15 +16,11 @@ const getInititalStats = async (req, res) => {
     let startDate;
     let endDate;
     if (date) {
-      startDate = new Date(date);
-      startDate.setUTCHours(0, 0, 0, 0);
-      endDate = new Date(date);
-      endDate.setUTCHours(23, 59, 59, 999);
+      startDate = getZonedDayBoundary(date, "start");
+      endDate = getZonedDayBoundary(date, "end");
     } else if (from && to) {
-      startDate = new Date(from);
-      startDate.setUTCHours(0, 0, 0, 0);
-      endDate = new Date(to);
-      endDate.setUTCHours(23, 59, 59, 999);
+      startDate = getZonedDayBoundary(from, "start");
+      endDate = getZonedDayBoundary(to, "end");
     }
 
     if (restaurantId) {

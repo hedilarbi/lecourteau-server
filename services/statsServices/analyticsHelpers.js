@@ -54,23 +54,73 @@ const toNumberOrZeroExpr = (fieldPath) => ({
   $ifNull: [toNumberOrNullExpr(fieldPath), 0],
 });
 
-const startOfUtcDay = (date) => {
-  const result = new Date(date);
-  result.setUTCHours(0, 0, 0, 0);
-  return result;
+const DAY_KEY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+// Decalage (ms) entre l'heure locale du fuseau et UTC a un instant donne
+// (ex: -4h en ete / -5h en hiver pour America/Toronto, gere l'heure avancee).
+const getTimezoneOffsetMs = (date, timezone = DEFAULT_TIMEZONE) => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone || DEFAULT_TIMEZONE,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return asUtc - (date.getTime() - date.getMilliseconds());
 };
 
-const endOfUtcDay = (date) => {
-  const result = new Date(date);
-  result.setUTCHours(23, 59, 59, 999);
-  return result;
+// Instant UTC correspondant a 00:00 (heure du fuseau) du jour "YYYY-MM-DD".
+const startOfZonedDay = (dayKey, timezone = DEFAULT_TIMEZONE) => {
+  const [, year, month, day] = dayKey.match(DAY_KEY_REGEX);
+  const localMidnightAsUtc = Date.UTC(Number(year), Number(month) - 1, Number(day));
+  let result = localMidnightAsUtc - getTimezoneOffsetMs(new Date(localMidnightAsUtc), timezone);
+  // Recalcul avec le decalage a l'instant trouve (changement d'heure)
+  result = localMidnightAsUtc - getTimezoneOffsetMs(new Date(result), timezone);
+  return new Date(result);
 };
 
-const parseDateInput = (value) => {
+const addDaysToDayKey = (dayKey, days) => {
+  const [, year, month, day] = dayKey.match(DAY_KEY_REGEX);
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day) + days));
+  return formatIsoDay(date);
+};
+
+// Fin de journee (23:59:59.999 heure du fuseau) du jour "YYYY-MM-DD".
+const endOfZonedDay = (dayKey, timezone = DEFAULT_TIMEZONE) =>
+  new Date(startOfZonedDay(addDaysToDayKey(dayKey, 1), timezone).getTime() - 1);
+
+// Convertit une entree en jour calendaire "YYYY-MM-DD" du fuseau.
+// "2026-10-16" est pris tel quel (jour de Quebec), un instant ISO est converti.
+const parseDayKeyInput = (value, timezone = DEFAULT_TIMEZONE) => {
   if (!value) return null;
-  const parsed = new Date(value);
+  const raw = String(value).trim();
+  if (DAY_KEY_REGEX.test(raw)) return raw;
+  const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
+  return formatIsoDayInTimezone(parsed, timezone);
+};
+
+// Borne d'un jour de Quebec en instant UTC: "start" = 00:00, "end" = 23:59:59.999.
+const getZonedDayBoundary = (value, mode = "start", timezone = DEFAULT_TIMEZONE) => {
+  const dayKey = parseDayKeyInput(value, timezone);
+  if (!dayKey) return null;
+  return mode === "end"
+    ? endOfZonedDay(dayKey, timezone)
+    : startOfZonedDay(dayKey, timezone);
 };
 
 const formatIsoDay = (date) => {
@@ -153,13 +203,25 @@ const getOrderTypeExpressions = () => {
   };
 };
 
-const resolveDateRange = (query = {}, defaultPreset = "day") => {
+const resolveDateRange = (
+  query = {},
+  defaultPreset = "day",
+  timezone = DEFAULT_TIMEZONE,
+) => {
   const preset = String(query?.preset || defaultPreset || "day")
     .trim()
     .toLowerCase();
-  const pivotDate = parseDateInput(query?.date) || new Date();
-  const fromInput = parseDateInput(query?.from);
-  const toInput = parseDateInput(query?.to);
+  const pivotDay =
+    parseDayKeyInput(query?.date, timezone) ||
+    formatIsoDayInTimezone(new Date(), timezone);
+  const fromDay = parseDayKeyInput(query?.from, timezone);
+  const toDay = parseDayKeyInput(query?.to, timezone);
+
+  const buildRange = (resolvedPreset, firstDay, lastDay) => ({
+    preset: resolvedPreset,
+    startDate: startOfZonedDay(firstDay, timezone),
+    endDate: endOfZonedDay(lastDay, timezone),
+  });
 
   if (preset === "all") {
     return {
@@ -170,56 +232,23 @@ const resolveDateRange = (query = {}, defaultPreset = "day") => {
   }
 
   if (preset === "custom") {
-    const fromDate = fromInput ? startOfUtcDay(fromInput) : null;
-    const toDate = toInput ? endOfUtcDay(toInput) : null;
-    if (!fromDate || !toDate) {
-      return {
-        preset: "day",
-        startDate: startOfUtcDay(pivotDate),
-        endDate: endOfUtcDay(pivotDate),
-      };
+    if (!fromDay || !toDay) {
+      return buildRange("day", pivotDay, pivotDay);
     }
-
-    if (fromDate.getTime() <= toDate.getTime()) {
-      return {
-        preset,
-        startDate: fromDate,
-        endDate: toDate,
-      };
-    }
-
-    return {
-      preset,
-      startDate: startOfUtcDay(toInput),
-      endDate: endOfUtcDay(fromInput),
-    };
+    return fromDay <= toDay
+      ? buildRange(preset, fromDay, toDay)
+      : buildRange(preset, toDay, fromDay);
   }
 
   if (preset === "week") {
-    const endDate = endOfUtcDay(pivotDate);
-    const startDate = startOfUtcDay(new Date(endDate.getTime() - 6 * DAY_MS));
-    return {
-      preset,
-      startDate,
-      endDate,
-    };
+    return buildRange(preset, addDaysToDayKey(pivotDay, -6), pivotDay);
   }
 
   if (preset === "month") {
-    const endDate = endOfUtcDay(pivotDate);
-    const startDate = startOfUtcDay(new Date(endDate.getTime() - 29 * DAY_MS));
-    return {
-      preset,
-      startDate,
-      endDate,
-    };
+    return buildRange(preset, addDaysToDayKey(pivotDay, -29), pivotDay);
   }
 
-  return {
-    preset: "day",
-    startDate: startOfUtcDay(pivotDate),
-    endDate: endOfUtcDay(pivotDate),
-  };
+  return buildRange("day", pivotDay, pivotDay);
 };
 
 const getRangeDays = (startDate, endDate) => {
@@ -347,44 +376,21 @@ const fillRevenueByDay = (series, startDate, endDate, timezone = DEFAULT_TIMEZON
       .filter(Boolean),
   );
 
-  const pickExistingPoint = (cursorDate) => {
-    const utcKey = formatIsoDay(cursorDate);
-    const timezoneKey = formatIsoDayInTimezone(cursorDate, timezone);
-    const middayTimezoneKey = formatIsoDayInTimezone(
-      new Date(cursorDate.getTime() + 12 * 60 * 60 * 1000),
-      timezone,
-    );
-
-    return (
-      map.get(utcKey) ||
-      map.get(timezoneKey) ||
-      map.get(middayTimezoneKey) ||
-      null
-    );
-  };
-
   const filled = [];
+  const lastDay = formatIsoDayInTimezone(endDate, timezone);
   for (
-    let cursor = startOfUtcDay(startDate);
-    cursor.getTime() <= endDate.getTime();
-    cursor = new Date(cursor.getTime() + DAY_MS)
+    let dayKey = formatIsoDayInTimezone(startDate, timezone);
+    dayKey <= lastDay;
+    dayKey = addDaysToDayKey(dayKey, 1)
   ) {
-    const displayDay = formatIsoDay(cursor);
-    const existing = pickExistingPoint(cursor);
+    const existing = map.get(dayKey);
     filled.push(
-      existing
-        ? {
-            day: displayDay,
-            revenue: roundMoney(existing.revenue, 0),
-            orders: Math.max(0, Math.floor(safeNumber(existing.orders, 0))),
-            referralOrders: Math.max(0, Math.floor(safeNumber(existing.referralOrders, 0))),
-          }
-        : {
-            day: displayDay,
-            revenue: 0,
-            orders: 0,
-            referralOrders: 0,
-          },
+      existing || {
+        day: dayKey,
+        revenue: 0,
+        orders: 0,
+        referralOrders: 0,
+      },
     );
   }
 
@@ -922,6 +928,7 @@ const buildOrdersAnalytics = async ({
 module.exports = {
   resolveDateRange,
   buildOrdersAnalytics,
+  getZonedDayBoundary,
   toObjectId,
   DEFAULT_TIMEZONE,
 };

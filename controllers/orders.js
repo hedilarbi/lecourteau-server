@@ -17,6 +17,9 @@ const { ON_GOING } = require("../utils/constants");
 const Audit = require("../models/Audit");
 const { Expo } = require("expo-server-sdk");
 const {
+  getZonedDayBoundary,
+} = require("../services/statsServices/analyticsHelpers");
+const {
   cancelCheckoutPaymentIntentIfPossible,
 } = require("../services/paymentServices/paymentIntentHelpers");
 require("dotenv").config();
@@ -71,18 +74,8 @@ const releasePaymentIntentAfterOrderFailure = async (
   return result;
 };
 
-const parseDateBoundary = (rawValue, mode = "start") => {
-  if (!rawValue) return null;
-  const parsedDate = new Date(rawValue);
-  if (Number.isNaN(parsedDate.getTime())) return null;
-
-  if (mode === "start") {
-    parsedDate.setHours(0, 0, 0, 0);
-  } else {
-    parsedDate.setHours(23, 59, 59, 999);
-  }
-  return parsedDate;
-};
+const parseDateBoundary = (rawValue, mode = "start") =>
+  getZonedDayBoundary(rawValue, mode);
 
 const getTypeFilterValues = (rawType) => {
   const normalizedType = String(rawType || "")

@@ -1,4 +1,7 @@
 const Audit = require("../models/Audit");
+const {
+  getZonedDayBoundary,
+} = require("../services/statsServices/analyticsHelpers");
 
 const getAllAudits = async (req, res) => {
   const { page = 1, limit = 50, from, to } = req.query;
@@ -8,20 +11,14 @@ const getAllAudits = async (req, res) => {
 
   if (from || to) {
     query.timestamp = {};
-    if (from) {
-      const fromDate = new Date(from);
-      if (!Number.isNaN(fromDate.getTime())) {
-        fromDate.setHours(0, 0, 0, 0);
-        query.timestamp.$gte = fromDate;
-      }
+    const fromDate = getZonedDayBoundary(from, "start");
+    if (fromDate) {
+      query.timestamp.$gte = fromDate;
     }
 
-    if (to) {
-      const toDate = new Date(to);
-      if (!Number.isNaN(toDate.getTime())) {
-        toDate.setHours(23, 59, 59, 999);
-        query.timestamp.$lte = toDate;
-      }
+    const toDate = getZonedDayBoundary(to, "end");
+    if (toDate) {
+      query.timestamp.$lte = toDate;
     }
 
     if (Object.keys(query.timestamp).length === 0) {

@@ -16,6 +16,7 @@ const { default: mongoose } = require("mongoose");
 const { ON_GOING } = require("../utils/constants");
 const Audit = require("../models/Audit");
 const { Expo } = require("expo-server-sdk");
+const { notifyCustomer } = require("../services/notificationServices/notifyCustomer");
 const {
   getZonedDayBoundary,
 } = require("../services/statsServices/analyticsHelpers");
@@ -348,30 +349,39 @@ const addPickupDelay = async (req, res) => {
       { _id: order._id, pickupDelayMinutes: currentDelay, pickupReadyAt: order.pickupReadyAt, status: order.status },
       { $set: { pickupReadyAt }, $inc: { pickupDelayMinutes: minutes } },
       { new: true },
-    ).select("pickupReadyAt pickupDelayMinutes user code");
+    ).select("pickupReadyAt pickupDelayMinutes user code restaurant").populate("restaurant", "name");
     if (!updated) return res.status(409).json({ success: false, message: "La commande a changé. Actualisez et réessayez." });
 
-    const user = await User.findById(updated.user).select("expo_token").lean();
-    let notificationSent = false;
-    if (user?.expo_token) {
-      const time = new Intl.DateTimeFormat("fr-CA", {
-        timeZone: "America/Toronto", hour: "2-digit", minute: "2-digit",
-      }).format(updated.pickupReadyAt);
-      try {
-        await new Expo({ useFcmV1: true }).sendPushNotificationsAsync([{
-          to: user.expo_token,
-          sound: "default",
-          title: "Retard de votre commande",
-          body: `Votre commande #${updated.code} a ${minutes} min de retard supplémentaires. Elle devrait être prête vers ${time}.`,
-          data: { order_id: updated._id },
-          priority: "high",
-        }]);
-        notificationSent = true;
-      } catch (error) {
-        logWithTimestamp(`Pickup delay notification failed: ${error.message}`);
-      }
-    }
-    return res.json({ success: true, pickupReadyAt: updated.pickupReadyAt, pickupDelayMinutes: updated.pickupDelayMinutes, notificationSent });
+    // Push si possible ; sinon (commande web, app désinstallée, push refusée) courriel par SES.
+    const user = await User.findById(updated.user).select("name email expo_token appIsInstalled").lean();
+    const time = new Intl.DateTimeFormat("fr-CA", {
+      timeZone: "America/Toronto", hour: "2-digit", minute: "2-digit",
+    }).format(updated.pickupReadyAt);
+    const restaurantName = updated.restaurant?.name || "restaurant";
+    const notifiedBy = await notifyCustomer({
+      user,
+      push: {
+        title: "Retard de votre commande",
+        body: `Votre commande #${updated.code} a ${minutes} min de retard supplémentaires. Elle devrait être prête vers ${time}.`,
+        data: { order_id: updated._id },
+      },
+      email: {
+        subject: `Votre commande #${updated.code} : prête vers ${time}`,
+        paragraphs: [
+          `Votre commande #${updated.code} prend un peu plus de temps que prévu : nous avons ${updated.pickupDelayMinutes} minutes de retard.`,
+          `Elle devrait être prête vers ${time} au ${restaurantName}.`,
+          "Toutes nos excuses pour l’attente, et merci de votre patience !",
+        ],
+      },
+    });
+    if (!notifiedBy) logWithTimestamp(`Pickup delay: client de la commande ${updated.code} non prévenu (ni push ni courriel)`);
+    return res.json({
+      success: true,
+      pickupReadyAt: updated.pickupReadyAt,
+      pickupDelayMinutes: updated.pickupDelayMinutes,
+      notificationSent: Boolean(notifiedBy),
+      notifiedBy,
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }

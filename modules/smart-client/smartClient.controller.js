@@ -1,5 +1,4 @@
 const crypto = require("crypto");
-const mongoose = require("mongoose");
 const SmartClientService = require("./smartClient.service");
 const SmartClientAnalyticsService = require("./smartClientAnalytics.service");
 const SmartClientEligibilityService = require("./smartClientEligibility.service");
@@ -10,34 +9,6 @@ const SmartClientStateService = require("./smartClientState.service");
 const SmartClientUserSnapshotService = require("./smartClientUserSnapshot.service");
 const SmartClientExposure = require("./smartClientExposure.model");
 const SmartClientActiveOfferService = require("./smartClientActiveOffer.service");
-
-const MAX_LOG_BATCH = 100;
-// La file mobile survit aux coupures réseau. On accepte son horodatage réel
-// pendant 30 jours afin de ne pas perdre les sessions collectées hors ligne.
-const MAX_CLOCK_DRIFT_MS = 30 * 24 * 60 * 60 * 1000;
-const ALLOWED_EVENTS = new Set([
-  "state_changed", "cart_changed", "screen_view", "screen_entered", "screen_duration", "screen_idle",
-  "app_resumed", "app_backgrounded", "tappable_clicked", "smart_offer_triggered",
-  "smart_offer_accepted", "smart_offer_refused", "search_no_results", "promo_code_failed",
-  "promo_viewed", "option_changed", "size_changed", "cart_total_viewed", "cart_exit_intent",
-  "checkout_started", "checkout_returned_to_cart",
-  "order_confirmed", "user_interaction", "context_changed", "app_opened", "app_heartbeat",
-  "app_closed", "app_terminated",
-  "smart_offer_converted", "smart_offer_ignored",
-  "personalized_offer_ignored",
-  "user_session_ended",
-]);
-const SENSITIVE_KEYS = new Set(["email", "phone", "phone_number", "address", "street_address", "token", "password", "authorization"]);
-
-const sanitizeTelemetry = (value, depth = 0) => {
-  if (depth > 5 || value == null) return value;
-  if (Array.isArray(value)) return value.slice(0, 100).map((item) => sanitizeTelemetry(item, depth + 1));
-  if (typeof value !== "object") return typeof value === "string" ? value.slice(0, 1000) : value;
-  return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !SENSITIVE_KEYS.has(String(key).toLowerCase()))
-    .slice(0, 100)
-    .map(([key, item]) => [key, sanitizeTelemetry(item, depth + 1)]));
-};
 
 const sendError = (res, error, fallback) => {
   const validation = error?.name === "ValidationError" || error?.name === "StrictModeError" || error?.name === "CastError";
@@ -176,71 +147,9 @@ class SmartClientController {
     } catch (error) { sendError(res, error, "Erreur lors de la duplication."); }
   }
 
-  async logEvents(req, res) {
-    try {
-      if (!Array.isArray(req.body) || req.body.length === 0 || req.body.length > MAX_LOG_BATCH) {
-        const error = new Error(`Les logs doivent contenir entre 1 et ${MAX_LOG_BATCH} événements.`);
-        error.statusCode = 400;
-        throw error;
-      }
-      const userSnapshot = await SmartClientUserSnapshotService.get(req.user.id);
-      const now = Date.now();
-      const documents = req.body.map((raw, index) => {
-        if (!raw || !ALLOWED_EVENTS.has(raw.event) || typeof raw.sessionId !== "string" || raw.sessionId.length > 100) {
-          const error = new Error(`Événement invalide à l'index ${index}.`);
-          error.statusCode = 400;
-          throw error;
-        }
-        const timestamp = new Date(raw.timestamp || now);
-        if (Number.isNaN(timestamp.getTime()) || Math.abs(now - timestamp.getTime()) > MAX_CLOCK_DRIFT_MS) {
-          const error = new Error(`Horodatage invalide à l'index ${index}.`);
-          error.statusCode = 400;
-          throw error;
-        }
-        const payload = sanitizeTelemetry(raw.payload && typeof raw.payload === "object" ? raw.payload : {});
-        const rawSignals = sanitizeTelemetry(raw.signals && typeof raw.signals === "object" ? raw.signals : {});
-        const signals = SmartClientUserSnapshotService.enrichSignals(rawSignals, userSnapshot);
-        const serializedSize = Buffer.byteLength(JSON.stringify({ payload, signals }));
-        if (serializedSize > 32768) {
-          const error = new Error(`Événement trop volumineux à l'index ${index}.`);
-          error.statusCode = 413;
-          throw error;
-        }
-        return {
-          eventId: String(raw.eventId || `${raw.sessionId}:${timestamp.getTime()}:${index}:${crypto.randomUUID()}`),
-          userId: req.user.id,
-          ruleId: mongoose.isValidObjectId(payload.ruleId) ? payload.ruleId : null,
-          exposureId: mongoose.isValidObjectId(payload.exposureId) ? payload.exposureId : null,
-          sessionId: raw.sessionId,
-          event: raw.event,
-          state: typeof raw.state === "string" ? raw.state.slice(0, 80) : "",
-          signals,
-          payload,
-          timestamp,
-        };
-      });
-      await SmartClientLog.insertMany(documents, { ordered: false });
-      const latestLifecycleEvent = documents
-        .filter((document) => ["app_opened", "app_heartbeat", "app_backgrounded", "app_resumed", "app_closed", "user_session_ended"].includes(document.event))
-        .sort((a, b) => b.timestamp - a.timestamp)[0]?.event;
-      await SmartClientSession.updateOne(
-        { sessionId: documents[0].sessionId, user: req.user.id },
-        {
-          $set: {
-            lastSeenAt: new Date(),
-            ...(latestLifecycleEvent === "app_backgrounded" ? { status: "background", endedAt: null } : {}),
-            ...(["app_closed", "user_session_ended"].includes(latestLifecycleEvent) ? { status: "closed", endedAt: new Date() } : {}),
-            ...(["app_opened", "app_heartbeat", "app_resumed"].includes(latestLifecycleEvent) ? { status: "active", endedAt: null } : {}),
-          },
-          $setOnInsert: { startedAt: documents[0].timestamp },
-        },
-        { upsert: true },
-      );
-      res.status(202).json({ success: true, accepted: documents.length });
-    } catch (error) {
-      if (error?.code === 11000) return res.status(202).json({ success: true, accepted: 0, duplicatesIgnored: true });
-      sendError(res, error, "Erreur lors de la journalisation.");
-    }
+  logEvents(req, res) {
+    const accepted = Array.isArray(req.body) ? req.body.length : 0;
+    return res.status(202).json({ success: true, accepted });
   }
 
   async getSessionBundle(req, res) {
